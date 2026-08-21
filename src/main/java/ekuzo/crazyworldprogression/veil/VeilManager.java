@@ -7,8 +7,8 @@ import net.minecraft.core.BlockPos;
 
 public class VeilManager {
 
-    private static final double WORLD_RADIUS_ONE = 1000.0;
-    private static final double WORLD_RADIUS_TWO = 2000.0;
+    public static final double WORLD_RADIUS_ONE = 1000.0;
+    public static final double WORLD_RADIUS_TWO = 1200.0;
 
     public static void initialize() {
         ServerTickEvents.END_SERVER_TICK.register(server -> {

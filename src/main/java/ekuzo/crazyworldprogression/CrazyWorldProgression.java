@@ -4,6 +4,7 @@ import net.fabricmc.api.ModInitializer;
 
 import net.minecraft.resources.Identifier;
 
+import ekuzo.crazyworldprogression.progression.PlayerModifications;
 import ekuzo.crazyworldprogression.veil.VeilManager;
 
 import org.slf4j.Logger;
@@ -25,6 +26,7 @@ public class CrazyWorldProgression implements ModInitializer {
 
 		LOGGER.info("Hello Fabric world!");
 		VeilManager.initialize();
+		PlayerModifications.initialize();
 	}
 
 	public static Identifier id(String path) {

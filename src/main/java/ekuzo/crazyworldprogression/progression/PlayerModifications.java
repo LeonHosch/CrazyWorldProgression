@@ -23,6 +23,7 @@ public class PlayerModifications {
             CrazyWorldProgression.id("movement_speed_modifier");
 
 
+    // Register player lifecycle callbacks that restore all custom attributes.
     public static void initialize() {
         ServerPlayerEvents.JOIN.register(PlayerModifications::applyAll);
 
@@ -31,12 +32,14 @@ public class PlayerModifications {
         });
     }
 
+    // Apply every configured attribute modification to one player.
     private static void applyAll(ServerPlayer player) {
         applyBlockBreakSpeed(player);
         applyMovementSpeed(player);
         applyMaxHealth(player);
     }
 
+    // Apply the configured block-breaking speed multiplier.
     private static void applyBlockBreakSpeed(ServerPlayer player) {
         AttributeInstance blockBreakSpeed = player.getAttribute(Attributes.BLOCK_BREAK_SPEED);
 
@@ -49,6 +52,7 @@ public class PlayerModifications {
         }
     }
 
+    // Apply the configured movement speed multiplier.
     private static void applyMovementSpeed(ServerPlayer player) {
         AttributeInstance movementSpeed = player.getAttribute(Attributes.MOVEMENT_SPEED);
 
@@ -61,6 +65,7 @@ public class PlayerModifications {
         }
     }
 
+    // Apply the configured maximum-health adjustment.
     private static void applyMaxHealth(ServerPlayer player) {
         AttributeInstance maxHealth = player.getAttribute(Attributes.MAX_HEALTH);
 

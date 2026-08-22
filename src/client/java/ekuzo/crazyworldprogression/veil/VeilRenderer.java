@@ -53,9 +53,11 @@ public final class VeilRenderer {
     private static final RenderStateDataKey<VeilRenderState> VEIL_STATE =
         RenderStateDataKey.create(() -> "crazy-world-progression:veil");
 
+    // Prevent this static renderer from being instantiated.
     private VeilRenderer() {
     }
 
+    // Register veil state extraction, world geometry, and HUD ambience callbacks.
     public static void register() {
         LevelExtractionEvents.END_EXTRACTION.register(context -> {
             BlockPos spawn = context.level().getRespawnData().pos();
@@ -74,6 +76,7 @@ public final class VeilRenderer {
         HudElementRegistry.addFirst(AMBIENCE_ID, VeilRenderer::renderAmbience);
     }
 
+    // Select the camera's veil zone and apply its sky, fog, and transition effects.
     private static void applyAmbience(ClientLevel level, LevelRenderState levelState, VeilRenderState veil) {
         CameraRenderState camera = levelState.cameraRenderState;
         SkyRenderState sky = levelState.skyRenderState;
@@ -105,6 +108,7 @@ public final class VeilRenderer {
         updateTransition(level, newZone);
     }
 
+    // Darken and shorten environmental fog while the camera is inside a veil zone.
     private static void applyVeilFog(CameraRenderState camera, VeilZone zone) {
         if (zone == VeilZone.SAFE
             || camera.fogType == FogType.WATER
@@ -138,6 +142,7 @@ public final class VeilRenderer {
         );
     }
 
+    // Start the visual and sound transition when the camera crosses a veil boundary.
     private static void updateTransition(ClientLevel level, VeilZone newZone) {
         if (activeLevel != level || currentZone == null) {
             activeLevel = level;
@@ -166,6 +171,7 @@ public final class VeilRenderer {
         currentZone = newZone;
     }
 
+    // Draw the persistent veil tint and temporary boundary-crossing flash over the HUD.
     private static void renderAmbience(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
         if (Minecraft.getInstance().level == null) {
             return;
@@ -187,6 +193,7 @@ public final class VeilRenderer {
         }
     }
 
+    // Calculate the current opacity of the timed boundary-crossing flash.
     private static int transitionAlpha() {
         if (transitionStartMillis == Long.MIN_VALUE) {
             return 0;
@@ -210,6 +217,7 @@ public final class VeilRenderer {
         return clampColor((int) Math.round(transitionPeakAlpha * strength));
     }
 
+    // Submit visible inner and outer veil geometry for the current frame.
     private static void submitVeil(LevelRenderContext context) {
         VeilRenderState veil = context.levelState().getData(VEIL_STATE);
         if (veil == null) {
@@ -251,6 +259,7 @@ public final class VeilRenderer {
         poseStack.popPose();
     }
 
+    // Submit one veil cylinder when it lies within the configured render distance.
     private static void submitVeilLayer(
         LevelRenderContext context,
         PoseStack poseStack,
@@ -290,6 +299,7 @@ public final class VeilRenderer {
         );
     }
 
+    // Generate the visible quads that form one cylindrical veil layer.
     private static void renderCylinder(
         PoseStack.Pose pose,
         VertexConsumer vertices,
@@ -338,6 +348,7 @@ public final class VeilRenderer {
         }
     }
 
+    // Calculate a distance-faded and animated color for one veil vertex.
     private static int veilVertexColor(
         int baseColor,
         double x,
@@ -367,19 +378,23 @@ public final class VeilRenderer {
         return rgba(red, green, blue, alpha);
     }
 
+    // Smoothly interpolate a value from zero to one between two edges.
     private static double smoothStep(double edgeStart, double edgeEnd, double value) {
         double progress = Math.max(0.0, Math.min(1.0, (value - edgeStart) / (edgeEnd - edgeStart)));
         return progress * progress * (3.0 - 2.0 * progress);
     }
 
+    // Linearly interpolate between two floating-point values.
     private static float lerp(float start, float end, float progress) {
         return start + (end - start) * progress;
     }
 
+    // Clamp one color channel to the valid eight-bit range.
     private static int clampColor(int color) {
         return Math.max(0, Math.min(255, color));
     }
 
+    // Measure squared planar distance from a point to the nearest point on a segment.
     private static double distanceSquaredToSegment(
         double pointX,
         double pointZ,
@@ -402,10 +417,12 @@ public final class VeilRenderer {
         return distanceX * distanceX + distanceZ * distanceZ;
     }
 
+    // Pack separate color channels into one ARGB integer.
     private static int rgba(int red, int green, int blue, int alpha) {
         return alpha << 24 | red << 16 | green << 8 | blue;
     }
 
+    // Scale an existing color's RGB channels while preserving its alpha channel.
     private static int darkenAndTint(int color, float redScale, float greenScale, float blueScale) {
         int alpha = color >>> 24;
         int red = Math.round((color >> 16 & 0xFF) * redScale);

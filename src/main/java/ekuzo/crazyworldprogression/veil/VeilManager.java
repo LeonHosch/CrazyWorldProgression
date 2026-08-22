@@ -10,6 +10,7 @@ public class VeilManager {
     public static final double WORLD_RADIUS_ONE = 1000.0;
     public static final double WORLD_RADIUS_TWO = 1200.0;
 
+    // Register the periodic server tick callback that applies veil damage.
     public static void initialize() {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             server.overworld().getLevelData();
@@ -23,6 +24,7 @@ public class VeilManager {
         });
     }
 
+    // Damage players according to their distance from the world spawn.
     private static void applyVeilDamage(MinecraftServer server) {
         BlockPos spawn = server.getRespawnData().pos();
 

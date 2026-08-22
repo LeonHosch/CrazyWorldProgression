@@ -6,6 +6,7 @@ import net.minecraft.resources.Identifier;
 
 import ekuzo.crazyworldprogression.progression.PlayerModifications;
 import ekuzo.crazyworldprogression.veil.VeilManager;
+import ekuzo.crazyworldprogression.currency.KingdomPointsCommands;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +28,7 @@ public class CrazyWorldProgression implements ModInitializer {
 		LOGGER.info("Hello Fabric world!");
 		VeilManager.initialize();
 		PlayerModifications.initialize();
+		KingdomPointsCommands.initialize();
 	}
 
 	public static Identifier id(String path) {

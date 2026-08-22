@@ -2,6 +2,7 @@ package ekuzo.crazyworldprogression.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -19,9 +20,13 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.NameAndId;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 public final class PersonalCurrencyCommands {
+    private static final int MAX_EXPLICIT_TARGETS = 32;
+
     private static final CurrencyOperations ECHELON_POINTS = regularCurrency(
             CurrencyDisplay.ECHELON_POINTS, PersonalCurrency.ECHELON_POINTS);
     private static final CurrencyOperations FAKHRUL_CURRENCY = regularCurrency(
@@ -68,21 +73,43 @@ public final class PersonalCurrencyCommands {
         // Balance checks are public, while direct mutations are reserved for debugging and administration.
         return Commands.literal(name)
                 .executes(context -> showBalance(context, currency))
-                .then(Commands.literal("give")
+                .then(Commands.argument("targets", GameProfileArgument.gameProfile())
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                        .then(Commands.argument("targets", GameProfileArgument.gameProfile())
-                                .then(Commands.argument("amount", LongArgumentType.longArg(1L))
-                                        .executes(context -> changeBalance(context, currency, ChangeType.GIVE)))))
-                .then(Commands.literal("take")
-                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                        .then(Commands.argument("targets", GameProfileArgument.gameProfile())
-                                .then(Commands.argument("amount", LongArgumentType.longArg(1L))
-                                        .executes(context -> changeBalance(context, currency, ChangeType.TAKE)))))
-                .then(Commands.literal("set")
-                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                        .then(Commands.argument("targets", GameProfileArgument.gameProfile())
-                                .then(Commands.argument("amount", LongArgumentType.longArg(0L))
-                                        .executes(context -> changeBalance(context, currency, ChangeType.SET)))));
+                        .executes(context -> showTargetBalances(context, currency)))
+                .then(buildMultiTargetCommand("give", currency, ChangeType.GIVE, 1L))
+                .then(buildMultiTargetCommand("take", currency, ChangeType.TAKE, 1L))
+                .then(buildMultiTargetCommand("set", currency, ChangeType.SET, 0L));
+    }
+
+    // Build an amount-first mutation branch that accepts up to 32 names or selectors.
+    private static LiteralArgumentBuilder<CommandSourceStack> buildMultiTargetCommand(
+            String commandName,
+            CurrencyOperations currency,
+            ChangeType changeType,
+            long minimumAmount
+    ) {
+        return Commands.literal(commandName)
+                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                .then(Commands.argument("amount", LongArgumentType.longArg(minimumAmount))
+                        .then(buildMutationTarget(currency, changeType, 1)));
+    }
+
+    // Build one optional target level and recursively append the remaining target levels.
+    private static ArgumentBuilder<CommandSourceStack, ?> buildMutationTarget(
+            CurrencyOperations currency,
+            ChangeType changeType,
+            int targetIndex
+    ) {
+        String argumentName = "target" + targetIndex;
+        ArgumentBuilder<CommandSourceStack, ?> target = Commands
+                .argument(argumentName, GameProfileArgument.gameProfile())
+                .executes(context -> changeMultipleTargetBalances(
+                        context, currency, changeType, targetIndex));
+
+        if (targetIndex < MAX_EXPLICIT_TARGETS) {
+            target.then(buildMutationTarget(currency, changeType, targetIndex + 1));
+        }
+        return target;
     }
 
     // Show the executing player's balance for the selected currency.
@@ -100,15 +127,57 @@ public final class PersonalCurrencyCommands {
         return 1;
     }
 
-    // Apply one administrative balance operation to every selected player.
-    private static int changeBalance(
+    // Show one personal currency balance for every admin-selected player profile.
+    private static int showTargetBalances(
             CommandContext<CommandSourceStack> context,
-            CurrencyOperations currency,
-            ChangeType changeType
+            CurrencyOperations currency
     ) throws CommandSyntaxException {
         CommandSourceStack source = context.getSource();
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
-        long requestedAmount = LongArgumentType.getLong(context, "amount");
+
+        for (NameAndId profile : profiles) {
+            source.sendSuccess(() -> Component.literal("Balance for " + profile.name())
+                    .withStyle(ChatFormatting.BOLD), false);
+            BalanceCommands.sendBalance(
+                    source,
+                    currency.display(),
+                    currency.reader().get(source.getServer(), profile.id())
+            );
+        }
+        return profiles.size();
+    }
+
+    // Collect every explicit name or selector and mutate each unique player's balance.
+    private static int changeMultipleTargetBalances(
+            CommandContext<CommandSourceStack> context,
+            CurrencyOperations currency,
+            ChangeType changeType,
+            int targetCount
+    ) throws CommandSyntaxException {
+        Map<UUID, NameAndId> uniqueProfiles = new LinkedHashMap<>();
+        for (int targetIndex = 1; targetIndex <= targetCount; targetIndex++) {
+            Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(
+                    context, "target" + targetIndex);
+            profiles.forEach(profile -> uniqueProfiles.putIfAbsent(profile.id(), profile));
+        }
+
+        return changeBalances(
+                context.getSource(),
+                uniqueProfiles.values(),
+                LongArgumentType.getLong(context, "amount"),
+                currency,
+                changeType
+        );
+    }
+
+    // Apply one already-parsed balance operation to a collection of player profiles.
+    private static int changeBalances(
+            CommandSourceStack source,
+            Collection<NameAndId> profiles,
+            long requestedAmount,
+            CurrencyOperations currency,
+            ChangeType changeType
+    ) {
         int changedPlayers = 0;
 
         for (NameAndId profile : profiles) {

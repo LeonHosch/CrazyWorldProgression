@@ -9,8 +9,13 @@ import ekuzo.crazyworldprogression.progression.player.PlayerProgressionService;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.NameAndId;
+
+import java.util.Collection;
+import java.util.UUID;
 
 public final class BalanceCommands {
     // Prevent this static command utility from being instantiated.
@@ -19,7 +24,11 @@ public final class BalanceCommands {
 
     // Register the command that shows every balance available to the executing player.
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("balance").executes(BalanceCommands::showAll));
+        dispatcher.register(Commands.literal("balance")
+                .executes(BalanceCommands::showAll)
+                .then(Commands.argument("targets", GameProfileArgument.gameProfile())
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(BalanceCommands::showAllForTargets)));
     }
 
     // Show the shared balance and all balances owned by the executing player.
@@ -30,10 +39,29 @@ public final class BalanceCommands {
         // Kingdom Points are shared globally; the remaining entries belong to the executing player.
         source.sendSuccess(() -> Component.literal("Balances").withStyle(ChatFormatting.BOLD), false);
         sendKingdomPoints(source);
-        sendEchelonPoints(source, player);
-        sendFakhrulCurrency(source, player);
-        sendPowerfulSouls(source, player);
+        sendPersonalBalances(source, player.getUUID());
         return 1;
+    }
+
+    // Show every balance for one or more admin-selected player profiles.
+    private static int showAllForTargets(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        CommandSourceStack source = context.getSource();
+        Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
+
+        for (NameAndId profile : profiles) {
+            source.sendSuccess(() -> Component.literal("Balances for " + profile.name())
+                    .withStyle(ChatFormatting.BOLD), false);
+            sendKingdomPoints(source);
+            sendPersonalBalances(source, profile.id());
+        }
+        return profiles.size();
+    }
+
+    // Display all three balances that belong to one player UUID.
+    private static void sendPersonalBalances(CommandSourceStack source, UUID playerUuid) {
+        sendEchelonPoints(source, playerUuid);
+        sendFakhrulCurrency(source, playerUuid);
+        sendPowerfulSouls(source, playerUuid);
     }
 
     // Read and display the server-wide Kingdom Points balance.
@@ -43,22 +71,22 @@ public final class BalanceCommands {
     }
 
     // Read and display the player's Echelon Points balance.
-    private static void sendEchelonPoints(CommandSourceStack source, ServerPlayer player) {
+    private static void sendEchelonPoints(CommandSourceStack source, UUID playerUuid) {
         long balance = PlayerProgressionService.getBalance(
-                source.getServer(), player.getUUID(), PersonalCurrency.ECHELON_POINTS);
+                source.getServer(), playerUuid, PersonalCurrency.ECHELON_POINTS);
         sendBalance(source, CurrencyDisplay.ECHELON_POINTS, balance);
     }
 
     // Read and display the player's temporary Fakhrul currency balance.
-    private static void sendFakhrulCurrency(CommandSourceStack source, ServerPlayer player) {
+    private static void sendFakhrulCurrency(CommandSourceStack source, UUID playerUuid) {
         long balance = PlayerProgressionService.getBalance(
-                source.getServer(), player.getUUID(), PersonalCurrency.FAKHRUL_CURRENCY);
+                source.getServer(), playerUuid, PersonalCurrency.FAKHRUL_CURRENCY);
         sendBalance(source, CurrencyDisplay.FAKHRUL_CURRENCY, balance);
     }
 
     // Read and display the player's Powerful Souls balance.
-    private static void sendPowerfulSouls(CommandSourceStack source, ServerPlayer player) {
-        long balance = PlayerProgressionService.getPowerfulSouls(source.getServer(), player.getUUID());
+    private static void sendPowerfulSouls(CommandSourceStack source, UUID playerUuid) {
+        long balance = PlayerProgressionService.getPowerfulSouls(source.getServer(), playerUuid);
         sendBalance(source, CurrencyDisplay.POWERFUL_SOULS, balance);
     }
 

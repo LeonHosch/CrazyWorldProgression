@@ -13,32 +13,32 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-public class KingdomPointsData extends SavedData {
+public class EchelonPointsData extends SavedData {
     private final Map<UUID, Integer> points = new HashMap<>();
 
-    public static final Codec<KingdomPointsData> CODEC = RecordCodecBuilder.create(instance ->
+    public static final Codec<EchelonPointsData> CODEC = RecordCodecBuilder.create(instance ->
             instance.group(
                     Codec.unboundedMap(Codec.STRING.xmap(UUID::fromString, UUID::toString), Codec.INT)
                             .optionalFieldOf("points", Collections.emptyMap())
                             .forGetter(data -> data.points)
-            ).apply(instance, KingdomPointsData::new)
+            ).apply(instance, EchelonPointsData::new)
     );
 
-    public static final SavedDataType<KingdomPointsData> TYPE = new SavedDataType<>(
-            Identifier.fromNamespaceAndPath(CrazyWorldProgression.MOD_ID, "kingdom_points"),
-            KingdomPointsData::new,
+    public static final SavedDataType<EchelonPointsData> TYPE = new SavedDataType<>(
+            Identifier.fromNamespaceAndPath(CrazyWorldProgression.MOD_ID, "echelon_points"),
+            EchelonPointsData::new,
             CODEC,
             null
     );
 
-    public KingdomPointsData() {
+    public EchelonPointsData() {
     }
 
-    public KingdomPointsData(Map<UUID, Integer> initialPoints) {
+    public EchelonPointsData(Map<UUID, Integer> initialPoints) {
         this.points.putAll(initialPoints);
     }
 
-    public static KingdomPointsData get(MinecraftServer server) {
+    public static EchelonPointsData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(TYPE);
     }
 

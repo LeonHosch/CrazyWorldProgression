@@ -1,12 +1,13 @@
 package ekuzo.crazyworldprogression;
 
+import ekuzo.crazyworldprogression.currency.EchelonPointsCommands;
 import net.fabricmc.api.ModInitializer;
 
 import net.minecraft.resources.Identifier;
 
 import ekuzo.crazyworldprogression.progression.PlayerModifications;
 import ekuzo.crazyworldprogression.veil.VeilManager;
-import ekuzo.crazyworldprogression.currency.KingdomPointsCommands;
+import ekuzo.crazyworldprogression.currency.EchelonPointsCommands;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +29,7 @@ public class CrazyWorldProgression implements ModInitializer {
 		LOGGER.info("Hello Fabric world!");
 		VeilManager.initialize();
 		PlayerModifications.initialize();
-		KingdomPointsCommands.initialize();
+		EchelonPointsCommands.initialize();
 	}
 
 	public static Identifier id(String path) {

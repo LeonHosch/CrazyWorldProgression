@@ -15,7 +15,7 @@ import net.minecraft.server.players.NameAndId;
 
 import java.util.Collection;
 
-public class KingdomPointsCommands {
+public class EchelonPointsCommands {
 
     public static void initialize() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
@@ -24,61 +24,61 @@ public class KingdomPointsCommands {
     }
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        var baseCommand = Commands.literal("kingdompoints")
-                // Player self check: /kingdompoints or /kingdompoints balance
-                .executes(KingdomPointsCommands::checkSelf)
+        var baseCommand = Commands.literal("echelonpoints")
+                // Player self check: /echelonpoints or /echelonpoints balance
+                .executes(EchelonPointsCommands::checkSelf)
                 .then(Commands.literal("balance")
-                        .executes(KingdomPointsCommands::checkSelf)
+                        .executes(EchelonPointsCommands::checkSelf)
                         .then(Commands.argument("target", GameProfileArgument.gameProfile())
                                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                                .executes(KingdomPointsCommands::checkOther)
+                                .executes(EchelonPointsCommands::checkOther)
                         )
                 )
-                // Admin give: /kingdompoints give <targets> <amount>
+                // Admin give: /echelonpoints give <targets> <amount>
                 .then(Commands.literal("give")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("targets", GameProfileArgument.gameProfile())
                                 .then(Commands.argument("amount", IntegerArgumentType.integer(1))
-                                        .executes(KingdomPointsCommands::givePoints)
+                                        .executes(EchelonPointsCommands::givePoints)
                                 )
                         )
                 )
-                // Admin take: /kingdompoints take <targets> <amount>
+                // Admin take: /echelonpoints take <targets> <amount>
                 .then(Commands.literal("take")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("targets", GameProfileArgument.gameProfile())
                                 .then(Commands.argument("amount", IntegerArgumentType.integer(1))
-                                        .executes(KingdomPointsCommands::takePoints)
+                                        .executes(EchelonPointsCommands::takePoints)
                                 )
                         )
                 )
-                // Admin set: /kingdompoints set <targets> <amount>
+                // Admin set: /echelonpoints set <targets> <amount>
                 .then(Commands.literal("set")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("targets", GameProfileArgument.gameProfile())
                                 .then(Commands.argument("amount", IntegerArgumentType.integer(0))
-                                        .executes(KingdomPointsCommands::setPoints)
+                                        .executes(EchelonPointsCommands::setPoints)
                                 )
                         )
                 );
 
         dispatcher.register(baseCommand);
 
-        // Alias: /kp
-        var aliasCommand = Commands.literal("kp")
-                .executes(KingdomPointsCommands::checkSelf)
+        // Alias: /ep
+        var aliasCommand = Commands.literal("ep")
+                .executes(EchelonPointsCommands::checkSelf)
                 .then(Commands.literal("balance")
-                        .executes(KingdomPointsCommands::checkSelf)
+                        .executes(EchelonPointsCommands::checkSelf)
                         .then(Commands.argument("target", GameProfileArgument.gameProfile())
                                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                                .executes(KingdomPointsCommands::checkOther)
+                                .executes(EchelonPointsCommands::checkOther)
                         )
                 )
                 .then(Commands.literal("give")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("targets", GameProfileArgument.gameProfile())
                                 .then(Commands.argument("amount", IntegerArgumentType.integer(1))
-                                        .executes(KingdomPointsCommands::givePoints)
+                                        .executes(EchelonPointsCommands::givePoints)
                                 )
                         )
                 )
@@ -86,7 +86,7 @@ public class KingdomPointsCommands {
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("targets", GameProfileArgument.gameProfile())
                                 .then(Commands.argument("amount", IntegerArgumentType.integer(1))
-                                        .executes(KingdomPointsCommands::takePoints)
+                                        .executes(EchelonPointsCommands::takePoints)
                                 )
                         )
                 )
@@ -94,7 +94,7 @@ public class KingdomPointsCommands {
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("targets", GameProfileArgument.gameProfile())
                                 .then(Commands.argument("amount", IntegerArgumentType.integer(0))
-                                        .executes(KingdomPointsCommands::setPoints)
+                                        .executes(EchelonPointsCommands::setPoints)
                                 )
                         )
                 );
@@ -105,13 +105,13 @@ public class KingdomPointsCommands {
     private static int checkSelf(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         CommandSourceStack source = context.getSource();
         ServerPlayer player = source.getPlayerOrException();
-        KingdomPointsData data = KingdomPointsData.get(source.getServer());
+        EchelonPointsData data = EchelonPointsData.get(source.getServer());
         int current = data.getPoints(player.getUUID());
 
         source.sendSuccess(() -> Component.literal("You have ")
-                .withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(String.valueOf(current)).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
-                .append(Component.literal(" KingdomPoints.").withStyle(ChatFormatting.GOLD)), false);
+                .withStyle(ChatFormatting.AQUA)
+                .append(Component.literal(String.valueOf(current)).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                .append(Component.literal(" Echelon Points.").withStyle(ChatFormatting.AQUA)), false);
 
         return current;
     }
@@ -119,14 +119,14 @@ public class KingdomPointsCommands {
     private static int checkOther(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         CommandSourceStack source = context.getSource();
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "target");
-        KingdomPointsData data = KingdomPointsData.get(source.getServer());
+        EchelonPointsData data = EchelonPointsData.get(source.getServer());
 
         for (NameAndId profile : profiles) {
             int current = data.getPoints(profile.id());
             source.sendSuccess(() -> Component.literal(profile.name() + " has ")
-                    .withStyle(ChatFormatting.GOLD)
-                    .append(Component.literal(String.valueOf(current)).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
-                    .append(Component.literal(" KingdomPoints.").withStyle(ChatFormatting.GOLD)), false);
+                    .withStyle(ChatFormatting.AQUA)
+                    .append(Component.literal(String.valueOf(current)).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                    .append(Component.literal(" Echelon Points.").withStyle(ChatFormatting.AQUA)), false);
             return current;
         }
         return 0;
@@ -136,23 +136,23 @@ public class KingdomPointsCommands {
         CommandSourceStack source = context.getSource();
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
         int amount = IntegerArgumentType.getInteger(context, "amount");
-        KingdomPointsData data = KingdomPointsData.get(source.getServer());
+        EchelonPointsData data = EchelonPointsData.get(source.getServer());
 
         for (NameAndId profile : profiles) {
             int newBalance = data.addPoints(profile.id(), amount);
 
             source.sendSuccess(() -> Component.literal("Gave ")
                     .withStyle(ChatFormatting.GREEN)
-                    .append(Component.literal(String.valueOf(amount)).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
-                    .append(Component.literal(" KingdomPoints to " + profile.name() + ". (New balance: " + newBalance + ")")
+                    .append(Component.literal(String.valueOf(amount)).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                    .append(Component.literal(" Echelon Points to " + profile.name() + ". (New balance: " + newBalance + ")")
                             .withStyle(ChatFormatting.GREEN)), true);
 
             ServerPlayer targetPlayer = source.getServer().getPlayerList().getPlayer(profile.id());
             if (targetPlayer != null) {
                 targetPlayer.sendSystemMessage(Component.literal("You received ")
-                        .withStyle(ChatFormatting.GOLD)
-                        .append(Component.literal(String.valueOf(amount)).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
-                        .append(Component.literal(" KingdomPoints! (Total: " + newBalance + ")").withStyle(ChatFormatting.GOLD)));
+                        .withStyle(ChatFormatting.AQUA)
+                        .append(Component.literal(String.valueOf(amount)).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                        .append(Component.literal(" Echelon Points! (Total: " + newBalance + ")").withStyle(ChatFormatting.AQUA)));
             }
         }
 
@@ -163,20 +163,20 @@ public class KingdomPointsCommands {
         CommandSourceStack source = context.getSource();
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
         int amount = IntegerArgumentType.getInteger(context, "amount");
-        KingdomPointsData data = KingdomPointsData.get(source.getServer());
+        EchelonPointsData data = EchelonPointsData.get(source.getServer());
 
         for (NameAndId profile : profiles) {
             int newBalance = data.removePoints(profile.id(), amount);
 
             source.sendSuccess(() -> Component.literal("Took ")
                     .withStyle(ChatFormatting.RED)
-                    .append(Component.literal(String.valueOf(amount)).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
-                    .append(Component.literal(" KingdomPoints from " + profile.name() + ". (New balance: " + newBalance + ")")
+                    .append(Component.literal(String.valueOf(amount)).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                    .append(Component.literal(" Echelon Points from " + profile.name() + ". (New balance: " + newBalance + ")")
                             .withStyle(ChatFormatting.RED)), true);
 
             ServerPlayer targetPlayer = source.getServer().getPlayerList().getPlayer(profile.id());
             if (targetPlayer != null) {
-                targetPlayer.sendSystemMessage(Component.literal(amount + " KingdomPoints were removed from your balance. (Total: " + newBalance + ")")
+                targetPlayer.sendSystemMessage(Component.literal(amount + " Echelon Points were removed from your balance. (Total: " + newBalance + ")")
                         .withStyle(ChatFormatting.RED));
             }
         }
@@ -188,21 +188,21 @@ public class KingdomPointsCommands {
         CommandSourceStack source = context.getSource();
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
         int amount = IntegerArgumentType.getInteger(context, "amount");
-        KingdomPointsData data = KingdomPointsData.get(source.getServer());
+        EchelonPointsData data = EchelonPointsData.get(source.getServer());
 
         for (NameAndId profile : profiles) {
             data.setPoints(profile.id(), amount);
 
             source.sendSuccess(() -> Component.literal("Set ")
                     .withStyle(ChatFormatting.GREEN)
-                    .append(Component.literal(profile.name() + "'s ").withStyle(ChatFormatting.YELLOW))
-                    .append(Component.literal("KingdomPoints to " + amount + ".")
+                    .append(Component.literal(profile.name() + "'s ").withStyle(ChatFormatting.AQUA))
+                    .append(Component.literal("Echelon Points to " + amount + ".")
                             .withStyle(ChatFormatting.GREEN)), true);
 
             ServerPlayer targetPlayer = source.getServer().getPlayerList().getPlayer(profile.id());
             if (targetPlayer != null) {
-                targetPlayer.sendSystemMessage(Component.literal("Your KingdomPoints balance was set to " + amount + ".")
-                        .withStyle(ChatFormatting.GOLD));
+                targetPlayer.sendSystemMessage(Component.literal("Your Echelon Points balance was set to " + amount + ".")
+                        .withStyle(ChatFormatting.AQUA));
             }
         }
 

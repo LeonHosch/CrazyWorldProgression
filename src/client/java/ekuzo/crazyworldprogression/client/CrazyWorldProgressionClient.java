@@ -7,8 +7,8 @@ public class CrazyWorldProgressionClient implements ClientModInitializer {
 	// Register rendering and other client-only systems.
 	@Override
 	public void onInitializeClient() {
-		// This entrypoint is suitable for setting up client-specific logic, such as rendering.
+		// Client initialization remains visible here so startup ownership is easy to follow.
 		VeilRenderer.register();
-
+		SkillTreeClient.initialize();
 	}
 }

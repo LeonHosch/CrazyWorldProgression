@@ -1,0 +1,48 @@
+# Every .yml file in this directory becomes one tab in the skill-tree screen.
+skilltree: global
+name: Kingdom Progression
+gname: Königreichsfortschritt
+icon: minecraft:golden_helmet
+
+skills:
+  - name: Strong Foundations
+    gname: Starke Fundamente
+    description: Every player gains half a heart and 2% mining speed.
+    beschreibung: Alle Spieler erhalten ein halbes Herz und 2% mehr Abbaugeschwindigkeit.
+    icon: minecraft:stone_bricks
+    previous: none
+    following: 0
+    costs:
+      kingdomPoints: 10
+      fakhrulCurrency: 2
+    stats:
+      - addHealth(1)
+      - addMiningSpeed(2)
+
+  - name: Roads of the Realm
+    gname: Straßen des Reiches
+    description: Every player moves 2% faster.
+    beschreibung: Alle Spieler bewegen sich 2% schneller.
+    icon: minecraft:leather_boots
+    previous:
+      - Strong Foundations
+    following: 0
+    costs:
+      kingdomPoints: 20
+      fakhrulCurrency: 3
+    stats:
+      - addMovementSpeed(2)
+
+  - name: Roads of the Realm 2
+    gname: Straßen des Reiches 2
+    description: Every player moves another 2% faster.
+    beschreibung: Alle Spieler bewegen sich um weitere 2% schneller.
+    icon: minecraft:golden_boots
+    previous:
+      - Roads of the Realm
+    following: 0
+    costs:
+      kingdomPoints: 30
+      fakhrulCurrency: 5
+    stats:
+      - addMovementSpeed(2)

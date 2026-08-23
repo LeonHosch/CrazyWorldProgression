@@ -4,6 +4,9 @@ plugins {
 }
 
 repositories {
+	// SnakeYAML is a regular Java library published through Maven Central.
+	mavenCentral()
+
 	// Add repositories to retrieve artifacts from in here.
 	// You should only use this when depending on other mods because
 	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
@@ -43,6 +46,10 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Parse editable skill-tree configuration files and bundle the parser with the mod.
+	implementation "org.yaml:snakeyaml:2.6"
+	include "org.yaml:snakeyaml:2.6"
 }
 
 processResources {

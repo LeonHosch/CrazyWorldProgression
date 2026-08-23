@@ -1,0 +1,13 @@
+{
+  "screen.crazy-world-progression.skill_trees.title": "Fähigkeitsbäume",
+  "screen.crazy-world-progression.skill_trees.king_only_spend": "Nur der gewählte König kann hier Punkte ausgeben.",
+  "screen.crazy-world-progression.skill_trees.free": "Kostenlos",
+  "screen.crazy-world-progression.skill_trees.status.already_unlocked": "Bereits freigeschaltet",
+  "screen.crazy-world-progression.skill_trees.status.branch_excluded": "Durch Pfadwahl ausgeschlossen",
+  "screen.crazy-world-progression.skill_trees.status.previous_required": "Mehr Fortschritt sammeln",
+  "screen.crazy-world-progression.skill_trees.status.not_enough_currency": "Nicht genügend Währung",
+  "screen.crazy-world-progression.skill_trees.status.hold_to_unlock": "Halten zum Freischalten",
+  "screen.crazy-world-progression.skill_trees.status.king_only_unlock": "Nur der gewählte König kann dies freischalten",
+  "screen.crazy-world-progression.skill_trees.status.unavailable": "Nicht verfügbar",
+  "tooltip.crazy-world-progression.open_skill_trees": "Fähigkeitsbäume öffnen"
+}

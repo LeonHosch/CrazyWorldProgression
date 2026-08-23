@@ -102,7 +102,7 @@ public final class BalanceCommands {
                         .withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD));
     }
 
-    enum CurrencyDisplay {
+    public enum CurrencyDisplay {
         KINGDOM_POINTS("Kingdom Points", ChatFormatting.GOLD),
         ECHELON_POINTS("Echelon Points", ChatFormatting.AQUA),
         FAKHRUL_CURRENCY("Fakhrul Currency", ChatFormatting.LIGHT_PURPLE),
@@ -118,12 +118,12 @@ public final class BalanceCommands {
         }
 
         // Return the name shown in balance and administration messages.
-        String displayName() {
+        public String displayName() {
             return displayName;
         }
 
         // Return the color used for this currency's messages.
-        ChatFormatting color() {
+        public ChatFormatting color() {
             return color;
         }
     }

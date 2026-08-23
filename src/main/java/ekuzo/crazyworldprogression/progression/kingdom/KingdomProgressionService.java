@@ -1,10 +1,12 @@
 package ekuzo.crazyworldprogression.progression.kingdom;
 
 import ekuzo.crazyworldprogression.progression.BalanceChange;
-import net.minecraft.resources.Identifier;
+import ekuzo.crazyworldprogression.progression.player.PersonalCurrency;
+import ekuzo.crazyworldprogression.progression.player.PlayerProgressionService;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public final class KingdomProgressionService {
@@ -83,25 +85,47 @@ public final class KingdomProgressionService {
     public static TechnologyUnlockResult unlockTechnology(
             MinecraftServer server,
             UUID actingPlayer,
-            Identifier technologyId,
-            long cost
+            String technologyId,
+            long kingdomPointCost,
+            long fakhrulCurrencyCost
     ) {
-        requireNonNegative(cost);
+        requireNonNegative(kingdomPointCost);
+        requireNonNegative(fakhrulCurrencyCost);
         KingdomProgressionData data = KingdomProgressionData.get(server);
 
         // Technology purchases are global but can only be authorized by the elected king.
         if (data.electedKing().filter(actingPlayer::equals).isEmpty()) {
             return TechnologyUnlockResult.NOT_ELECTED_KING;
         }
-        if (data.isTechnologyUnlocked(technologyId.toString())) {
+        if (data.isTechnologyUnlocked(technologyId)) {
             return TechnologyUnlockResult.ALREADY_UNLOCKED;
         }
-        if (data.kingdomPoints() < cost) {
+        if (data.kingdomPoints() < kingdomPointCost) {
             return TechnologyUnlockResult.INSUFFICIENT_KINGDOM_POINTS;
         }
+        long fakhrulCurrency = PlayerProgressionService.getBalance(
+                server,
+                actingPlayer,
+                PersonalCurrency.FAKHRUL_CURRENCY
+        );
+        if (fakhrulCurrency < fakhrulCurrencyCost) {
+            return TechnologyUnlockResult.INSUFFICIENT_FAKHRUL_CURRENCY;
+        }
 
-        data.unlockTechnology(technologyId.toString(), data.kingdomPoints() - cost);
+        // Both SavedData objects are changed on the server thread as one logical purchase.
+        data.unlockTechnology(technologyId, data.kingdomPoints() - kingdomPointCost);
+        PlayerProgressionService.debit(
+                server,
+                actingPlayer,
+                PersonalCurrency.FAKHRUL_CURRENCY,
+                fakhrulCurrencyCost
+        );
         return TechnologyUnlockResult.UNLOCKED;
+    }
+
+    // Return all globally persisted technology keys.
+    public static Set<String> getUnlockedTechnologies(MinecraftServer server) {
+        return KingdomProgressionData.get(server).unlockedTechnologies();
     }
 
     // Reject negative values before they reach persistent kingdom state.
@@ -115,6 +139,7 @@ public final class KingdomProgressionService {
         UNLOCKED,
         NOT_ELECTED_KING,
         ALREADY_UNLOCKED,
-        INSUFFICIENT_KINGDOM_POINTS
+        INSUFFICIENT_KINGDOM_POINTS,
+        INSUFFICIENT_FAKHRUL_CURRENCY
     }
 }

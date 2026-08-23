@@ -115,4 +115,9 @@ public final class KingdomProgressionData extends SavedData {
         unlockedTechnologies.add(technologyId);
         setDirty();
     }
+
+    // Return a defensive copy of every globally unlocked technology key.
+    Set<String> unlockedTechnologies() {
+        return Set.copyOf(unlockedTechnologies);
+    }
 }

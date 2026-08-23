@@ -122,12 +122,24 @@ public final class PlayerProgressionData extends SavedData {
     }
 
     // Deduct a skill's costs and persist its unlock as one state change.
-    void unlockSkill(UUID playerUuid, String skillId, long updatedEchelonPoints, long updatedPowerfulSouls) {
+    void unlockSkill(
+            UUID playerUuid,
+            String skillId,
+            long updatedEchelonPoints,
+            long updatedFakhrulCurrency,
+            long updatedPowerfulSouls
+    ) {
         // Costs and the resulting unlock are persisted together to prevent partially applied purchases.
         putOrRemoveZero(echelonPoints, playerUuid, updatedEchelonPoints);
+        putOrRemoveZero(fakhrulCurrency, playerUuid, updatedFakhrulCurrency);
         putOrRemoveZero(powerfulSouls, playerUuid, updatedPowerfulSouls);
         unlockedSkills.computeIfAbsent(playerUuid, ignored -> new HashSet<>()).add(skillId);
         setDirty();
+    }
+
+    // Return a defensive copy of every skill key unlocked by one player.
+    Set<String> unlockedSkills(UUID playerUuid) {
+        return Set.copyOf(unlockedSkills.getOrDefault(playerUuid, Set.of()));
     }
 
     // Select the backing balance map for a regular personal currency.

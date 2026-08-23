@@ -1,0 +1,13 @@
+{
+  "screen.crazy-world-progression.skill_trees.title": "Skill Trees",
+  "screen.crazy-world-progression.skill_trees.king_only_spend": "Only the elected king can spend here.",
+  "screen.crazy-world-progression.skill_trees.free": "Free",
+  "screen.crazy-world-progression.skill_trees.status.already_unlocked": "Already unlocked",
+  "screen.crazy-world-progression.skill_trees.status.branch_excluded": "Excluded by branch choice",
+  "screen.crazy-world-progression.skill_trees.status.previous_required": "Previous skills required",
+  "screen.crazy-world-progression.skill_trees.status.not_enough_currency": "Not enough currency",
+  "screen.crazy-world-progression.skill_trees.status.hold_to_unlock": "Hold to unlock",
+  "screen.crazy-world-progression.skill_trees.status.king_only_unlock": "Only the elected king can unlock",
+  "screen.crazy-world-progression.skill_trees.status.unavailable": "Unavailable",
+  "tooltip.crazy-world-progression.open_skill_trees": "Open skill trees"
+}

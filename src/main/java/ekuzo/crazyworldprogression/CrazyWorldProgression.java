@@ -4,12 +4,17 @@ import ekuzo.crazyworldprogression.command.BalanceCommands;
 import ekuzo.crazyworldprogression.command.KingCommands;
 import ekuzo.crazyworldprogression.command.KingdomPointsCommands;
 import ekuzo.crazyworldprogression.command.PersonalCurrencyCommands;
+import ekuzo.crazyworldprogression.command.SkillTreeCommands;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 
 import net.minecraft.resources.Identifier;
 
 import ekuzo.crazyworldprogression.progression.PlayerModifications;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillStatRegistry;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeManager;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeNetworking;
 import ekuzo.crazyworldprogression.veil.VeilManager;
 
 import org.slf4j.Logger;
@@ -35,6 +40,12 @@ public class CrazyWorldProgression implements ModInitializer {
 		// Gameplay systems listen for server events, while commands expose progression state to players and admins.
 		VeilManager.initialize();
 		PlayerModifications.initialize();
+		SkillStatRegistry.initialize();
+		SkillTreeNetworking.registerPayloadTypes();
+		SkillTreeNetworking.registerServerReceivers();
+
+		// Load authoritative YAML only when a server starts, so remote clients never depend on local copies.
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> SkillTreeManager.initialize());
 
 		// Register all server commands through one callback while keeping startup ownership in this entrypoint.
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
@@ -42,6 +53,7 @@ public class CrazyWorldProgression implements ModInitializer {
 			PersonalCurrencyCommands.register(dispatcher);
 			KingdomPointsCommands.register(dispatcher);
 			KingCommands.register(dispatcher);
+			SkillTreeCommands.register(dispatcher);
 		});
 	}
 

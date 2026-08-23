@@ -5,6 +5,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.UUID;
+import java.util.Set;
 
 public final class PlayerProgressionService {
     // Prevent this static progression service from being instantiated.
@@ -138,23 +139,28 @@ public final class PlayerProgressionService {
     public static SkillUnlockResult unlockSkill(
             MinecraftServer server,
             UUID playerUuid,
-            Identifier skillId,
+            String skillId,
             long echelonPointCost,
+            long fakhrulCurrencyCost,
             long powerfulSoulCost
     ) {
         requireNonNegative(echelonPointCost);
+        requireNonNegative(fakhrulCurrencyCost);
         requireNonNegative(powerfulSoulCost);
         PlayerProgressionData data = PlayerProgressionData.get(server);
-        String persistedSkillId = skillId.toString();
 
         // Validate the complete purchase before deducting either required currency.
-        if (data.isSkillUnlocked(playerUuid, persistedSkillId)) {
+        if (data.isSkillUnlocked(playerUuid, skillId)) {
             return SkillUnlockResult.ALREADY_UNLOCKED;
         }
         long echelonPoints = data.balance(playerUuid, PersonalCurrency.ECHELON_POINTS);
+        long fakhrulCurrency = data.balance(playerUuid, PersonalCurrency.FAKHRUL_CURRENCY);
         long powerfulSouls = data.powerfulSouls(playerUuid);
         if (echelonPoints < echelonPointCost) {
             return SkillUnlockResult.INSUFFICIENT_ECHELON_POINTS;
+        }
+        if (fakhrulCurrency < fakhrulCurrencyCost) {
+            return SkillUnlockResult.INSUFFICIENT_FAKHRUL_CURRENCY;
         }
         if (powerfulSouls < powerfulSoulCost) {
             return SkillUnlockResult.INSUFFICIENT_POWERFUL_SOULS;
@@ -162,11 +168,17 @@ public final class PlayerProgressionService {
 
         data.unlockSkill(
                 playerUuid,
-                persistedSkillId,
+                skillId,
                 echelonPoints - echelonPointCost,
+                fakhrulCurrency - fakhrulCurrencyCost,
                 powerfulSouls - powerfulSoulCost
         );
         return SkillUnlockResult.UNLOCKED;
+    }
+
+    // Return all persisted skill keys unlocked by one player.
+    public static Set<String> getUnlockedSkills(MinecraftServer server, UUID playerUuid) {
+        return PlayerProgressionData.get(server).unlockedSkills(playerUuid);
     }
 
     // Reject negative values before they reach persistent progression state.
@@ -186,6 +198,7 @@ public final class PlayerProgressionService {
         UNLOCKED,
         ALREADY_UNLOCKED,
         INSUFFICIENT_ECHELON_POINTS,
+        INSUFFICIENT_FAKHRUL_CURRENCY,
         INSUFFICIENT_POWERFUL_SOULS
     }
 }

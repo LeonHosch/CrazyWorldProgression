@@ -53,32 +53,14 @@ public final class KingdomProgressionService {
         return KingdomProgressionData.get(server).electedKing();
     }
 
-    // Appoint the winning player as king and close the active vote.
-    public static void electKing(MinecraftServer server, UUID playerUuid) {
-        // Resolving a successful vote appoints the king and closes the active election.
-        KingdomProgressionData.get(server).electKing(playerUuid);
+    // Immediately appoint a player as king, replacing the current king when present.
+    public static void setKing(MinecraftServer server, UUID playerUuid) {
+        KingdomProgressionData.get(server).setKing(playerUuid);
     }
 
-    // Return the candidate in the currently active king vote.
-    public static Optional<UUID> getActiveVoteCandidate(MinecraftServer server) {
-        return KingdomProgressionData.get(server).activeVoteCandidate();
-    }
-
-    // Start a king vote when no other candidate is active.
-    public static boolean startKingVote(MinecraftServer server, UUID candidateUuid) {
-        KingdomProgressionData data = KingdomProgressionData.get(server);
-
-        // Only one candidate can be active until the election system resolves or clears the vote.
-        if (data.activeVoteCandidate().isPresent()) {
-            return false;
-        }
-        data.startKingVote(candidateUuid);
-        return true;
-    }
-
-    // Clear both the current king and unfinished vote state.
-    public static void clearKingAndVote(MinecraftServer server) {
-        KingdomProgressionData.get(server).clearKingAndVote();
+    // Clear the current king.
+    public static void clearKing(MinecraftServer server) {
+        KingdomProgressionData.get(server).clearKing();
     }
 
     // Let the elected king purchase one global technology when all requirements pass.

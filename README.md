@@ -33,7 +33,7 @@ SnakeYAML 2.6 is included inside the built mod JAR. Install Crazy World Progress
 - Permanent branch choices configured with `following`.
 - English and German tree text and UI translations.
 - Server-authoritative purchases, balances, prerequisites, king checks, and excluded branches.
-- Persistent balances, unlocks, king state, election candidate, and Powerful Soul claim history.
+- Persistent balances, unlocks, king state, and Powerful Soul claim history.
 - Administrative commands for inspecting and debugging every currency.
 
 ## Currencies
@@ -119,8 +119,8 @@ The same syntax works with `/fc`, `/ps`, and their long aliases. For example:
 | --- | --- | --- |
 | `/skill` | Player | Opens the skill-tree screen |
 | `/king` | Player | Shows the elected king and active vote candidate |
-| `/king vote start <candidate>` | Admin | Starts an election for exactly one candidate |
-| `/king clear` | Admin | Clears both the elected king and any active election |
+| `/king set <player>` | Admin | Immediately appoints a player, replacing the current king |
+| `/king clear` | Admin | Clears the current king |
 
 Starting a vote records and announces the candidate; it does not immediately appoint that player.
 
@@ -385,7 +385,7 @@ Build output is written to `build/libs/`. Use the remapped mod JAR rather than t
 
 ## Current limitations
 
-- The election command can start or clear one candidate, and the service can appoint a winner, but vote casting, counting, timing, and automatic resolution are not implemented yet.
+- King elections are roleplay-managed; administrators appoint the chosen player with `/king set <player>`.
 - Gameplay events that automatically award EP, FC, or PS are not connected yet. The persistence and safe award APIs are ready for those integrations; administration commands are currently the available in-game testing path.
 - Skill-tree YAML is bundled into release JARs rather than copied to an external server configuration directory.
 - There is no skill-tree reload command; definitions are loaded on server startup.

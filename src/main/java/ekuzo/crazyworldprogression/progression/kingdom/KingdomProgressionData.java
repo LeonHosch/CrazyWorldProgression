@@ -17,7 +17,6 @@ public final class KingdomProgressionData extends SavedData {
     // This state belongs to the kingdom as a whole rather than to an individual player.
     private long kingdomPoints;
     private UUID electedKing;
-    private UUID activeVoteCandidate;
     private final Set<String> unlockedTechnologies = new HashSet<>();
 
     public static final Codec<KingdomProgressionData> CODEC = RecordCodecBuilder.create(instance ->
@@ -26,8 +25,6 @@ public final class KingdomProgressionData extends SavedData {
                             .forGetter(data -> data.kingdomPoints),
                     Codec.STRING.xmap(UUID::fromString, UUID::toString).optionalFieldOf("elected_king")
                             .forGetter(data -> Optional.ofNullable(data.electedKing)),
-                    Codec.STRING.xmap(UUID::fromString, UUID::toString).optionalFieldOf("active_vote_candidate")
-                            .forGetter(data -> Optional.ofNullable(data.activeVoteCandidate)),
                     Codec.STRING.listOf().optionalFieldOf("unlocked_technologies", List.of())
                             .forGetter(data -> List.copyOf(data.unlockedTechnologies))
             ).apply(instance, KingdomProgressionData::new)
@@ -48,12 +45,10 @@ public final class KingdomProgressionData extends SavedData {
     private KingdomProgressionData(
             long kingdomPoints,
             Optional<UUID> electedKing,
-            Optional<UUID> activeVoteCandidate,
             List<String> unlockedTechnologies
     ) {
         this.kingdomPoints = Math.max(0L, kingdomPoints);
         this.electedKing = electedKing.orElse(null);
-        this.activeVoteCandidate = activeVoteCandidate.orElse(null);
         this.unlockedTechnologies.addAll(unlockedTechnologies);
     }
 
@@ -78,28 +73,15 @@ public final class KingdomProgressionData extends SavedData {
         return Optional.ofNullable(electedKing);
     }
 
-    // Appoint a king and close the election that selected them.
-    void electKing(UUID electedKing) {
+    // Appoint a king, replacing the current one when present.
+    void setKing(UUID electedKing) {
         this.electedKing = electedKing;
-        activeVoteCandidate = null;
         setDirty();
     }
 
-    // Return the active election candidate when a vote is running.
-    Optional<UUID> activeVoteCandidate() {
-        return Optional.ofNullable(activeVoteCandidate);
-    }
-
-    // Store the candidate for a newly started king vote.
-    void startKingVote(UUID candidateUuid) {
-        activeVoteCandidate = candidateUuid;
-        setDirty();
-    }
-
-    // Clear all election leadership state for administration or recovery.
-    void clearKingAndVote() {
+    // Clear the current king for administration or recovery.
+    void clearKing() {
         electedKing = null;
-        activeVoteCandidate = null;
         setDirty();
     }
 

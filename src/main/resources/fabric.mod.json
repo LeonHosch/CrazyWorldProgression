@@ -3,9 +3,9 @@
 	"id": "crazy-world-progression",
 	"version": "${version}",
 	"name": "Crazy World Progression",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "Extensible currency wallets and YAML skill trees for Fabric mods.",
 	"authors": [
-		"Me!"
+		"Leon Hosch"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",

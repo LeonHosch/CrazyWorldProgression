@@ -1,8 +1,7 @@
 package ekuzo.crazyworldprogression.progression.skilltrees;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
-import ekuzo.crazyworldprogression.progression.kingdom.KingdomProgressionService;
-import ekuzo.crazyworldprogression.progression.player.PlayerProgressionService;
+import ekuzo.crazyworldprogression.progression.ProgressionService;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.minecraft.core.Holder;
 import net.minecraft.resources.Identifier;
@@ -67,8 +66,10 @@ public final class SkillStatRegistry {
     public static void refresh(ServerPlayer player) {
         Map<String, Double> totals = new LinkedHashMap<>();
         TRANSLATIONS.keySet().forEach(key -> totals.put(key, 0.0));
-        Set<String> globalUnlocks = KingdomProgressionService.getUnlockedTechnologies(player.level().getServer());
-        Set<String> personalUnlocks = PlayerProgressionService.getUnlockedSkills(player.level().getServer(), player.getUUID());
+        Set<String> globalUnlocks = ProgressionService.getUnlocks(
+                player.level().getServer(), player.getUUID(), SkillTreeDefinition.SkillTreeType.GLOBAL);
+        Set<String> personalUnlocks = ProgressionService.getUnlocks(
+                player.level().getServer(), player.getUUID(), SkillTreeDefinition.SkillTreeType.PERSONAL);
 
         for (SkillTreeDefinition tree : SkillTreeManager.getSkillTrees()) {
             Set<String> unlocks = tree.type() == SkillTreeDefinition.SkillTreeType.GLOBAL

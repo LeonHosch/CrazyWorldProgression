@@ -1,11 +1,9 @@
 package ekuzo.crazyworldprogression.client;
 
-import ekuzo.crazyworldprogression.CrazyWorldProgression;
-import ekuzo.crazyworldprogression.command.BalanceCommands.CurrencyDisplay;
-import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeDefinition.SkillCosts;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeDefinition.SkillTreeType;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeNetworking;
-import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.Balances;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.CostSnapshot;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.CurrencySnapshot;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.NodeSnapshot;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.SkillTreeSnapshot;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.TreeSnapshot;
@@ -48,34 +46,6 @@ public final class SkillTreeScreen extends Screen {
             Identifier.withDefaultNamespace("textures/block/blackstone.png");
     private static final Identifier PERSONAL_BACKGROUND =
             Identifier.withDefaultNamespace("textures/block/deepslate_tiles.png");
-    private static final CurrencyIcon KINGDOM_POINTS_ICON = new CurrencyIcon(
-            CrazyWorldProgression.id("currencies/kp-32x32.png"),
-            7,
-            4,
-            18,
-            24
-    );
-    private static final CurrencyIcon ECHELON_POINTS_ICON = new CurrencyIcon(
-            CrazyWorldProgression.id("currencies/ep-32x32.png"),
-            7,
-            4,
-            17,
-            24
-    );
-    private static final CurrencyIcon FAKHRUL_CURRENCY_ICON = new CurrencyIcon(
-            CrazyWorldProgression.id("currencies/fc-32x32.png"),
-            5,
-            4,
-            22,
-            24
-    );
-    private static final CurrencyIcon POWERFUL_SOULS_ICON = new CurrencyIcon(
-            CrazyWorldProgression.id("currencies/ps-32x32.png"),
-            8,
-            4,
-            16,
-            24
-    );
     private static final int WINDOW_WIDTH = 252;
     private static final int WINDOW_HEIGHT = 140;
     private static final int CANVAS_OFFSET_X = 9;
@@ -517,21 +487,20 @@ public final class SkillTreeScreen extends Screen {
             graphics.text(font, Component.literal(displayedTreeName(tree)), leftPos + 8, topPos + 6, 0xFF404040, false);
         }
 
-        drawBalances(graphics, tree, snapshot.balances());
+        drawBalances(graphics, tree);
         int messageY = topPos + WINDOW_HEIGHT + 52;
-        if (tree != null && tree.type() == SkillTreeType.GLOBAL && !snapshot.electedKing()) {
-            Component warning = Component.translatable("screen.crazy-world-progression.skill_trees.king_only_spend")
-                    .withStyle(ChatFormatting.RED);
+        if (tree != null && !tree.purchaseDeniedReason().isBlank()) {
+            Component warning = Component.literal(tree.purchaseDeniedReason()).withStyle(ChatFormatting.RED);
             graphics.centeredText(font, warning, width / 2, messageY, 0xFFFFFFFF);
         }
     }
 
     // Draw the selected tree's relevant balances together inside one highlighted box.
-    private void drawBalances(GuiGraphicsExtractor graphics, TreeSnapshot tree, Balances balances) {
+    private void drawBalances(GuiGraphicsExtractor graphics, TreeSnapshot tree) {
         if (tree == null) {
             return;
         }
-        List<CurrencyAmount> currencies = balanceCurrencies(tree, balances);
+        List<CurrencyAmount> currencies = balanceCurrencies(tree);
         int contentWidth = currencyRowWidth(currencies);
         int badgeWidth = highlightedContentWidth(contentWidth);
         int badgeX = (width - badgeWidth) / 2;
@@ -549,44 +518,11 @@ public final class SkillTreeScreen extends Screen {
         }
     }
 
-    // Return KP plus king FC for global trees or the player's three personal currencies.
-    private static List<CurrencyAmount> balanceCurrencies(TreeSnapshot tree, Balances balances) {
-        if (tree.type() == SkillTreeType.GLOBAL) {
-            return List.of(
-                    new CurrencyAmount(
-                            balances.kingdomPoints(),
-                            CurrencyDisplay.KINGDOM_POINTS,
-                            KINGDOM_POINTS_ICON,
-                            true
-                    ),
-                    new CurrencyAmount(
-                            balances.kingFakhrulCurrency(),
-                            CurrencyDisplay.FAKHRUL_CURRENCY,
-                            FAKHRUL_CURRENCY_ICON,
-                            true
-                    )
-            );
-        }
-        return List.of(
-                new CurrencyAmount(
-                        balances.echelonPoints(),
-                        CurrencyDisplay.ECHELON_POINTS,
-                        ECHELON_POINTS_ICON,
-                        true
-                ),
-                new CurrencyAmount(
-                        balances.fakhrulCurrency(),
-                        CurrencyDisplay.FAKHRUL_CURRENCY,
-                        FAKHRUL_CURRENCY_ICON,
-                        true
-                ),
-                new CurrencyAmount(
-                        balances.powerfulSouls(),
-                        CurrencyDisplay.POWERFUL_SOULS,
-                        POWERFUL_SOULS_ICON,
-                        true
-                )
-        );
+    // Return every registered currency actually used by the selected tree.
+    private static List<CurrencyAmount> balanceCurrencies(TreeSnapshot tree) {
+        return tree.balances().stream()
+                .map(currency -> currencyAmount(currency, currency.balance(), true))
+                .toList();
     }
 
     // Draw a vanilla-inspired hover card or a tab-name tooltip under the cursor.
@@ -623,7 +559,7 @@ public final class SkillTreeScreen extends Screen {
         String displayedDescription = displayedSkillDescription(skill);
         boolean showCosts = !skill.unlocked();
         List<CurrencyAmount> costs = showCosts
-                ? formatCosts(tree.type(), skill.costs(), snapshot.balances())
+                ? formatCosts(skill.costs())
                 : List.of();
         boolean free = showCosts && costs.isEmpty();
         Component status = nodeStatus(tree, skill);
@@ -769,7 +705,7 @@ public final class SkillTreeScreen extends Screen {
             int y
     ) {
         Component amount = Component.literal(Long.toString(currency.amount()))
-                .withStyle(currency.affordable() ? currency.display().color() : ChatFormatting.GRAY);
+                .withStyle(currency.affordable() ? currency.color() : ChatFormatting.GRAY);
         graphics.text(font, amount, x, y + CURRENCY_TEXT_VERTICAL_OFFSET, 0xFFFFFFFF, false);
         int iconX = x + font.width(amount) + CURRENCY_TEXT_ICON_GAP;
         int iconWidth = currencyIconDisplayWidth(currency.icon());
@@ -839,9 +775,8 @@ public final class SkillTreeScreen extends Screen {
             return Component.translatable("screen.crazy-world-progression.skill_trees.status.hold_to_unlock")
                     .withStyle(ChatFormatting.YELLOW);
         }
-        if (tree.type() == SkillTreeType.GLOBAL && !snapshot.electedKing()) {
-            return Component.translatable("screen.crazy-world-progression.skill_trees.status.king_only_unlock")
-                    .withStyle(ChatFormatting.RED);
+        if (!tree.purchaseDeniedReason().isBlank()) {
+            return Component.literal(tree.purchaseDeniedReason()).withStyle(ChatFormatting.RED);
         }
         return Component.translatable("screen.crazy-world-progression.skill_trees.status.unavailable")
                 .withStyle(ChatFormatting.GRAY);
@@ -926,58 +861,32 @@ public final class SkillTreeScreen extends Screen {
     }
 
     // Format costs normally when affordable and grey out each individually insufficient currency.
-    private static List<CurrencyAmount> formatCosts(SkillTreeType type, SkillCosts costs, Balances balances) {
-        List<CurrencyAmount> result = new ArrayList<>();
-        if (type == SkillTreeType.GLOBAL && costs.kingdomPoints() > 0L) {
-            appendCost(
-                    result,
-                    costs.kingdomPoints(),
-                    CurrencyDisplay.KINGDOM_POINTS,
-                    KINGDOM_POINTS_ICON,
-                    balances.kingdomPoints() >= costs.kingdomPoints()
-            );
-        }
-        if (type == SkillTreeType.PERSONAL && costs.echelonPoints() > 0L) {
-            appendCost(
-                    result,
-                    costs.echelonPoints(),
-                    CurrencyDisplay.ECHELON_POINTS,
-                    ECHELON_POINTS_ICON,
-                    balances.echelonPoints() >= costs.echelonPoints()
-            );
-        }
-        if (costs.fakhrulCurrency() > 0L) {
-            appendCost(
-                    result,
-                    costs.fakhrulCurrency(),
-                    CurrencyDisplay.FAKHRUL_CURRENCY,
-                    FAKHRUL_CURRENCY_ICON,
-                    (type == SkillTreeType.GLOBAL
-                            ? balances.kingFakhrulCurrency()
-                            : balances.fakhrulCurrency()) >= costs.fakhrulCurrency()
-            );
-        }
-        if (type == SkillTreeType.PERSONAL && costs.powerfulSouls() > 0L) {
-            appendCost(
-                    result,
-                    costs.powerfulSouls(),
-                    CurrencyDisplay.POWERFUL_SOULS,
-                    POWERFUL_SOULS_ICON,
-                    balances.powerfulSouls() >= costs.powerfulSouls()
-            );
-        }
-        return result;
+    private static List<CurrencyAmount> formatCosts(List<CostSnapshot> costs) {
+        return costs.stream()
+                .map(cost -> currencyAmount(cost.currency(), cost.amount(), cost.affordable()))
+                .toList();
     }
 
-    // Append one cost together with its icon and individual affordability state.
-    private static void appendCost(
-            List<CurrencyAmount> costs,
-            long amount,
-            CurrencyDisplay currency,
-            CurrencyIcon icon,
-            boolean affordable
-    ) {
-        costs.add(new CurrencyAmount(amount, currency, icon, affordable));
+    private static CurrencyAmount currencyAmount(CurrencySnapshot currency, long amount, boolean affordable) {
+        ChatFormatting color;
+        try {
+            color = ChatFormatting.valueOf(currency.color().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            color = ChatFormatting.WHITE;
+        }
+        return new CurrencyAmount(
+                amount,
+                color,
+                new CurrencyIcon(parseIdentifier(currency.icon()), currency.iconU(), currency.iconV(),
+                        currency.iconWidth(), currency.iconHeight()),
+                affordable
+        );
+    }
+
+    private static Identifier parseIdentifier(String value) {
+        int separator = value.indexOf(':');
+        return separator < 0 ? Identifier.withDefaultNamespace(value)
+                : Identifier.fromNamespaceAndPath(value.substring(0, separator), value.substring(separator + 1));
     }
 
     // Handle Done, tabs, the start of hold-to-unlock, and canvas dragging.
@@ -1300,7 +1209,7 @@ public final class SkillTreeScreen extends Screen {
 
     private record CurrencyAmount(
             long amount,
-            CurrencyDisplay display,
+            ChatFormatting color,
             CurrencyIcon icon,
             boolean affordable
     ) {

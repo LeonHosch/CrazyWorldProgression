@@ -1,29 +1,32 @@
 package ekuzo.crazyworldprogression.progression.skilltrees;
 
+import net.minecraft.resources.Identifier;
+
 import java.util.List;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public record SkillTreeDefinition(
-        String id,
+        Identifier id,
         String name,
         String germanName,
         String icon,
         SkillTreeType type,
+        int priority,
         List<SkillNode> skills
 ) {
-    // Find a node by the stable id used by network requests and save data.
+    // Resolve a client-requested node ID inside this immutable tree definition.
     public SkillNode findSkill(String skillId) {
         return skills.stream().filter(skill -> skill.id().equals(skillId)).findFirst().orElse(null);
     }
 
-    // Build the save-data key shared by definitions, purchases, and effects.
+    // Build the namespaced storage key that prevents equal node IDs in different trees from colliding.
     public String persistedKey(SkillNode skill) {
         return id + "/" + skill.id();
     }
 
-    public enum SkillTreeType {
-        GLOBAL,
-        PERSONAL
-    }
+    public enum SkillTreeType { GLOBAL, PERSONAL }
 
     public record SkillNode(
             String id,
@@ -35,21 +38,12 @@ public record SkillTreeDefinition(
             List<String> previous,
             int following,
             List<String> stats,
-            SkillCosts costs
+            Map<Identifier, Long> costs
     ) {
-    }
-
-    public record SkillCosts(
-            long kingdomPoints,
-            long echelonPoints,
-            long fakhrulCurrency,
-            long powerfulSouls
-    ) {
-        public static final SkillCosts FREE = new SkillCosts(0L, 0L, 0L, 0L);
-
-        // Reject negative costs because they would turn a purchase into a reward exploit.
-        public SkillCosts {
-            if (kingdomPoints < 0L || echelonPoints < 0L || fakhrulCurrency < 0L || powerfulSouls < 0L) {
+        // Preserve YAML cost order for predictable GUI rendering and reject reward-like negative costs.
+        public SkillNode {
+            costs = Collections.unmodifiableMap(new LinkedHashMap<>(costs));
+            if (costs.values().stream().anyMatch(value -> value < 0L)) {
                 throw new IllegalArgumentException("Skill costs must not be negative");
             }
         }

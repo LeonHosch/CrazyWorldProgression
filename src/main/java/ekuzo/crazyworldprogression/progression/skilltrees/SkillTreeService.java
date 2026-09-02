@@ -1,284 +1,162 @@
 package ekuzo.crazyworldprogression.progression.skilltrees;
 
-import ekuzo.crazyworldprogression.progression.kingdom.KingdomProgressionService;
-import ekuzo.crazyworldprogression.progression.player.PersonalCurrency;
-import ekuzo.crazyworldprogression.progression.player.PlayerProgressionService;
+import ekuzo.crazyworldprogression.currency.CurrencyDefinition;
+import ekuzo.crazyworldprogression.currency.CurrencyRegistry;
+import ekuzo.crazyworldprogression.currency.CurrencyService;
+import ekuzo.crazyworldprogression.progression.ProgressionService;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeDefinition.SkillCosts;
 import static ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeDefinition.SkillNode;
 import static ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeDefinition.SkillTreeType;
 
 public final class SkillTreeService {
-    // Prevent this static gameplay service from being instantiated.
+    // Prevent instantiation of the server-authoritative tree gameplay service.
     private SkillTreeService() {
     }
 
-    // Build the complete server-authoritative screen state visible to one player.
+    // Build the complete dynamic GUI snapshot for one viewer without exposing mutable server state.
     public static SkillTreeSnapshot createSnapshot(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
-        Balances balances = balances(server, player);
-        boolean electedKing = KingdomProgressionService.getElectedKing(server)
-                .filter(player.getUUID()::equals)
-                .isPresent();
-        Set<String> globalUnlocks = KingdomProgressionService.getUnlockedTechnologies(server);
-        Set<String> personalUnlocks = PlayerProgressionService.getUnlockedSkills(server, player.getUUID());
         List<TreeSnapshot> trees = new ArrayList<>();
-
         for (SkillTreeDefinition tree : SkillTreeManager.getSkillTrees()) {
-            Set<String> unlocks = tree.type() == SkillTreeType.GLOBAL ? globalUnlocks : personalUnlocks;
+            Set<String> unlocks = ProgressionService.getUnlocks(server, player.getUUID(), tree.type());
             Set<String> excludedSkillIds = excludedSkillIds(tree, unlocks);
-            Map<String, String> idsByName = new LinkedHashMap<>();
-            tree.skills().forEach(skill -> idsByName.put(skill.name(), skill.id()));
+            SkillTreeRegistry.PurchaseDecision decision = SkillTreeRegistry.canPurchase(player, tree);
             List<NodeSnapshot> nodes = new ArrayList<>();
-
             for (SkillNode skill : tree.skills()) {
                 String persistedKey = tree.persistedKey(skill);
                 boolean unlocked = unlocks.contains(persistedKey);
                 boolean previousUnlocked = prerequisitesUnlocked(tree, skill, unlocks);
-                boolean affordable = canAfford(tree.type(), skill.costs(), balances);
+                List<CostSnapshot> costs = costSnapshots(server, player, skill.costs());
+                boolean affordable = costs.stream().allMatch(CostSnapshot::affordable);
                 boolean excluded = excludedSkillIds.contains(skill.id()) && !unlocked;
-                boolean canPurchase = !unlocked
-                        && !excluded
-                        && previousUnlocked
-                        && affordable
-                        && (tree.type() != SkillTreeType.GLOBAL || electedKing);
-                nodes.add(new NodeSnapshot(
-                        skill.id(),
-                        skill.name(),
-                        skill.germanName(),
-                        skill.description(),
-                        skill.germanDescription(),
-                        skill.icon(),
-                        skill.previous().stream().map(idsByName::get).toList(),
-                        skill.following(),
-                        skill.costs(),
-                        unlocked,
-                        previousUnlocked,
-                        affordable,
-                        excluded,
-                        canPurchase
-                ));
+                nodes.add(new NodeSnapshot(skill.id(), skill.name(), skill.germanName(), skill.description(),
+                        skill.germanDescription(), skill.icon(), skill.previous(),
+                        skill.following(), costs, unlocked, previousUnlocked, affordable, excluded,
+                        !unlocked && !excluded && previousUnlocked && affordable && decision.allowed()));
             }
-            trees.add(new TreeSnapshot(
-                    tree.id(),
-                    tree.name(),
-                    tree.germanName(),
-                    tree.icon(),
-                    tree.type(),
-                    List.copyOf(nodes)
-            ));
+            trees.add(new TreeSnapshot(tree.id().toString(), tree.name(), tree.germanName(), tree.icon(), tree.type(),
+                    tree.priority(), List.copyOf(nodes), treeBalances(server, player, tree),
+                    decision.allowed() ? "" : decision.reason()));
         }
-        return new SkillTreeSnapshot(List.copyOf(trees), balances, electedKing);
+        return new SkillTreeSnapshot(
+                List.copyOf(trees),
+                new StatSheetSnapshot(SkillTreeType.GLOBAL,
+                        SkillStatSheetService.create(player, SkillTreeType.GLOBAL)),
+                new StatSheetSnapshot(SkillTreeType.PERSONAL,
+                        SkillStatSheetService.create(player, SkillTreeType.PERSONAL))
+        );
     }
 
-    // Validate and execute one clicked node purchase without trusting client-side state.
+    // Revalidate and execute a client-requested purchase, silently rejecting stale or invalid requests.
     public static void purchase(ServerPlayer player, String treeId, String skillId) {
         SkillTreeDefinition tree = SkillTreeManager.findTree(treeId);
-        if (tree == null) {
-            return;
-        }
+        if (tree == null || !SkillTreeRegistry.canPurchase(player, tree).allowed()) return;
         SkillNode skill = tree.findSkill(skillId);
-        if (skill == null) {
-            return;
-        }
-
+        if (skill == null) return;
         MinecraftServer server = player.level().getServer();
-        Set<String> unlocks = tree.type() == SkillTreeType.GLOBAL
-                ? KingdomProgressionService.getUnlockedTechnologies(server)
-                : PlayerProgressionService.getUnlockedSkills(server, player.getUUID());
-        if (unlocks.contains(tree.persistedKey(skill))) {
-            return;
-        }
-        if (excludedSkillIds(tree, unlocks).contains(skill.id())) {
-            return;
-        }
-        if (!prerequisitesUnlocked(tree, skill, unlocks)) {
-            return;
-        }
-
-        boolean unlocked = tree.type() == SkillTreeType.GLOBAL
-                ? purchaseGlobal(player, tree, skill)
-                : purchasePersonal(player, tree, skill);
-        if (unlocked) {
-            if (tree.type() == SkillTreeType.GLOBAL) {
-                SkillStatRegistry.refreshAll(server.getPlayerList().getPlayers());
-            } else {
-                SkillStatRegistry.refresh(player);
-            }
+        Set<String> unlocks = ProgressionService.getUnlocks(server, player.getUUID(), tree.type());
+        if (unlocks.contains(tree.persistedKey(skill)) || excludedSkillIds(tree, unlocks).contains(skill.id())
+                || !prerequisitesUnlocked(tree, skill, unlocks)) return;
+        if (ProgressionService.purchase(server, player.getUUID(), tree, skill)) {
+            if (tree.type() == SkillTreeType.GLOBAL) SkillStatRegistry.refreshAll(server.getPlayerList().getPlayers());
+            else SkillStatRegistry.refresh(player);
         }
     }
 
-    // Purchase one global node with shared KP and the elected king's Fakhrul Currency.
-    private static boolean purchaseGlobal(
-            ServerPlayer player,
-            SkillTreeDefinition tree,
-            SkillNode skill
-    ) {
-        SkillCosts costs = skill.costs();
-        KingdomProgressionService.TechnologyUnlockResult result = KingdomProgressionService.unlockTechnology(
-                player.level().getServer(),
-                player.getUUID(),
-                tree.persistedKey(skill),
-                costs.kingdomPoints(),
-                costs.fakhrulCurrency()
-        );
-        return result == KingdomProgressionService.TechnologyUnlockResult.UNLOCKED;
+    // Pair each configured cost with current metadata, balance, and individual affordability for the client.
+    private static List<CostSnapshot> costSnapshots(MinecraftServer server, ServerPlayer player,
+                                                     Map<Identifier, Long> costs) {
+        List<CostSnapshot> snapshots = new ArrayList<>();
+        for (Map.Entry<Identifier, Long> cost : costs.entrySet()) {
+            CurrencySnapshot currency = currencySnapshot(server, player, CurrencyRegistry.require(cost.getKey()));
+            snapshots.add(new CostSnapshot(currency, cost.getValue(), currency.balance() >= cost.getValue()));
+        }
+        return List.copyOf(snapshots);
     }
 
-    // Purchase one personal node with the acting player's three eligible currencies.
-    private static boolean purchasePersonal(
-            ServerPlayer player,
-            SkillTreeDefinition tree,
-            SkillNode skill
-    ) {
-        SkillCosts costs = skill.costs();
-        PlayerProgressionService.SkillUnlockResult result = PlayerProgressionService.unlockSkill(
-                player.level().getServer(),
-                player.getUUID(),
-                tree.persistedKey(skill),
-                costs.echelonPoints(),
-                costs.fakhrulCurrency(),
-                costs.powerfulSouls()
-        );
-        return result == PlayerProgressionService.SkillUnlockResult.UNLOCKED;
+    // Collect only currencies used anywhere in this tree, preserving global currency registration order.
+    private static List<CurrencySnapshot> treeBalances(MinecraftServer server, ServerPlayer player,
+                                                        SkillTreeDefinition tree) {
+        Set<Identifier> used = new LinkedHashSet<>();
+        tree.skills().forEach(skill -> used.addAll(skill.costs().keySet()));
+        return CurrencyRegistry.values().stream().filter(currency -> used.contains(currency.id()))
+                .map(currency -> currencySnapshot(server, player, currency)).toList();
     }
 
-    // Check whether every name-based dependency has a persisted unlock key.
-    private static boolean prerequisitesUnlocked(
-            SkillTreeDefinition tree,
-            SkillNode skill,
-            Set<String> unlocks
-    ) {
-        Map<String, SkillNode> byName = new LinkedHashMap<>();
-        tree.skills().forEach(candidate -> byName.put(candidate.name(), candidate));
-        return skill.previous().stream()
-                .map(byName::get)
+    // Convert one registered server definition and viewer-relative balance into JSON-safe snapshot fields.
+    private static CurrencySnapshot currencySnapshot(MinecraftServer server, ServerPlayer player,
+                                                       CurrencyDefinition definition) {
+        long balance = CurrencyService.getBalance(server, player.getUUID(), definition.id());
+        return new CurrencySnapshot(definition.id().toString(), definition.displayName(), definition.abbreviation(),
+                definition.icon().toString(), definition.iconU(), definition.iconV(), definition.iconWidth(),
+                definition.iconHeight(), definition.color().name().toLowerCase(java.util.Locale.ROOT), balance);
+    }
+
+    // Require every ID-based predecessor to have its canonical persisted unlock key.
+    private static boolean prerequisitesUnlocked(SkillTreeDefinition tree, SkillNode skill, Set<String> unlocks) {
+        Map<String, SkillNode> byId = new LinkedHashMap<>();
+        tree.skills().forEach(candidate -> byId.put(candidate.id(), candidate));
+        return skill.previous().stream().map(byId::get)
                 .allMatch(previous -> unlocks.contains(tree.persistedKey(previous)));
     }
 
-    // Derive every permanently excluded branch from the already unlocked direct successors.
+    // Derive branches permanently excluded because an ancestor reached its configured following limit.
     private static Set<String> excludedSkillIds(SkillTreeDefinition tree, Set<String> unlocks) {
         Map<String, List<SkillNode>> childrenByParent = new LinkedHashMap<>();
-        tree.skills().forEach(skill -> childrenByParent.put(skill.name(), new ArrayList<>()));
-        for (SkillNode child : tree.skills()) {
-            child.previous().forEach(parent -> childrenByParent.get(parent).add(child));
-        }
-
+        tree.skills().forEach(skill -> childrenByParent.put(skill.id(), new ArrayList<>()));
+        for (SkillNode child : tree.skills()) child.previous().forEach(parent -> childrenByParent.get(parent).add(child));
         Set<String> excluded = new HashSet<>();
         for (SkillNode parent : tree.skills()) {
-            if (parent.following() <= 0) {
-                continue;
-            }
-            List<SkillNode> branches = childrenByParent.get(parent.name());
-            long chosenBranches = branches.stream()
-                    .filter(branch -> unlocks.contains(tree.persistedKey(branch)))
-                    .count();
-            if (chosenBranches < parent.following()) {
-                continue;
-            }
-            for (SkillNode branch : branches) {
-                if (!unlocks.contains(tree.persistedKey(branch))) {
-                    excludeBranch(branch, childrenByParent, excluded);
-                }
+            if (parent.following() <= 0) continue;
+            List<SkillNode> branches = childrenByParent.get(parent.id());
+            long chosen = branches.stream().filter(branch -> unlocks.contains(tree.persistedKey(branch))).count();
+            if (chosen < parent.following()) continue;
+            for (SkillNode branch : branches) if (!unlocks.contains(tree.persistedKey(branch))) {
+                excludeBranch(branch, childrenByParent, excluded);
             }
         }
         return Set.copyOf(excluded);
     }
 
-    // Mark one unchosen branch and all nodes that depend on it as permanently excluded.
-    private static void excludeBranch(
-            SkillNode skill,
-            Map<String, List<SkillNode>> childrenByParent,
-            Set<String> excluded
-    ) {
-        if (!excluded.add(skill.id())) {
-            return;
-        }
-        for (SkillNode child : childrenByParent.get(skill.name())) {
-            excludeBranch(child, childrenByParent, excluded);
-        }
+    // Recursively mark an unchosen branch and all descendants while avoiding duplicate traversal.
+    private static void excludeBranch(SkillNode skill, Map<String, List<SkillNode>> childrenByParent, Set<String> excluded) {
+        if (!excluded.add(skill.id())) return;
+        for (SkillNode child : childrenByParent.get(skill.id())) excludeBranch(child, childrenByParent, excluded);
     }
 
-    // Test the appropriate shared or personal balances without mutating them.
-    private static boolean canAfford(SkillTreeType type, SkillCosts costs, Balances balances) {
-        if (type == SkillTreeType.GLOBAL) {
-            return balances.kingdomPoints() >= costs.kingdomPoints()
-                    && balances.kingFakhrulCurrency() >= costs.fakhrulCurrency();
-        }
-        return balances.echelonPoints() >= costs.echelonPoints()
-                && balances.fakhrulCurrency() >= costs.fakhrulCurrency()
-                && balances.powerfulSouls() >= costs.powerfulSouls();
-    }
+    public record SkillTreeSnapshot(List<TreeSnapshot> trees, StatSheetSnapshot globalStats,
+                                    StatSheetSnapshot personalStats) { }
 
-    // Read the viewer's balances together with the elected king's Fakhrul Currency.
-    private static Balances balances(MinecraftServer server, ServerPlayer player) {
-        long kingFakhrulCurrency = KingdomProgressionService.getElectedKing(server)
-                .map(kingUuid -> PlayerProgressionService.getBalance(
-                        server,
-                        kingUuid,
-                        PersonalCurrency.FAKHRUL_CURRENCY
-                ))
-                .orElse(0L);
-        return new Balances(
-                KingdomProgressionService.getKingdomPoints(server),
-                PlayerProgressionService.getBalance(server, player.getUUID(), PersonalCurrency.ECHELON_POINTS),
-                PlayerProgressionService.getBalance(server, player.getUUID(), PersonalCurrency.FAKHRUL_CURRENCY),
-                PlayerProgressionService.getPowerfulSouls(server, player.getUUID()),
-                kingFakhrulCurrency
-        );
-    }
+    public record TreeSnapshot(String id, String name, String germanName, String icon, SkillTreeType type,
+                               int priority, List<NodeSnapshot> skills, List<CurrencySnapshot> balances,
+                               String purchaseDeniedReason) { }
 
-    public record SkillTreeSnapshot(
-            List<TreeSnapshot> trees,
-            Balances balances,
-            boolean electedKing
-    ) {
-    }
+    public record StatSheetSnapshot(SkillTreeType type, List<StatSnapshot> stats) { }
 
-    public record TreeSnapshot(
-            String id,
-            String name,
-            String germanName,
-            String icon,
-            SkillTreeType type,
-            List<NodeSnapshot> skills
-    ) {
-    }
+    public record StatSnapshot(String translationKey, StatValueFormat format, double startingValue,
+                               double globalBoost, double personalBoost, double totalValue) { }
 
-    public record NodeSnapshot(
-            String id,
-            String name,
-            String germanName,
-            String description,
-            String germanDescription,
-            String icon,
-            List<String> previous,
-            int following,
-            SkillCosts costs,
-            boolean unlocked,
-            boolean prerequisitesUnlocked,
-            boolean affordable,
-            boolean excluded,
-            boolean canPurchase
-    ) {
-    }
+    public enum StatValueFormat { NUMBER, PERCENT, MULTIPLIER }
 
-    public record Balances(
-            long kingdomPoints,
-            long echelonPoints,
-            long fakhrulCurrency,
-            long powerfulSouls,
-            long kingFakhrulCurrency
-    ) {
-    }
+    public record NodeSnapshot(String id, String name, String germanName, String description,
+                               String germanDescription, String icon, List<String> previous, int following,
+                               List<CostSnapshot> costs, boolean unlocked, boolean prerequisitesUnlocked,
+                               boolean affordable, boolean excluded, boolean canPurchase) { }
 
+    public record CurrencySnapshot(String id, String displayName, String abbreviation, String icon,
+                                   int iconU, int iconV, int iconWidth, int iconHeight,
+                                   String color, long balance) { }
+
+    public record CostSnapshot(CurrencySnapshot currency, long amount, boolean affordable) { }
 }

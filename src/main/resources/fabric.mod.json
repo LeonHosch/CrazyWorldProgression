@@ -3,9 +3,9 @@
 	"id": "crazy-world-progression",
 	"version": "${version}",
 	"name": "Crazy World Progression",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "Extensible currency wallets, YAML skill trees, and random-event scheduling for Fabric mods.",
 	"authors": [
-		"Me!"
+		"Leon Hosch"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",
@@ -22,6 +22,9 @@
 			"ekuzo.crazyworldprogression.client.CrazyWorldProgressionClient"
 		]
 	},
+	"mixins": [
+		"crazy-world-progression.mixins.json"
+	],
 	"depends": {
 		"fabricloader": ">=0.19.3",
 		"minecraft": "~26.2",

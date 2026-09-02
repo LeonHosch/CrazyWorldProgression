@@ -17,9 +17,11 @@ import java.util.UUID;
 
 /** Generic persistence and purchase operations shared by all skill trees. */
 public final class ProgressionService {
+    // Prevent instantiation of the generic skill-unlock facade.
     private ProgressionService() {
     }
 
+    // Read unlocks for the requested scope and expose legacy path-only keys under their new namespaced form.
     public static Set<String> getUnlocks(MinecraftServer server, UUID playerUuid,
                                          SkillTreeDefinition.SkillTreeType type) {
         Set<String> stored = type == SkillTreeDefinition.SkillTreeType.GLOBAL
@@ -37,6 +39,7 @@ public final class ProgressionService {
         return Set.copyOf(compatible);
     }
 
+    // Deduct all costs and persist the resulting unlock after the caller has checked tree prerequisites and policy.
     public static boolean purchase(MinecraftServer server, UUID playerUuid, SkillTreeDefinition tree,
                                    SkillTreeDefinition.SkillNode skill) {
         String key = tree.persistedKey(skill);
@@ -54,6 +57,7 @@ public final class ProgressionService {
         return true;
     }
 
+    // Check every dynamic cost against the correct global or player-owned wallet without changing state.
     public static boolean canAfford(MinecraftServer server, UUID playerUuid, Map<Identifier, Long> costs) {
         for (Map.Entry<Identifier, Long> cost : costs.entrySet()) {
             CurrencyDefinition definition = CurrencyRegistry.require(cost.getKey());
@@ -63,6 +67,7 @@ public final class ProgressionService {
         return true;
     }
 
+    // Query the storage object selected by the tree scope for one canonical persisted skill key.
     private static boolean isUnlocked(MinecraftServer server, UUID playerUuid,
                                       SkillTreeDefinition.SkillTreeType type, String key) {
         return type == SkillTreeDefinition.SkillTreeType.GLOBAL

@@ -36,9 +36,11 @@ public final class GlobalProgressionData extends SavedData {
     public static final SavedDataType<GlobalProgressionData> TYPE = new SavedDataType<>(
             CrazyWorldProgression.id("kingdom_progression"), GlobalProgressionData::new, CODEC, null);
 
+    // Create empty global progression state for a new world.
     public GlobalProgressionData() {
     }
 
+    // Rebuild mutable state from disk while translating the old fixed KP and king fields for migration.
     private GlobalProgressionData(Map<String, Long> balances, List<String> unlockedSkills,
                                    long legacyKingdomPoints, Optional<UUID> legacyElectedKing) {
         balances.forEach((id, amount) -> { if (amount > 0L) this.balances.put(id, amount); });
@@ -47,28 +49,34 @@ public final class GlobalProgressionData extends SavedData {
         this.legacyElectedKing = legacyElectedKing.orElse(null);
     }
 
+    // Load the one global progression record stored in the overworld's SavedData storage.
     public static GlobalProgressionData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(TYPE);
     }
 
+    // Read one registered global currency by its stable namespaced identifier.
     public long balance(Identifier currencyId) {
         return balances.getOrDefault(currencyId.toString(), 0L);
     }
 
+    // Store an exact balance and omit zero entries to keep the save compact.
     public void setBalance(Identifier currencyId, long amount) {
         if (amount == 0L) balances.remove(currencyId.toString()); else balances.put(currencyId.toString(), amount);
         setDirty();
     }
 
+    // Check whether a global tree node has already been purchased.
     public boolean isSkillUnlocked(String skillId) {
         return unlockedSkills.contains(skillId);
     }
 
+    // Persist one global unlock after its complete purchase has succeeded.
     public void unlockSkill(String skillId) {
         unlockedSkills.add(skillId);
         setDirty();
     }
 
+    // Return an immutable snapshot so callers cannot mutate SavedData without marking it dirty.
     public Set<String> unlockedSkills() {
         return Set.copyOf(unlockedSkills);
     }

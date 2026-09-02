@@ -6,6 +6,9 @@ import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.CostS
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.CurrencySnapshot;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.NodeSnapshot;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.SkillTreeSnapshot;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.StatSheetSnapshot;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.StatSnapshot;
+import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.StatValueFormat;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeService.TreeSnapshot;
 import ekuzo.crazyworldprogression.client.SkillTreeLayout.ConnectionKey;
 import ekuzo.crazyworldprogression.client.SkillTreeLayout.ConnectorRoute;
@@ -40,6 +43,8 @@ import java.util.Map;
 import static ekuzo.crazyworldprogression.client.SkillTreeLayout.NODE_SIZE;
 
 public final class SkillTreeScreen extends Screen {
+    private static final String GLOBAL_STATS_TAB_ID = "__cwp_global_stats__";
+    private static final String PERSONAL_STATS_TAB_ID = "__cwp_personal_stats__";
     private static final Identifier WINDOW_TEXTURE =
             Identifier.withDefaultNamespace("textures/gui/advancements/window.png");
     private static final Identifier GLOBAL_BACKGROUND =
@@ -53,6 +58,9 @@ public final class SkillTreeScreen extends Screen {
     private static final int CANVAS_WIDTH = 234;
     private static final int CANVAS_HEIGHT = 113;
     private static final int CANVAS_MARGIN = 18;
+    private static final int STAT_HEADER_HEIGHT = 14;
+    private static final int STAT_ROW_HEIGHT = 12;
+    private static final int STAT_TABLE_PADDING = 3;
     private static final int MINIMUM_HOVER_WIDTH = 72;
     private static final int MAXIMUM_HOVER_WIDTH = 190;
     private static final int HOVER_HORIZONTAL_PADDING = 6;
@@ -83,6 +91,7 @@ public final class SkillTreeScreen extends Screen {
     private final Map<String, NodePosition> nodePositions = new HashMap<>();
     private final Map<ConnectionKey, ConnectorRoute> connectorRoutes = new HashMap<>();
     private final Map<String, CanvasState> canvasStates = new HashMap<>();
+    private final Map<String, Integer> statScrollOffsets = new HashMap<>();
     private final Map<String, ItemStack> iconCache = new HashMap<>();
     private SkillTreeSnapshot snapshot;
     private String selectedTreeId;
@@ -104,7 +113,7 @@ public final class SkillTreeScreen extends Screen {
         super(Component.translatable("screen.crazy-world-progression.skill_trees.title"));
         this.parent = parent;
         this.snapshot = snapshot;
-        this.selectedTreeId = snapshot.trees().isEmpty() ? "" : snapshot.trees().getFirst().id();
+        this.selectedTreeId = GLOBAL_STATS_TAB_ID;
     }
 
     // Replace balances and unlock state while preserving the selected tab and canvas position.
@@ -120,8 +129,8 @@ public final class SkillTreeScreen extends Screen {
         }
         pendingTreeId = null;
         pendingSkillId = null;
-        if (snapshot.trees().stream().noneMatch(tree -> tree.id().equals(selectedTreeId))) {
-            selectedTreeId = snapshot.trees().isEmpty() ? "" : snapshot.trees().getFirst().id();
+        if (!tabExists(selectedTreeId)) {
+            selectedTreeId = GLOBAL_STATS_TAB_ID;
         }
         rebuildNodeLayout();
     }
@@ -192,13 +201,18 @@ public final class SkillTreeScreen extends Screen {
     // Draw the textured, clipped node canvas and every connector and node inside it.
     private void drawCanvas(GuiGraphicsExtractor graphics) {
         TreeSnapshot tree = selectedTree();
+        StatSheetSnapshot statSheet = selectedStatSheet();
         int canvasX = canvasX();
         int canvasY = canvasY();
         graphics.enableScissor(canvasX, canvasY, canvasX + CANVAS_WIDTH, canvasY + CANVAS_HEIGHT);
-        if (tree == null) {
+        if (statSheet != null) {
+            drawTiledBackground(graphics, statSheet.type(), 0.0D, 0.0D);
+            drawStatSheet(graphics, statSheet);
+        } else if (tree == null) {
             graphics.fill(canvasX, canvasY, canvasX + CANVAS_WIDTH, canvasY + CANVAS_HEIGHT, 0xFF101010);
         } else {
-            drawTiledBackground(graphics, tree);
+            CanvasState state = selectedCanvasState();
+            drawTiledBackground(graphics, tree.type(), state.offsetX, state.offsetY);
             drawConnections(graphics, tree, true);
             drawConnections(graphics, tree, false);
             drawBranchChoiceLabels(graphics, tree);
@@ -208,16 +222,133 @@ public final class SkillTreeScreen extends Screen {
     }
 
     // Tile a tree-specific vanilla block texture behind the panning nodes.
-    private void drawTiledBackground(GuiGraphicsExtractor graphics, TreeSnapshot tree) {
-        CanvasState state = selectedCanvasState();
-        Identifier texture = tree.type() == SkillTreeType.GLOBAL ? GLOBAL_BACKGROUND : PERSONAL_BACKGROUND;
-        int originX = canvasX() + Math.floorMod((int) Math.floor(state.offsetX), 16) - 16;
-        int originY = canvasY() + Math.floorMod((int) Math.floor(state.offsetY), 16) - 16;
+    private void drawTiledBackground(GuiGraphicsExtractor graphics, SkillTreeType type,
+                                     double horizontalOffset, double verticalOffset) {
+        Identifier texture = type == SkillTreeType.GLOBAL ? GLOBAL_BACKGROUND : PERSONAL_BACKGROUND;
+        int originX = canvasX() + Math.floorMod((int) Math.floor(horizontalOffset), 16) - 16;
+        int originY = canvasY() + Math.floorMod((int) Math.floor(verticalOffset), 16) - 16;
         for (int x = originX; x < canvasX() + CANVAS_WIDTH; x += 16) {
             for (int y = originY; y < canvasY() + CANVAS_HEIGHT; y += 16) {
                 graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, 0.0F, 0.0F, 16, 16, 16, 16);
             }
         }
+    }
+
+    // Draw a compact scrollable table for either the global or personal progression breakdown.
+    private void drawStatSheet(GuiGraphicsExtractor graphics, StatSheetSnapshot sheet) {
+        boolean personal = sheet.type() == SkillTreeType.PERSONAL;
+        int[] widths = personal ? new int[]{66, 36, 40, 46, 38} : new int[]{88, 46, 46, 46};
+        String[] headers = personal
+                ? new String[]{translated("stat_sheet.stat"), translated("stat_sheet.start"),
+                translated("stat_sheet.global"), translated("stat_sheet.personal"), translated("stat_sheet.total")}
+                : new String[]{translated("stat_sheet.stat"), translated("stat_sheet.start"),
+                translated("stat_sheet.added"), translated("stat_sheet.total")};
+        int tableX = canvasX() + STAT_TABLE_PADDING;
+        int rowsTop = canvasY() + STAT_HEADER_HEIGHT;
+        int scroll = statScrollOffsets.getOrDefault(selectedTreeId, 0);
+        graphics.fill(tableX, canvasY() + 2, tableX + sum(widths), canvasY() + CANVAS_HEIGHT - 2, 0xD0181818);
+
+        if (sheet.stats().isEmpty()) {
+            graphics.centeredText(font, Component.literal(translated("stat_sheet.empty")),
+                    canvasX() + CANVAS_WIDTH / 2, rowsTop + 28, 0xFFBBBBBB);
+        }
+
+        for (int index = 0; index < sheet.stats().size(); index++) {
+            int rowY = rowsTop + index * STAT_ROW_HEIGHT - scroll;
+            if (rowY + STAT_ROW_HEIGHT <= rowsTop || rowY >= canvasY() + CANVAS_HEIGHT) continue;
+            StatSnapshot stat = sheet.stats().get(index);
+            int background = index % 2 == 0 ? 0xB0282828 : 0xB0202020;
+            String[] values = personal
+                    ? new String[]{translated(stat.translationKey()),
+                    formatStatValue(stat.format(), stat.startingValue(), false),
+                    formatStatValue(stat.format(), stat.globalBoost(), true),
+                    formatStatValue(stat.format(), stat.personalBoost(), true),
+                    formatStatValue(stat.format(), stat.totalValue(), false)}
+                    : new String[]{translated(stat.translationKey()),
+                    formatStatValue(stat.format(), stat.startingValue(), false),
+                    formatStatValue(stat.format(), stat.globalBoost(), true),
+                    formatStatValue(stat.format(), stat.totalValue(), false)};
+            int[] colors = personal
+                    ? new int[]{0xFFFFFFFF, 0xFFBBBBBB, 0xFFFFCC55, 0xFF55CCFF, 0xFF77DD77}
+                    : new int[]{0xFFFFFFFF, 0xFFBBBBBB, 0xFFFFCC55, 0xFF77DD77};
+            drawStatRow(graphics, tableX, rowY, widths, values, colors, background);
+        }
+
+        drawStatRow(graphics, tableX, canvasY() + 2, widths, headers,
+                personal
+                        ? new int[]{0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFCC55, 0xFF55CCFF, 0xFF77DD77}
+                        : new int[]{0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFCC55, 0xFF77DD77},
+                0xFF383838);
+        drawStatScrollbar(graphics, sheet.stats().size(), scroll);
+    }
+
+    // Draw a narrow scroll track when the complete stat list is taller than its visible row area.
+    private void drawStatScrollbar(GuiGraphicsExtractor graphics, int rowCount, int scroll) {
+        int viewportHeight = CANVAS_HEIGHT - STAT_HEADER_HEIGHT;
+        int contentHeight = rowCount * STAT_ROW_HEIGHT;
+        if (contentHeight <= viewportHeight) return;
+        int trackX = canvasX() + CANVAS_WIDTH - 3;
+        int trackY = canvasY() + STAT_HEADER_HEIGHT;
+        int trackHeight = viewportHeight;
+        int thumbHeight = Math.max(12, trackHeight * viewportHeight / contentHeight);
+        int maximumScroll = contentHeight - viewportHeight;
+        int thumbY = trackY + (trackHeight - thumbHeight) * scroll / maximumScroll;
+        graphics.fill(trackX, trackY, trackX + 2, trackY + trackHeight, 0xFF151515);
+        graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, 0xFFAAAAAA);
+    }
+
+    // Draw one table row with independently clipped-looking cells and compact text.
+    private void drawStatRow(GuiGraphicsExtractor graphics, int x, int y, int[] widths,
+                             String[] values, int[] colors, int background) {
+        int cellX = x;
+        for (int index = 0; index < widths.length; index++) {
+            int width = widths[index];
+            graphics.fill(cellX, y, cellX + width - 1, y + STAT_ROW_HEIGHT - 1, background);
+            graphics.text(font, Component.literal(fitStatText(values[index], width - 4)),
+                    cellX + 2, y + 2, colors[index], false);
+            cellX += width;
+        }
+    }
+
+    // Format raw server values as numbers, percentages of base, or whole reward multipliers.
+    private static String formatStatValue(StatValueFormat format, double value, boolean boost) {
+        double normalized = Math.abs(value) < 0.0005D ? 0.0D : value;
+        String prefix = boost && normalized > 0.0D ? "+" : "";
+        return switch (format) {
+            case NUMBER -> prefix + compactDecimal(normalized, 2);
+            case PERCENT -> prefix + compactDecimal(normalized * 100.0D, 1) + "%";
+            case MULTIPLIER -> prefix + compactDecimal(normalized, 2) + "×";
+        };
+    }
+
+    // Render a locale-independent decimal while removing insignificant trailing zeroes.
+    private static String compactDecimal(double value, int decimalPlaces) {
+        String formatted = String.format(Locale.ROOT, "%." + decimalPlaces + "f", value);
+        while (formatted.contains(".") && formatted.endsWith("0")) formatted = formatted.substring(0, formatted.length() - 1);
+        return formatted.endsWith(".") ? formatted.substring(0, formatted.length() - 1) : formatted;
+    }
+
+    // Shorten one cell value with an ellipsis so it never overwrites the following column.
+    private String fitStatText(String value, int maximumWidth) {
+        if (font.width(value) <= maximumWidth) return value;
+        String shortened = value;
+        while (!shortened.isEmpty() && font.width(shortened + "…") > maximumWidth) {
+            shortened = shortened.substring(0, shortened.length() - 1);
+        }
+        return shortened + "…";
+    }
+
+    // Resolve a CWP client translation key into the active language for table cells and headers.
+    private static String translated(String key) {
+        String completeKey = key.startsWith("stat.") ? key : "screen.crazy-world-progression." + key;
+        return Component.translatable(completeKey).getString();
+    }
+
+    // Sum fixed table-column widths when drawing the shared background.
+    private static int sum(int[] values) {
+        int total = 0;
+        for (int value : values) total += value;
+        return total;
     }
 
     // Draw outlined dependency connectors while preserving branch-choice color priority at shared trunks.
@@ -461,13 +592,14 @@ public final class SkillTreeScreen extends Screen {
 
     // Draw vanilla advancement tabs and their configured item icons around the window.
     private void drawTabs(GuiGraphicsExtractor graphics) {
-        for (int index = 0; index < snapshot.trees().size(); index++) {
-            TabPlacement placement = tabPlacement(index);
+        List<TabEntry> tabs = tabs();
+        for (int index = 0; index < tabs.size(); index++) {
+            TabPlacement placement = tabPlacement(tabs, index);
             if (placement == null) {
-                break;
+                continue;
             }
-            TreeSnapshot tree = snapshot.trees().get(index);
-            boolean selected = tree.id().equals(selectedTreeId);
+            TabEntry tab = tabs.get(index);
+            boolean selected = tab.id().equals(selectedTreeId);
             placement.type().extractRenderState(
                     graphics,
                     leftPos + placement.type().getX(placement.index()),
@@ -475,7 +607,7 @@ public final class SkillTreeScreen extends Screen {
                     selected,
                     placement.index()
             );
-            placement.type().extractIcon(graphics, leftPos, topPos, placement.index(), icon(tree.icon()));
+            placement.type().extractIcon(graphics, leftPos, topPos, placement.index(), icon(tab.icon()));
         }
     }
 
@@ -485,6 +617,11 @@ public final class SkillTreeScreen extends Screen {
         TreeSnapshot tree = selectedTree();
         if (tree != null) {
             graphics.text(font, Component.literal(displayedTreeName(tree)), leftPos + 8, topPos + 6, 0xFF404040, false);
+        } else if (selectedStatSheet() != null) {
+            String key = selectedTreeId.equals(GLOBAL_STATS_TAB_ID)
+                    ? "stat_sheet.global_title"
+                    : "stat_sheet.personal_title";
+            graphics.text(font, Component.literal(translated(key)), leftPos + 8, topPos + 6, 0xFF404040, false);
         }
 
         drawBalances(graphics, tree);
@@ -527,14 +664,20 @@ public final class SkillTreeScreen extends Screen {
 
     // Draw a vanilla-inspired hover card or a tab-name tooltip under the cursor.
     private void drawHoverContent(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+        StatSnapshot hoveredStat = hoveredStat(mouseX, mouseY);
+        if (hoveredStat != null) {
+            graphics.setTooltipForNextFrame(Component.translatable(hoveredStat.translationKey()), mouseX, mouseY);
+            return;
+        }
         TreeSnapshot tree = selectedTree();
         NodeSnapshot hovered = tree == null ? null : hoveredNode(tree, mouseX, mouseY);
         if (hovered != null) {
             drawNodeHover(graphics, tree, hovered);
             return;
         }
-        for (int index = 0; index < snapshot.trees().size(); index++) {
-            TabPlacement placement = tabPlacement(index);
+        List<TabEntry> tabs = tabs();
+        for (int index = 0; index < tabs.size(); index++) {
+            TabPlacement placement = tabPlacement(tabs, index);
             if (placement != null && placement.type().isMouseOver(
                     leftPos,
                     topPos,
@@ -543,13 +686,23 @@ public final class SkillTreeScreen extends Screen {
                     mouseY
             )) {
                 graphics.setTooltipForNextFrame(
-                        Component.literal(displayedTreeName(snapshot.trees().get(index))),
+                        displayedTabName(tabs.get(index)),
                         mouseX,
                         mouseY
                 );
                 return;
             }
         }
+    }
+
+    // Return the stat-sheet row under the cursor so truncated names retain a full tooltip.
+    private StatSnapshot hoveredStat(double mouseX, double mouseY) {
+        StatSheetSnapshot sheet = selectedStatSheet();
+        if (sheet == null || !isInsideCanvas(mouseX, mouseY) || mouseY < canvasY() + STAT_HEADER_HEIGHT) return null;
+        int localY = (int) mouseY - (canvasY() + STAT_HEADER_HEIGHT)
+                + statScrollOffsets.getOrDefault(selectedTreeId, 0);
+        int index = localY / STAT_ROW_HEIGHT;
+        return index >= 0 && index < sheet.stats().size() ? sheet.stats().get(index) : null;
     }
 
     // Draw a content-sized hover card directly below its node without covering the hovered icon.
@@ -867,6 +1020,7 @@ public final class SkillTreeScreen extends Screen {
                 .toList();
     }
 
+    // Adapt one network-safe currency snapshot into the screen's render-specific amount and cropped icon data.
     private static CurrencyAmount currencyAmount(CurrencySnapshot currency, long amount, boolean affordable) {
         ChatFormatting color;
         try {
@@ -883,6 +1037,7 @@ public final class SkillTreeScreen extends Screen {
         );
     }
 
+    // Reconstruct a Minecraft identifier from the namespace:path string serialized in a currency snapshot.
     private static Identifier parseIdentifier(String value) {
         int separator = value.indexOf(':');
         return separator < 0 ? Identifier.withDefaultNamespace(value)
@@ -895,8 +1050,9 @@ public final class SkillTreeScreen extends Screen {
         if (super.mouseClicked(event, doubleClick)) {
             return true;
         }
-        for (int index = 0; index < snapshot.trees().size(); index++) {
-            TabPlacement placement = tabPlacement(index);
+        List<TabEntry> tabs = tabs();
+        for (int index = 0; index < tabs.size(); index++) {
+            TabPlacement placement = tabPlacement(tabs, index);
             if (placement != null && placement.type().isMouseOver(
                     leftPos,
                     topPos,
@@ -904,11 +1060,12 @@ public final class SkillTreeScreen extends Screen {
                     event.x(),
                     event.y()
             )) {
-                selectTree(snapshot.trees().get(index).id());
+                selectTree(tabs.get(index).id());
                 return true;
             }
         }
         if (event.button() == 0 && isInsideCanvas(event.x(), event.y())) {
+            if (selectedStatSheet() != null) return true;
             TreeSnapshot tree = selectedTree();
             NodeSnapshot node = tree == null ? null : hoveredNode(tree, event.x(), event.y());
             if (node != null) {
@@ -1020,6 +1177,15 @@ public final class SkillTreeScreen extends Screen {
     // Scroll the selected tree in both axes using Minecraft's wheel deltas.
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        StatSheetSnapshot sheet = selectedStatSheet();
+        if (isInsideCanvas(mouseX, mouseY) && sheet != null) {
+            int maximum = Math.max(0, sheet.stats().size() * STAT_ROW_HEIGHT
+                    - (CANVAS_HEIGHT - STAT_HEADER_HEIGHT));
+            int current = statScrollOffsets.getOrDefault(selectedTreeId, 0);
+            int updated = Math.max(0, Math.min(maximum, current - (int) Math.round(verticalAmount * STAT_ROW_HEIGHT)));
+            statScrollOffsets.put(selectedTreeId, updated);
+            return true;
+        }
         if (isInsideCanvas(mouseX, mouseY) && selectedTree() != null) {
             selectedCanvasState().pan(horizontalAmount * 16.0D, verticalAmount * 16.0D);
             return true;
@@ -1027,7 +1193,7 @@ public final class SkillTreeScreen extends Screen {
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
-    // Switch to another YAML-backed tab without resetting a previously visited canvas.
+    // Switch to another tree or fixed stat-sheet tab without resetting previously visited content state.
     private void selectTree(String treeId) {
         clearHoldToUnlock();
         draggingCanvas = false;
@@ -1070,23 +1236,37 @@ public final class SkillTreeScreen extends Screen {
         });
     }
 
+    // Build fixed stat-sheet entries followed by priority-sorted trees on their respective sides.
+    private List<TabEntry> tabs() {
+        List<TabEntry> tabs = new ArrayList<>();
+        tabs.add(new TabEntry(GLOBAL_STATS_TAB_ID, SkillTreeType.GLOBAL, "minecraft:paper",
+                "stat_sheet.global_title", null));
+        snapshot.trees().stream().filter(tree -> tree.type() == SkillTreeType.GLOBAL)
+                .forEach(tree -> tabs.add(new TabEntry(tree.id(), tree.type(), tree.icon(), "", tree)));
+        tabs.add(new TabEntry(PERSONAL_STATS_TAB_ID, SkillTreeType.PERSONAL, "minecraft:paper",
+                "stat_sheet.personal_title", null));
+        snapshot.trees().stream().filter(tree -> tree.type() == SkillTreeType.PERSONAL)
+                .forEach(tree -> tabs.add(new TabEntry(tree.id(), tree.type(), tree.icon(), "", tree)));
+        return List.copyOf(tabs);
+    }
+
     // Place global tabs on the left and personal tabs on the right of the window.
-    private TabPlacement tabPlacement(int absoluteIndex) {
-        TreeSnapshot tree = snapshot.trees().get(absoluteIndex);
+    private static TabPlacement tabPlacement(List<TabEntry> tabs, int absoluteIndex) {
+        TabEntry tab = tabs.get(absoluteIndex);
         int scopeIndex = 0;
         for (int index = 0; index < absoluteIndex; index++) {
-            if (snapshot.trees().get(index).type() == tree.type()) {
+            if (tabs.get(index).type() == tab.type()) {
                 scopeIndex++;
             }
         }
-        AdvancementTabType primary = tree.type() == SkillTreeType.GLOBAL
+        AdvancementTabType primary = tab.type() == SkillTreeType.GLOBAL
                 ? AdvancementTabType.LEFT
                 : AdvancementTabType.RIGHT;
         if (scopeIndex < primary.getMax()) {
             return new TabPlacement(primary, scopeIndex);
         }
 
-        AdvancementTabType overflow = tree.type() == SkillTreeType.GLOBAL
+        AdvancementTabType overflow = tab.type() == SkillTreeType.GLOBAL
                 ? AdvancementTabType.ABOVE
                 : AdvancementTabType.BELOW;
         int overflowIndex = scopeIndex - primary.getMax();
@@ -1099,6 +1279,27 @@ public final class SkillTreeScreen extends Screen {
                 .filter(tree -> tree.id().equals(selectedTreeId))
                 .findFirst()
                 .orElse(null);
+    }
+
+    // Return the fixed sheet selected by its reserved client-only tab ID.
+    private StatSheetSnapshot selectedStatSheet() {
+        if (selectedTreeId.equals(GLOBAL_STATS_TAB_ID)) return snapshot.globalStats();
+        if (selectedTreeId.equals(PERSONAL_STATS_TAB_ID)) return snapshot.personalStats();
+        return null;
+    }
+
+    // Confirm that a preserved selection still names a fixed sheet or a tree in the refreshed snapshot.
+    private boolean tabExists(String tabId) {
+        return tabId.equals(GLOBAL_STATS_TAB_ID)
+                || tabId.equals(PERSONAL_STATS_TAB_ID)
+                || snapshot.trees().stream().anyMatch(tree -> tree.id().equals(tabId));
+    }
+
+    // Resolve a translated stat-sheet title or the locale-aware YAML name for one tab tooltip.
+    private Component displayedTabName(TabEntry tab) {
+        return tab.tree() == null
+                ? Component.literal(translated(tab.translationKey()))
+                : Component.literal(displayedTreeName(tab.tree()));
     }
 
     // Return the mutable panning state belonging to the selected tree.
@@ -1205,6 +1406,9 @@ public final class SkillTreeScreen extends Screen {
     }
 
     private record TabPlacement(AdvancementTabType type, int index) {
+    }
+
+    private record TabEntry(String id, SkillTreeType type, String icon, String translationKey, TreeSnapshot tree) {
     }
 
     private record CurrencyAmount(

@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "ekuzo.crazyworldprogression.mixin",
+  "mixins": [
+    "BlockMixin",
+    "LivingEntityMixin",
+    "ServerPlayerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

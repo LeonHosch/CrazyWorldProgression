@@ -13,12 +13,15 @@ public record SkillTreeDefinition(
         String germanName,
         String icon,
         SkillTreeType type,
+        int priority,
         List<SkillNode> skills
 ) {
+    // Resolve a client-requested node ID inside this immutable tree definition.
     public SkillNode findSkill(String skillId) {
         return skills.stream().filter(skill -> skill.id().equals(skillId)).findFirst().orElse(null);
     }
 
+    // Build the namespaced storage key that prevents equal node IDs in different trees from colliding.
     public String persistedKey(SkillNode skill) {
         return id + "/" + skill.id();
     }
@@ -37,6 +40,7 @@ public record SkillTreeDefinition(
             List<String> stats,
             Map<Identifier, Long> costs
     ) {
+        // Preserve YAML cost order for predictable GUI rendering and reject reward-like negative costs.
         public SkillNode {
             costs = Collections.unmodifiableMap(new LinkedHashMap<>(costs));
             if (costs.values().stream().anyMatch(value -> value < 0L)) {

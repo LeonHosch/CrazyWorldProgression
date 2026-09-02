@@ -46,9 +46,11 @@ public final class PlayerProgressionData extends SavedData {
     public static final SavedDataType<PlayerProgressionData> TYPE = new SavedDataType<>(
             CrazyWorldProgression.id("echelon_points"), PlayerProgressionData::new, CODEC, null);
 
+    // Create empty per-player progression state for a new world.
     public PlayerProgressionData() {
     }
 
+    // Decode generic state and merge fixed-format balances and claims written by pre-framework releases.
     private PlayerProgressionData(
             Map<String, Map<UUID, Long>> balances,
             Map<String, Map<UUID, Set<String>>> claims,
@@ -69,14 +71,17 @@ public final class PlayerProgressionData extends SavedData {
         }
     }
 
+    // Load the one per-player progression record stored in the overworld's SavedData storage.
     public static PlayerProgressionData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(TYPE);
     }
 
+    // Read one player's balance for a registered player-owned currency.
     public long balance(UUID playerUuid, Identifier currencyId) {
         return balances.getOrDefault(currencyId.toString(), Map.of()).getOrDefault(playerUuid, 0L);
     }
 
+    // Store an exact player balance and remove empty currency maps from serialized state.
     public void setBalance(UUID playerUuid, Identifier currencyId, long amount) {
         Map<UUID, Long> values = balances.computeIfAbsent(currencyId.toString(), ignored -> new HashMap<>());
         putOrRemoveZero(values, playerUuid, amount);
@@ -84,59 +89,71 @@ public final class PlayerProgressionData extends SavedData {
         setDirty();
     }
 
+    // Check whether one player has already purchased a personal tree node.
     public boolean isSkillUnlocked(UUID playerUuid, String skillId) {
         return unlockedSkills.getOrDefault(playerUuid, Set.of()).contains(skillId);
     }
 
+    // Persist one personal unlock after its complete purchase has succeeded.
     public void unlockSkill(UUID playerUuid, String skillId) {
         unlockedSkills.computeIfAbsent(playerUuid, ignored -> new HashSet<>()).add(skillId);
         setDirty();
     }
 
+    // Return an immutable snapshot of one player's personal unlock keys.
     public Set<String> unlockedSkills(UUID playerUuid) {
         return Set.copyOf(unlockedSkills.getOrDefault(playerUuid, Set.of()));
     }
 
+    // Test a namespaced claim ledger for a previously recorded unique reward identifier.
     public boolean hasClaim(UUID playerUuid, Identifier ledgerId, String claimId) {
         return claims.getOrDefault(ledgerId.toString(), Map.of()).getOrDefault(playerUuid, Set.of()).contains(claimId);
     }
 
+    // Count lifetime claims in one ledger without being affected by later currency spending.
     public int claimCount(UUID playerUuid, Identifier ledgerId) {
         return claims.getOrDefault(ledgerId.toString(), Map.of()).getOrDefault(playerUuid, Set.of()).size();
     }
 
+    // Record a unique claim in its ledger and mark the player progression save dirty.
     public void addClaim(UUID playerUuid, Identifier ledgerId, String claimId) {
         claims.computeIfAbsent(ledgerId.toString(), ignored -> new HashMap<>())
                 .computeIfAbsent(playerUuid, ignored -> new HashSet<>()).add(claimId);
         setDirty();
     }
 
+    // Merge a decoded fixed-format balance only when generic state does not already contain that player.
     private void mergeLegacyBalance(String currencyId, Map<UUID, Long> values) {
         if (!values.isEmpty()) copyBalances(values, balances.computeIfAbsent(currencyId, ignored -> new HashMap<>()));
     }
 
+    // Copy positive balances while preserving values already decoded from the new generic format.
     private static void copyBalances(Map<UUID, Long> source, Map<UUID, Long> target) {
         source.forEach((uuid, amount) -> { if (amount > 0L) target.putIfAbsent(uuid, amount); });
     }
 
+    // Deep-copy UUID-to-set mappings so decoded collections remain mutable and independently owned.
     private static Map<UUID, Set<String>> copySets(Map<UUID, Set<String>> source) {
         Map<UUID, Set<String>> copy = new HashMap<>();
         source.forEach((uuid, entries) -> copy.put(uuid, new HashSet<>(entries)));
         return copy;
     }
 
+    // Convert serialized lists to sets to eliminate duplicate identifiers at runtime.
     private static Map<UUID, Set<String>> toSets(Map<UUID, List<String>> storedValues) {
         Map<UUID, Set<String>> values = new HashMap<>();
         storedValues.forEach((uuid, entries) -> values.put(uuid, new HashSet<>(entries)));
         return values;
     }
 
+    // Convert identifier sets to sorted lists for deterministic SavedData output.
     private static Map<UUID, List<String>> toLists(Map<UUID, Set<String>> values) {
         Map<UUID, List<String>> stored = new HashMap<>();
         values.forEach((uuid, entries) -> stored.put(uuid, entries.stream().sorted().toList()));
         return stored;
     }
 
+    // Store positive balances and remove zero balances rather than serializing redundant entries.
     private static void putOrRemoveZero(Map<UUID, Long> values, UUID playerUuid, long amount) {
         if (amount == 0L) values.remove(playerUuid); else values.put(playerUuid, amount);
     }

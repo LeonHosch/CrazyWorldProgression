@@ -7,6 +7,8 @@ public class CrazyWorldProgressionClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		// Client initialization remains visible here so startup ownership is easy to follow.
+		AdminPanelClient.initialize();
+		AreaSelectionClient.initialize();
 		SkillTreeClient.initialize();
 	}
 }

@@ -20,13 +20,16 @@ import java.util.Collection;
 import java.util.UUID;
 
 public final class CurrencyCommands {
+    // Prevent instantiation of the command-tree generator.
     private CurrencyCommands() {
     }
 
+    // Generate commands for every currency currently registered by dependent mods.
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         for (CurrencyDefinition currency : CurrencyRegistry.values()) registerCurrency(dispatcher, currency);
     }
 
+    // Register a primary command and redirect every configured alias to that same command tree.
     private static void registerCurrency(CommandDispatcher<CommandSourceStack> dispatcher, CurrencyDefinition currency) {
         String primaryName = currency.commands().getFirst();
         var primary = dispatcher.register(buildCommand(primaryName, currency));
@@ -35,6 +38,7 @@ public final class CurrencyCommands {
         }
     }
 
+    // Build balance inspection plus operator give, take, and set branches appropriate to the currency scope.
     private static LiteralArgumentBuilder<CommandSourceStack> buildCommand(String name, CurrencyDefinition currency) {
         LiteralArgumentBuilder<CommandSourceStack> command = Commands.literal(name)
                 .executes(context -> showOwn(context, currency));
@@ -48,6 +52,7 @@ public final class CurrencyCommands {
                 .then(mutation("set", currency, ChangeType.SET, 0L));
     }
 
+    // Build one operator-only mutation branch, requiring targets only for player-owned wallets.
     private static LiteralArgumentBuilder<CommandSourceStack> mutation(String name, CurrencyDefinition currency,
                                                                         ChangeType type, long minimum) {
         var amount = Commands.argument("amount", LongArgumentType.longArg(minimum));
@@ -60,6 +65,7 @@ public final class CurrencyCommands {
         return Commands.literal(name).requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).then(amount);
     }
 
+    // Show the shared balance for a global currency or the executing player's personal balance.
     private static int showOwn(CommandContext<CommandSourceStack> context, CurrencyDefinition currency)
             throws CommandSyntaxException {
         UUID player = currency.scope() == CurrencyDefinition.CurrencyScope.GLOBAL
@@ -70,6 +76,7 @@ public final class CurrencyCommands {
         return 1;
     }
 
+    // Display a player-owned currency for every profile selected by an administrator.
     private static int showTargets(CommandContext<CommandSourceStack> context, CurrencyDefinition currency)
             throws CommandSyntaxException {
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
@@ -81,6 +88,7 @@ public final class CurrencyCommands {
         return profiles.size();
     }
 
+    // Apply one parsed mutation to every unique profile returned by the target selector.
     private static int changeTargets(CommandContext<CommandSourceStack> context, CurrencyDefinition currency, ChangeType type)
             throws CommandSyntaxException {
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
@@ -89,6 +97,7 @@ public final class CurrencyCommands {
         return changed;
     }
 
+    // Execute one wallet mutation and report its before-and-after values, including overflow failure.
     private static int change(CommandContext<CommandSourceStack> context, CurrencyDefinition currency,
                               ChangeType type, UUID playerUuid) {
         long amount = LongArgumentType.getLong(context, "amount");

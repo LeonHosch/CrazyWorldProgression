@@ -11,9 +11,11 @@ public final class CurrencyRegistry {
     private static final Map<Identifier, CurrencyDefinition> CURRENCIES = new LinkedHashMap<>();
     private static final Map<String, Identifier> COMMAND_OWNERS = new LinkedHashMap<>();
 
+    // Prevent creation of registry instances; all mods share this process-wide registration table.
     private CurrencyRegistry() {
     }
 
+    // Add one definition while rejecting identifiers and command aliases already claimed by another currency.
     public static synchronized CurrencyDefinition register(CurrencyDefinition currency) {
         for (String command : currency.commands()) {
             Identifier owner = COMMAND_OWNERS.get(command);
@@ -28,10 +30,12 @@ public final class CurrencyRegistry {
         return currency;
     }
 
+    // Look up a definition without failing when an optional integration has not registered it.
     public static synchronized CurrencyDefinition get(Identifier id) {
         return CURRENCIES.get(id);
     }
 
+    // Resolve a required definition and fail early with the missing identifier in the error message.
     public static synchronized CurrencyDefinition require(Identifier id) {
         CurrencyDefinition currency = get(id);
         if (currency == null) {
@@ -40,6 +44,7 @@ public final class CurrencyRegistry {
         return currency;
     }
 
+    // Return currencies in registration order so commands and GUI balance rows remain deterministic.
     public static synchronized List<CurrencyDefinition> values() {
         return List.copyOf(CURRENCIES.values());
     }

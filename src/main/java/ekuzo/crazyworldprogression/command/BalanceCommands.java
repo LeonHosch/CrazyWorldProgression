@@ -18,9 +18,11 @@ import java.util.Collection;
 import java.util.UUID;
 
 public final class BalanceCommands {
+    // Prevent instantiation of this command utility.
     private BalanceCommands() {
     }
 
+    // Register public self-inspection and operator-only target inspection under /balance.
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("balance").executes(BalanceCommands::showOwn)
                 .then(Commands.argument("targets", GameProfileArgument.gameProfile())
@@ -28,18 +30,21 @@ public final class BalanceCommands {
                         .executes(BalanceCommands::showTargets)));
     }
 
+    // Show every registered balance visible for the executing player's UUID.
     private static int showOwn(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
         showAll(context.getSource(), player.getUUID(), "Balances");
         return 1;
     }
 
+    // Show all balances for each administrator-selected profile, including shared global wallets.
     private static int showTargets(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         Collection<NameAndId> profiles = GameProfileArgument.getGameProfiles(context, "targets");
         for (NameAndId profile : profiles) showAll(context.getSource(), profile.id(), "Balances for " + profile.name());
         return profiles.size();
     }
 
+    // Render a heading followed by all currencies in deterministic registry order.
     private static void showAll(CommandSourceStack source, UUID playerUuid, String heading) {
         source.sendSuccess(() -> Component.literal(heading).withStyle(ChatFormatting.BOLD), false);
         for (CurrencyDefinition currency : CurrencyRegistry.values()) {
@@ -47,6 +52,7 @@ public final class BalanceCommands {
         }
     }
 
+    // Send one consistently colored name-and-amount line used by both balance command classes.
     static void sendBalance(CommandSourceStack source, CurrencyDefinition currency, long amount) {
         source.sendSuccess(() -> Component.literal(currency.displayName() + ": ").withStyle(currency.color())
                 .append(Component.literal(Long.toString(amount)).withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD)), false);

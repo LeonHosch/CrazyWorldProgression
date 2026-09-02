@@ -19,6 +19,7 @@ public record CurrencyDefinition(
         ChatFormatting color,
         List<String> commands
 ) {
+    // Validate and normalize extension-provided metadata before it enters the global registry.
     public CurrencyDefinition {
         if (displayName.isBlank() || abbreviation.isBlank()) {
             throw new IllegalArgumentException("Currency names must not be blank");

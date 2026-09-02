@@ -1,8 +1,17 @@
 package ekuzo.crazyworldprogression;
 
+import ekuzo.crazyworldprogression.admin.AdminPanelNetworking;
+import ekuzo.crazyworldprogression.admin.CwpAdminModule;
 import ekuzo.crazyworldprogression.command.BalanceCommands;
 import ekuzo.crazyworldprogression.command.CurrencyCommands;
+import ekuzo.crazyworldprogression.command.CwpAdminCommands;
+import ekuzo.crazyworldprogression.command.PortalCommands;
 import ekuzo.crazyworldprogression.command.SkillTreeCommands;
+import ekuzo.crazyworldprogression.events.RandomEventManager;
+import ekuzo.crazyworldprogression.events.RandomEventService;
+import ekuzo.crazyworldprogression.portals.PortalService;
+import ekuzo.crazyworldprogression.selection.AreaSelectionService;
+import ekuzo.crazyworldprogression.selection.AreaSelectionNetworking;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -10,6 +19,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.resources.Identifier;
 
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillStatRegistry;
+import ekuzo.crazyworldprogression.progression.skilltrees.BaselineStatRegistry;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeManager;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeNetworking;
 
@@ -35,17 +45,31 @@ public class CrazyWorldProgression implements ModInitializer {
 
 		// Gameplay systems listen for server events, while commands expose progression state to players and admins.
 		SkillStatRegistry.initialize();
+		RandomEventService.initialize();
+		PortalService.initialize();
+		AreaSelectionNetworking.registerPayloadType();
+		AreaSelectionNetworking.registerServerReceiver();
+		AreaSelectionService.initialize();
+		AdminPanelNetworking.registerPayloadTypes();
+		AdminPanelNetworking.registerServerReceivers();
+		CwpAdminModule.register();
 		SkillTreeNetworking.registerPayloadTypes();
 		SkillTreeNetworking.registerServerReceivers();
 
 		// Load authoritative YAML only when a server starts, so remote clients never depend on local copies.
-		ServerLifecycleEvents.SERVER_STARTING.register(server -> SkillTreeManager.initialize());
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> {
+			BaselineStatRegistry.reload();
+			SkillTreeManager.initialize();
+			RandomEventManager.reload();
+		});
 
 		// Register all server commands through one callback while keeping startup ownership in this entrypoint.
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
 			BalanceCommands.register(dispatcher);
 			CurrencyCommands.register(dispatcher);
 			SkillTreeCommands.register(dispatcher);
+			CwpAdminCommands.register(dispatcher);
+			PortalCommands.registerPlayer(dispatcher);
 		});
 	}
 

@@ -8,9 +8,11 @@ import java.util.UUID;
 
 /** Optional generic claim ledger for currencies awarded by unique game events. */
 public final class ClaimLedgerService {
+    // Prevent instantiation of the claim-ledger facade.
     private ClaimLedgerService() {
     }
 
+    // Record one unique claim when neither the identifier nor the configured lifetime limit blocks it.
     public static ClaimResult claim(MinecraftServer server, UUID playerUuid, Identifier ledgerId,
                                     Identifier claimId, int maximumClaims) {
         if (maximumClaims < 0) throw new IllegalArgumentException("Maximum claims must not be negative");

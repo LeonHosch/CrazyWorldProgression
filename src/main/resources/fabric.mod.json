@@ -3,7 +3,7 @@
 	"id": "crazy-world-progression",
 	"version": "${version}",
 	"name": "Crazy World Progression",
-	"description": "Extensible currency wallets, YAML skill trees, and random-event scheduling for Fabric mods.",
+	"description": "Currency wallets, YAML skill trees, random events, portals, and MobForge mob encounters for Fabric mods.",
 	"authors": [
 		"Leon Hosch"
 	],
@@ -23,7 +23,8 @@
 		]
 	},
 	"mixins": [
-		"crazy-world-progression.mixins.json"
+		"crazy-world-progression.mixins.json",
+		"mobforge.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.19.3",

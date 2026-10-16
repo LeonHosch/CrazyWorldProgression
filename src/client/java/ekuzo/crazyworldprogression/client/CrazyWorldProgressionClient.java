@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.client;
 
+import ekuzo.crazyworldprogression.mobforge.client.MobForgeClient;
 import net.fabricmc.api.ClientModInitializer;
 
 public class CrazyWorldProgressionClient implements ClientModInitializer {
@@ -10,5 +11,9 @@ public class CrazyWorldProgressionClient implements ClientModInitializer {
 		AdminPanelClient.initialize();
 		AreaSelectionClient.initialize();
 		SkillTreeClient.initialize();
+		PortalClientRenderer.initialize();
+		PortalEntryPromptClient.initialize();
+		PortalGroupClient.initialize();
+		MobForgeClient.initialize();
 	}
 }

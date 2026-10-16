@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression;
 
+import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.admin.AdminPanelNetworking;
 import ekuzo.crazyworldprogression.admin.CwpAdminModule;
 import ekuzo.crazyworldprogression.command.BalanceCommands;
@@ -10,6 +11,7 @@ import ekuzo.crazyworldprogression.command.SkillTreeCommands;
 import ekuzo.crazyworldprogression.events.RandomEventManager;
 import ekuzo.crazyworldprogression.events.RandomEventService;
 import ekuzo.crazyworldprogression.portals.PortalService;
+import ekuzo.crazyworldprogression.portals.PortalNetworking;
 import ekuzo.crazyworldprogression.selection.AreaSelectionService;
 import ekuzo.crazyworldprogression.selection.AreaSelectionNetworking;
 import net.fabricmc.api.ModInitializer;
@@ -46,6 +48,8 @@ public class CrazyWorldProgression implements ModInitializer {
 		// Gameplay systems listen for server events, while commands expose progression state to players and admins.
 		SkillStatRegistry.initialize();
 		RandomEventService.initialize();
+		PortalNetworking.registerPayloadType();
+		PortalNetworking.registerServerReceiver();
 		PortalService.initialize();
 		AreaSelectionNetworking.registerPayloadType();
 		AreaSelectionNetworking.registerServerReceiver();
@@ -55,6 +59,7 @@ public class CrazyWorldProgression implements ModInitializer {
 		CwpAdminModule.register();
 		SkillTreeNetworking.registerPayloadTypes();
 		SkillTreeNetworking.registerServerReceivers();
+		MobForge.initialize();
 
 		// Load authoritative YAML only when a server starts, so remote clients never depend on local copies.
 		ServerLifecycleEvents.SERVER_STARTING.register(server -> {

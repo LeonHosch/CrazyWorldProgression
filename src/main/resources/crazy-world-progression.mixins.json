@@ -6,6 +6,10 @@
     "LivingEntityMixin",
     "ServerPlayerMixin"
   ],
+  "client": [
+    "client.RenderPipelinesAccessor",
+    "client.RenderTypeAccessor"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

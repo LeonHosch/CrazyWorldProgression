@@ -1,0 +1,285 @@
+package ekuzo.crazyworldprogression.client;
+
+import com.mojang.blaze3d.PrimitiveTopology;
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.ColorTargetState;
+import com.mojang.blaze3d.pipeline.DepthStencilState;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.CompareOp;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import ekuzo.crazyworldprogression.CrazyWorldProgression;
+import ekuzo.crazyworldprogression.mixin.client.RenderPipelinesAccessor;
+import ekuzo.crazyworldprogression.mixin.client.RenderTypeAccessor;
+import ekuzo.crazyworldprogression.portals.PortalDefinition;
+import ekuzo.crazyworldprogression.portals.PortalNetworking;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.BindGroupLayouts;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/** Receives portal snapshots and renders each open portal as a solid, flat-colored two-sided surface. */
+public final class PortalClientRenderer {
+    private static final double RENDER_DISTANCE_SQUARED = 256.0 * 256.0;
+    private static final double PARTICLE_DISTANCE_SQUARED = 96.0 * 96.0;
+    private static final int ELLIPSE_SEGMENTS = 48;
+    private static final int SURFACE_ALPHA = 64;
+    private static final Map<String, CachedMesh> CACHE = new HashMap<>();
+    private static volatile List<PortalNetworking.PortalSnapshot> portals = List.of();
+    private static int particleTick;
+    private static final RenderPipeline PORTAL_PIPELINE = RenderPipelinesAccessor.cwp$register(
+            RenderPipeline.builder()
+                    .withLocation(CrazyWorldProgression.id("pipeline/translucent_portal"))
+                    .withBindGroupLayout(BindGroupLayouts.GLOBALS)
+                    .withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
+                    .withVertexShader("core/position_color")
+                    .withFragmentShader("core/position_color")
+                    .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+                    .withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR)
+                    .withPrimitiveTopology(PrimitiveTopology.QUADS)
+                    .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, true))
+                    .withCull(false)
+                    .build());
+    private static final RenderType PORTAL_RENDER_TYPE = RenderTypeAccessor.cwp$create(
+            "cwp_translucent_portal", RenderSetup.builder(PORTAL_PIPELINE).createRenderSetup());
+
+    // Prevent construction of the static client portal renderer.
+    private PortalClientRenderer() {
+    }
+
+    // Register portal snapshot lifecycle handling and world geometry submission.
+    public static void initialize() {
+        ClientPlayNetworking.registerGlobalReceiver(PortalNetworking.PortalSnapshotPayload.TYPE,
+                (payload, context) -> replaceSnapshot(PortalNetworking.decode(payload.json())));
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> replaceSnapshot(List.of()));
+        LevelRenderEvents.COLLECT_SUBMITS.register(PortalClientRenderer::submit);
+        ClientTickEvents.END_CLIENT_TICK.register(PortalClientRenderer::spawnBorderParticles);
+    }
+
+    // Atomically replace render state and discard cached meshes for removed or resized portals.
+    private static void replaceSnapshot(List<PortalNetworking.PortalSnapshot> replacement) {
+        portals = replacement;
+        synchronized (CACHE) {
+            CACHE.keySet().retainAll(replacement.stream().map(PortalNetworking.PortalSnapshot::id).toList());
+        }
+    }
+
+    // Submit nearby open portals in the current client dimension.
+    private static void submit(LevelRenderContext context) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) return;
+        String dimension = minecraft.level.dimension().identifier().toString();
+        Vec3 camera = context.levelState().cameraRenderState.pos;
+        for (PortalNetworking.PortalSnapshot portal : portals) {
+            if (!portal.open() || !portal.dimension().equals(dimension)
+                    || camera.distanceToSqr(portal.centerX(), portal.centerY(), portal.centerZ())
+                    > RENDER_DISTANCE_SQUARED) continue;
+            Mesh mesh = mesh(portal);
+            submitMesh(context, camera, portal, mesh);
+        }
+    }
+
+    // Resolve or rebuild the local-space mesh for one portal geometry revision.
+    private static Mesh mesh(PortalNetworking.PortalSnapshot portal) {
+        int geometryHash = java.util.Objects.hash(portal.shape(), portal.plane(), portal.width(), portal.height());
+        synchronized (CACHE) {
+            CachedMesh cached = CACHE.get(portal.id());
+            if (cached == null || cached.geometryHash() != geometryHash) {
+                cached = new CachedMesh(geometryHash, buildMesh(portal));
+                CACHE.put(portal.id(), cached);
+            }
+            return cached.mesh();
+        }
+    }
+
+    // Translate local geometry to camera space and submit one uniformly colored render node.
+    private static void submitMesh(LevelRenderContext context, Vec3 camera,
+                                   PortalNetworking.PortalSnapshot portal, Mesh mesh) {
+        PoseStack poseStack = context.poseStack();
+        poseStack.pushPose();
+        poseStack.translate(portal.centerX() - camera.x, portal.centerY() - camera.y, portal.centerZ() - camera.z);
+        int color = SURFACE_ALPHA << 24 | portal.colorRgb();
+        context.submitNodeCollector().submitCustomGeometry(poseStack, PORTAL_RENDER_TYPE,
+                (pose, vertices) -> emit(pose, vertices, mesh.vertices(), color));
+        poseStack.popPose();
+    }
+
+    // Spawn a dense client-only ring of white vanilla particles around nearby open portal boundaries.
+    private static void spawnBorderParticles(Minecraft minecraft) {
+        if (minecraft.level == null || minecraft.player == null || ++particleTick % 2 != 0) return;
+        String dimension = minecraft.level.dimension().identifier().toString();
+        RandomSource random = minecraft.level.getRandom();
+        for (PortalNetworking.PortalSnapshot portal : portals) {
+            if (!portal.open() || !portal.dimension().equals(dimension)
+                    || minecraft.player.distanceToSqr(portal.centerX(), portal.centerY(), portal.centerZ())
+                    > PARTICLE_DISTANCE_SQUARED) continue;
+            for (int sample = 0; sample < 5; sample++) {
+                Coordinate edge = randomBoundaryPoint(portal, random);
+                Vec3 point = worldPoint(portal, edge.u(), edge.v());
+                minecraft.level.addParticle(ParticleTypes.END_ROD, point.x, point.y, point.z,
+                        (random.nextDouble() - 0.5) * 0.012, (random.nextDouble() - 0.5) * 0.012,
+                        (random.nextDouble() - 0.5) * 0.012);
+            }
+        }
+    }
+
+    // Sample one point directly on the configured shape perimeter for a vanilla portal particle.
+    private static Coordinate randomBoundaryPoint(PortalNetworking.PortalSnapshot portal, RandomSource random) {
+        double halfWidth = portal.width() / 2.0;
+        double halfHeight = portal.height() / 2.0;
+        double progress = random.nextDouble();
+        return switch (PortalDefinition.Shape.parse(portal.shape())) {
+            case ELLIPSE -> coordinate(Math.cos(progress * Math.PI * 2.0) * halfWidth,
+                    Math.sin(progress * Math.PI * 2.0) * halfHeight);
+            case RECTANGLE -> interpolateBoundary(List.of(coordinate(-halfWidth, -halfHeight),
+                    coordinate(halfWidth, -halfHeight), coordinate(halfWidth, halfHeight),
+                    coordinate(-halfWidth, halfHeight)), progress);
+            case DIAMOND -> interpolateBoundary(List.of(coordinate(0.0, halfHeight),
+                    coordinate(halfWidth, 0.0), coordinate(0.0, -halfHeight),
+                    coordinate(-halfWidth, 0.0)), progress);
+            case TRIANGLE -> interpolateBoundary(List.of(coordinate(-halfWidth, -halfHeight),
+                    coordinate(halfWidth, -halfHeight), coordinate(0.0, halfHeight)), progress);
+        };
+    }
+
+    // Interpolate around one closed polygon edge loop using an evenly selected side.
+    private static Coordinate interpolateBoundary(List<Coordinate> vertices, double progress) {
+        double scaled = progress * vertices.size();
+        int index = Math.min(vertices.size() - 1, (int) scaled);
+        Coordinate first = vertices.get(index);
+        Coordinate second = vertices.get((index + 1) % vertices.size());
+        double local = scaled - index;
+        return coordinate(first.u() + (second.u() - first.u()) * local,
+                first.v() + (second.v() - first.v()) * local);
+    }
+
+    // Convert portal-local boundary coordinates into the portal's world-space plane.
+    private static Vec3 worldPoint(PortalNetworking.PortalSnapshot portal, double u, double v) {
+        return switch (PortalDefinition.Plane.parse(portal.plane())) {
+            case XY -> new Vec3(portal.centerX() + u, portal.centerY() + v, portal.centerZ());
+            case XZ -> new Vec3(portal.centerX() + u, portal.centerY(), portal.centerZ() + v);
+            case YZ -> new Vec3(portal.centerX(), portal.centerY() + v, portal.centerZ() + u);
+        };
+    }
+
+    // Emit every face in both winding directions so either approach side is fully visible.
+    private static void emit(PoseStack.Pose pose, VertexConsumer consumer, List<Vertex> mesh, int color) {
+        for (int index = 0; index < mesh.size(); index += 4) {
+            Vertex a = mesh.get(index);
+            Vertex b = mesh.get(index + 1);
+            Vertex c = mesh.get(index + 2);
+            Vertex d = mesh.get(index + 3);
+            vertex(consumer, pose, a, color);
+            vertex(consumer, pose, b, color);
+            vertex(consumer, pose, c, color);
+            vertex(consumer, pose, d, color);
+            vertex(consumer, pose, d, color);
+            vertex(consumer, pose, c, color);
+            vertex(consumer, pose, b, color);
+            vertex(consumer, pose, a, color);
+        }
+    }
+
+    // Write one local mesh position in the portal's selected two-dimensional plane.
+    private static void vertex(VertexConsumer consumer, PoseStack.Pose pose, Vertex vertex, int color) {
+        consumer.addVertex(pose, vertex.x(), vertex.y(), vertex.z()).setColor(color);
+    }
+
+    // Build a filled quad mesh matching the portal's configured two-dimensional shape.
+    private static Mesh buildMesh(PortalNetworking.PortalSnapshot portal) {
+        List<Vertex> fill = new ArrayList<>();
+        double halfWidth = portal.width() / 2.0;
+        double halfHeight = portal.height() / 2.0;
+        PortalDefinition.Plane plane = PortalDefinition.Plane.parse(portal.plane());
+        switch (PortalDefinition.Shape.parse(portal.shape())) {
+            case RECTANGLE -> buildPolygon(fill, plane, List.of(coordinate(-halfWidth, -halfHeight),
+                    coordinate(halfWidth, -halfHeight), coordinate(halfWidth, halfHeight),
+                    coordinate(-halfWidth, halfHeight)));
+            case ELLIPSE -> buildEllipse(fill, plane, halfWidth, halfHeight);
+            case DIAMOND -> buildPolygon(fill, plane, List.of(coordinate(0.0, halfHeight),
+                    coordinate(halfWidth, 0.0), coordinate(0.0, -halfHeight),
+                    coordinate(-halfWidth, 0.0)));
+            case TRIANGLE -> buildPolygon(fill, plane, List.of(coordinate(-halfWidth, -halfHeight),
+                    coordinate(halfWidth, -halfHeight), coordinate(0.0, halfHeight)));
+        }
+        return new Mesh(List.copyOf(fill));
+    }
+
+    // Tessellate a filled ellipse from a smooth perimeter loop.
+    private static void buildEllipse(List<Vertex> fill, PortalDefinition.Plane plane,
+                                     double halfWidth, double halfHeight) {
+        List<Coordinate> outer = new ArrayList<>();
+        for (int segment = 0; segment < ELLIPSE_SEGMENTS; segment++) {
+            double angle = Math.PI * 2.0 * segment / ELLIPSE_SEGMENTS;
+            outer.add(coordinate(Math.cos(angle) * halfWidth, Math.sin(angle) * halfHeight));
+        }
+        buildPolygon(fill, plane, outer);
+    }
+
+    // Fill one convex edge loop as a center-based fan.
+    private static void buildPolygon(List<Vertex> fill, PortalDefinition.Plane plane,
+                                     List<Coordinate> outerCoordinates) {
+        List<Vertex> outer = outerCoordinates.stream().map(value -> point(plane, value.u(), value.v())).toList();
+        polygon(fill, point(plane, 0.0, 0.0), outer);
+    }
+
+    // Fill a convex polygon as a center-based fan using degenerate quads.
+    private static void polygon(List<Vertex> out, Vertex center, List<Vertex> edge) {
+        for (int index = 0; index < edge.size(); index++) {
+            triangle(out, center, edge.get(index), edge.get((index + 1) % edge.size()));
+        }
+    }
+
+    // Append a triangle in the quad topology by repeating its final vertex.
+    private static void triangle(List<Vertex> out, Vertex a, Vertex b, Vertex c) {
+        quad(out, a, b, c, c);
+    }
+
+    // Append one four-position face to the mesh under construction.
+    private static void quad(List<Vertex> out, Vertex a, Vertex b, Vertex c, Vertex d) {
+        out.add(a);
+        out.add(b);
+        out.add(c);
+        out.add(d);
+    }
+
+    // Map portal-local width and height coordinates onto its configured world plane.
+    private static Vertex point(PortalDefinition.Plane plane, double u, double v) {
+        return switch (plane) {
+            case XY -> new Vertex((float) u, (float) v, 0.0F);
+            case XZ -> new Vertex((float) u, 0.0F, (float) v);
+            case YZ -> new Vertex(0.0F, (float) v, (float) u);
+        };
+    }
+
+    // Create one convenient portal-local coordinate before its plane is known.
+    private static Coordinate coordinate(double u, double v) {
+        return new Coordinate(u, v);
+    }
+
+    private record Vertex(float x, float y, float z) {
+    }
+
+    private record Coordinate(double u, double v) {
+    }
+
+    private record Mesh(List<Vertex> vertices) {
+    }
+
+    private record CachedMesh(int geometryHash, Mesh mesh) {
+    }
+}

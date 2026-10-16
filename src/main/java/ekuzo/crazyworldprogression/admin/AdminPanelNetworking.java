@@ -60,7 +60,10 @@ public final class AdminPanelNetworking {
                         : exception.getMessage();
                 result = AdminPanelRegistry.ActionResult.failure(message);
             }
-            send(player, payload.moduleId(), payload.pageId(), result.message(), result.error());
+            if (!result.refresh()) return;
+            String responsePage = result.targetPage() == null || result.targetPage().isBlank()
+                    ? payload.pageId() : result.targetPage();
+            send(player, payload.moduleId(), responsePage, result.message(), result.error());
         });
     }
 

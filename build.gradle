@@ -50,7 +50,15 @@ dependencies {
 	// Parse editable skill-tree configuration files and bundle the parser with the mod.
 	implementation "org.yaml:snakeyaml:2.6"
 	include "org.yaml:snakeyaml:2.6"
+	// MobForge's YAML codec uses SnakeYAML Engine; ship it in the CWP jar.
+	include implementation("org.snakeyaml:snakeyaml-engine:2.9")
+
+	testImplementation platform("org.junit:junit-bom:5.11.4")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
+
+test { useJUnitPlatform() }
 
 processResources {
 	def version = project.version

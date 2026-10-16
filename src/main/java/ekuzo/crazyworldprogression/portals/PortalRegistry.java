@@ -2,6 +2,7 @@ package ekuzo.crazyworldprogression.portals;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.MinecraftServer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,10 +41,10 @@ public final class PortalRegistry {
     }
 
     // Notify integrations after a template was successfully reconstructed.
-    static synchronized void created(PortalService.ActiveInstance instance) {
+    static synchronized void created(MinecraftServer server, PortalService.ActiveInstance instance) {
         for (InstanceListener listener : LISTENERS) {
             try {
-                listener.onCreated(instance);
+                listener.onCreated(server, instance);
             } catch (RuntimeException exception) {
                 CrazyWorldProgression.LOGGER.error("Portal instance listener failed during creation of {}",
                         instance.portalId(), exception);
@@ -52,10 +53,10 @@ public final class PortalRegistry {
     }
 
     // Notify integrations immediately before an expired instance is cleared.
-    static synchronized void expiring(PortalService.ActiveInstance instance) {
+    static synchronized void expiring(MinecraftServer server, PortalService.ActiveInstance instance) {
         for (InstanceListener listener : LISTENERS) {
             try {
-                listener.onExpiring(instance);
+                listener.onExpiring(server, instance);
             } catch (RuntimeException exception) {
                 CrazyWorldProgression.LOGGER.error("Portal instance listener failed during expiry of {}",
                         instance.portalId(), exception);
@@ -65,6 +66,8 @@ public final class PortalRegistry {
 
     /** Optional gameplay hooks implemented by content mods without moving their logic into CWP. */
     public interface InstanceListener {
+        default void onCreated(MinecraftServer server, PortalService.ActiveInstance instance) { onCreated(instance); }
+        default void onExpiring(MinecraftServer server, PortalService.ActiveInstance instance) { onExpiring(instance); }
         // React after the destination template exists and can safely receive gameplay state.
         default void onCreated(PortalService.ActiveInstance instance) {
         }

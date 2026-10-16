@@ -1,6 +1,6 @@
 # Crazy World Progression
 
-Crazy World Progression (CWP) is a Fabric framework for server-authoritative currencies, YAML-defined skill trees, persistent random-event scheduling, and temporary template-backed portal dimensions. It provides storage, validation, commands, networking, and a generic client UI while leaving game-specific content to dependent mods.
+Crazy World Progression (CWP) is a Fabric framework for server-authoritative currencies, YAML-defined skill trees, persistent random-event scheduling, temporary template-backed portal dimensions, and MobForge mob encounters. It provides storage, validation, commands, networking, and client editors while leaving game-specific content to dependent mods.
 
 CWP intentionally ships without currencies, skill trees, earning rules, roles, or world mechanics. [EchelonCore](https://github.com/LeonHosch/EchelonCore) is the reference implementation.
 
@@ -13,7 +13,7 @@ CWP intentionally ships without currencies, skill trees, earning rules, roles, o
 | Fabric Loader | 0.19.3 or newer |
 | Fabric API | 0.158.0+26.2 |
 
-CWP must be installed on both the client and server. Purchases and persistence are server-authoritative, but the skill-tree screen and its networking are client-side. Installing CWP alone is valid, although it has no content until another mod registers currencies and tree sources.
+CWP must be installed on both the client and server. Purchases and persistence are server-authoritative, while skill-tree and MobForge editors run on the client. CWP can load MobForge templates and scripts directly from YAML; currencies and skill trees are registered by a dependent mod.
 
 ## What CWP owns
 
@@ -31,6 +31,7 @@ CWP must be installed on both the client and server. Purchases and persistence a
 | Random-event schedules, blackout windows, and active state | Event definitions, effects, rendering, locations, waves, and rewards |
 | Portal template capture, storage, schedules, geometry, instance slots, reconstruction, expiry, and cleanup | The builds captured as templates and any gameplay attached through lifecycle listeners |
 | Shared click-driven cuboid selection and private visualization | The workflows that consume a selected area |
+| MobForge template and script YAML, mob spawning, AI control, commands, and editors | Mob templates and encounter scripts |
 
 The server startup flow is:
 
@@ -54,6 +55,10 @@ For a normal Minecraft instance, place these files in the instance's `mods` dire
 3. At least one content mod that uses CWP, such as EchelonCore
 
 Use the same CWP and content-mod versions on the client and server.
+
+MobForge is built into the CWP JAR. Remove the old `mobforge-<version>.jar` from client and server `mods` folders when upgrading; keep existing `config/mobforge/templates/` and `config/mobforge/scripts/` files. The **MobForge** tab in `/cwp admin` opens the mob and script editors, including all supported script step types. The `/mobforge` commands and YAML format remain available. See [MobForge commands and examples](docs/mobforge.md).
+
+Content mods can also register custom MobForge definitions, abilities, and behaviors through the [MobForge developer API](docs/mobforge-api.md). The [architecture rules](docs/architecture.md) keep content and framework responsibilities separate.
 
 ## Using CWP from another mod
 
@@ -392,7 +397,7 @@ CWP directly owns portal templates. `/cwp portals workshop enter` opens a dedica
 
 ```text
 /cwp portals templates capture forgotten_vault -20 60 -20 20 90 20 0 65 0
-/cwp portals create vault_gate forgotten_vault ellipse xy 4 6 90
+/cwp portals create vault_gate forgotten_vault ellipse xy 4 6 90 purple
 ```
 
 The second command creates a 4-by-6 vertical ellipse centered at the command source. Its reconstructed dimension lasts at most 90 real-time minutes from the first entry. Coordinates may use normal relative `~` notation. The capture entry block must lie inside the selected cuboid.
@@ -403,7 +408,7 @@ Use `/cwp portals workshop leave` to return to the position from which you enter
 
 The Pockets page in `/cwp admin` provides the command-free authoring workflow. Enter the workshop, press **Select**, then left-click the first block and right-click the opposite block. CWP reserves those clicks so the blocks are not broken, placed, or opened, and draws a private end-rod wireframe around the selected cuboid. Stand at the intended arrival position and press **Set spawn**; the spawn must be inside the selection and is marked with soul-fire particles. **Save draft** requires this explicit spawn and captures the selected area under the template ID in the form. **Clear area** removes the selected workshop draft in bounded server-tick batches after a destructive-action confirmation.
 
-Portal authoring has its own Portals page. Portal IDs, linked templates, geometry, lifetime, placement, removal, and both schedule types are kept separate from pocket-template management. Shape and plane are constrained dropdowns that expose every supported value, preventing invalid free-form input. **Create here** and **Move here** place the portal at the administrator's current position without a command.
+Portal authoring has its own Portals page. Portal IDs, names, descriptions, linked templates, geometry, flat render color, lifetime, placement, removal, and both schedule types are kept separate from pocket-template management. Shape, plane, and color are constrained dropdowns that expose every supported value, preventing invalid free-form input. **Create here** and **Move here** place the portal at the administrator's current position without a command.
 
 Portal shapes are `rectangle`, `ellipse`, `diamond`, and `triangle`. Their two-dimensional plane is one of:
 
@@ -413,7 +418,11 @@ Portal shapes are `rectangle`, `ellipse`, `diamond`, and `triangle`. Their two-d
 | `yz` | Z and Y, fixed X | East/west-facing vertical portal |
 | `xz` | X and Z, fixed Y | Horizontal floor or ceiling portal |
 
-Open portals display vanilla portal particles across their actual configured shape. Player entry is checked authoritatively against that same finite surface; there are no portal blocks or rectangular collision assumptions.
+Open portals are rendered client-side as filled, two-sided surfaces across their actual configured shape. The surface is approximately 75% transparent and uses a blended, depth-writing pipeline so clouds, water, and other later render passes cannot appear fully visible through it. Dense white vanilla end-rod particles trace the real rectangle, ellipse, diamond, or triangle boundary without server particle traffic. The built-in colors are `purple`, `pink`, `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `white`, and `black`; integrations can also construct a `PortalDefinition` with any 24-bit RGB value. Existing saved portals that predate the color field load as purple. Player entry remains checked authoritatively by the server against the same finite surface; there are no portal blocks or rectangular collision assumptions.
+
+Touching a portal opens a framed Minecraft-style confirmation screen instead of teleporting immediately. It shows the difficulty-colored `Travel to "Name"` heading, the configured description, one to five colored skulls, and the instance time. If that portal already owns a running instance, the remaining time is marked `(already running)`; otherwise the full configured lifetime is shown. The server keeps authority over the prompt and revalidates its portal, schedule, dimension, proximity, and expiry before accepting travel. Existing portals without presentation text derive a readable name from their ID and show a neutral missing-description message. Existing portals without an explicit difficulty default to one skull.
+
+Each portal also has a persistent per-player entry policy: `repeatable`, `once_per_instance`, or `once_ever`. Once-per-instance records are cleared only after the pocket expires, cleanup finishes, and its dimension slot is released. Once-ever records survive pocket resets and server restarts. Older portals default to repeatable behavior.
 
 Calendar and periodic gates are independent and combine with logical AND. For example:
 
@@ -424,7 +433,7 @@ Calendar and periodic gates are independent and combine with logical AND. For ex
 
 This portal is eligible on Fridays from 14:00 until 21:00 Berlin time, but within that range it only opens for 60 minutes in every 360-minute cycle. Quote IANA zones, clock values, and comma-separated weekday lists because they contain command punctuation, for example `"MONDAY,WEDNESDAY,FRIDAY"`. The first periodic window begins when the periodic command is executed. Overnight calendar windows are supported; equal start and end means the selected complete weekday. Use `clear-calendar` or `clear-periodic` to remove either restriction without changing the other.
 
-Minecraft cannot safely add and remove registry-backed dimensions while a server is already running. CWP therefore ships eight registered empty void dimensions and leases them as reusable instance slots. On first entry, it reconstructs the linked template in a free slot and remembers each player's source position. When the real-time lifetime expires—even if it elapsed while the server was offline—CWP closes entry, evacuates every player, removes non-player entities, clears the reconstructed blocks in batches of 8,192 per tick, and releases the slot for a fresh reconstruction. Up to eight portal instances can therefore be active concurrently; the number of stored templates and placed portals is not limited by the slot count.
+Minecraft cannot safely add and remove registry-backed dimensions while a server is already running. CWP therefore ships eight registered empty void dimensions and leases them as reusable instance slots. A public portal shares one running instance; a private portal creates a separate sealed instance for each group. On first entry, CWP reconstructs the linked template in a free slot and remembers each player's source position. When the real-time lifetime expires—even if it elapsed while the server was offline—CWP closes entry, evacuates every player, removes non-player entities, clears the reconstructed blocks in batches of 8,192 per tick, and releases the slot for a fresh reconstruction. Up to eight portal instances can therefore be active concurrently; the number of stored templates and placed portals is not limited by the slot count. See [public and private portal groups](docs/portal-groups.md).
 
 Players may intentionally leave an active instance with `/portal leave`. This returns them to their remembered entry position and clears any respawn point aimed at an instance slot. A player who disconnects inside a slot is returned when reconnecting, preventing an offline profile from becoming stranded in a cleared or subsequently reused instance. After a restart, when the runtime return position is unavailable, evacuation safely falls back to the overworld spawn.
 
@@ -489,7 +498,14 @@ CWP generates commands from every registered currency. In these examples, `renow
 | `/cwp portals templates capture <template> <from> <to> <spawn>` | Game master | Capture a cuboid and its relative entry block into CWP template storage |
 | `/cwp portals templates list` | Game master | List captured template sizes and entry offsets |
 | `/cwp portals workshop enter\|leave` | Game master | Enter or leave the persistent void template-authoring dimension |
-| `/cwp portals create <portal> <template> <shape> <plane> <width> <height> <lifetime_minutes>` | Game master | Place and directly link a portal at the command source |
+| `/cwp portals create <portal> <template> <shape> <plane> <width> <height> <lifetime_minutes> [color]` | Game master | Place and directly link a portal at the command source; color defaults to purple |
+| `/cwp portals color <portal> <color>` | Game master | Change an existing portal's flat render color |
+| `/cwp portals presentation <portal> <quoted_name> <description>` | Game master | Set the name and description shown before travel |
+| `/cwp portals entry-policy <portal> <repeatable|once_per_instance|once_ever>` | Game master | Configure per-player portal reuse and reset behavior |
+| `/cwp portals access <portal> public` | Game master | Share one running instance among all entrants |
+| `/cwp portals access <portal> private <max_players>` | Game master | Create sealed group instances with a player limit |
+| `/portal group [invite <player>|accept <leader>|leave|list]` | Player | Manage a pre-entry private portal group; bare command opens the group screen |
+| `/cwp portals difficulty <portal> <1-5>` | Game master | Set the skull rating and confirmation-screen color |
 | `/cwp portals move <portal> here` | Game master | Move a placed portal to the command source and dimension |
 | `/cwp portals link <portal> <template>` | Game master | Change the template used by future instances |
 | `/cwp portals lifetime <portal> <minutes>` | Game master | Change the lifetime used by future instances |
@@ -511,9 +527,11 @@ All identifier arguments use complete namespaced IDs such as `echelon-core:blood
 
 `/cwp admin` opens a server-authoritative dashboard. CWP contributes native pages for framework health, pocket dimensions, currencies, skill trees, and random events. It supports live refresh, scrollable status cards, reusable text fields, server-provided autocomplete suggestions, action feedback, and second-click confirmation for destructive controls. The server rechecks game-master permission for every page and action packet; hiding a button on the client is never treated as authorization.
 
-The Currency page lists registered currencies rather than every online-player wallet. Its shared form accepts an online player name with Tab completion and a non-negative amount; each currency row then provides **Give**, **Take**, and **Set**. Global currencies ignore the player field. Pockets includes workshop entry, click selection, explicit spawn selection, draft capture/clearing, templates, and live instances. Portals is a separate page for placement, constrained shape/plane selection, editing, scheduling, and placed-portal status.
+The Currency page lists registered currencies rather than every online-player wallet. Its shared form accepts an online player name with Tab completion and a non-negative amount; each currency row then provides **Give**, **Take**, and **Set**. Global currencies ignore the player field. Pockets includes workshop entry, click selection, explicit spawn selection, draft capture/clearing, templates, and live instances. Portals is a separate page for placement, constrained shape/plane/color selection, editing, scheduling, and placed-portal status.
 
 Dependent mods add a top-level button by registering an `AdminPanelRegistry.AdminModule` during common initialization. A module supplies identifying text, a default page, a page provider, and an action handler. Pages use CWP's neutral `AdminPage`, `AdminTab`, `AdminEntry`, `AdminField`, and `AdminAction` records, so extensions do not need their own screen classes, payloads, rendering code, or a CWP-side dependency on the content mod. Each action receives the submitted field-value map. Providers are evaluated on the server whenever an administrator navigates or refreshes, and action IDs are opaque values interpreted only by their owning module.
+
+Pages can request `STANDARD`, responsive `PREVIEW_CARDS`, or compact `EDITOR` presentation. Editor rows use explicit named sections, support text/select/read-only fields, and can expose full-width actions. An editor may declare an automatic field action: dropdowns submit immediately and text changes are combined after a short debounce, so the owner receives partial patches instead of fragile whole-form submissions. Preview cards can carry a small shape-and-color visual. Navigation actions open nested server-provided pages without pretending to be mutations, while action results may return the administrator to a different page after a successful operation.
 
 ## Persistence and authority
 

@@ -8,6 +8,8 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.portals.PortalDefinition;
+import ekuzo.crazyworldprogression.portals.PortalGroups;
+import ekuzo.crazyworldprogression.portals.PortalNetworking;
 import ekuzo.crazyworldprogression.portals.PortalRegistry;
 import ekuzo.crazyworldprogression.portals.PortalService;
 import ekuzo.crazyworldprogression.portals.PortalTemplateService;
@@ -35,6 +37,10 @@ import java.util.stream.Collectors;
 public final class PortalCommands {
     private static final List<String> SHAPES = List.of("rectangle", "ellipse", "diamond", "triangle");
     private static final List<String> PLANES = List.of("xy", "xz", "yz");
+    private static final List<String> COLORS = Arrays.stream(PortalDefinition.PortalColor.values())
+            .map(PortalDefinition.PortalColor::serializedName).toList();
+    private static final List<String> ENTRY_POLICIES = Arrays.stream(PortalDefinition.EntryPolicy.values())
+            .map(PortalDefinition.EntryPolicy::serializedName).toList();
 
     // Prevent instantiation of the command-tree owner.
     private PortalCommands() {
@@ -43,7 +49,15 @@ public final class PortalCommands {
     // Register the player-accessible emergency/intentional exit command.
     public static void registerPlayer(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("portal")
-                .then(Commands.literal("leave").executes(PortalCommands::leave)));
+                .then(Commands.literal("leave").executes(PortalCommands::leave))
+                .then(Commands.literal("group")
+                        .executes(PortalCommands::groupScreen)
+                        .then(Commands.literal("invite").then(Commands.argument("player", StringArgumentType.word())
+                                .executes(PortalCommands::groupInvite)))
+                        .then(Commands.literal("accept").then(Commands.argument("player", StringArgumentType.word())
+                                .executes(PortalCommands::groupAccept)))
+                        .then(Commands.literal("leave").executes(PortalCommands::groupLeave))
+                        .then(Commands.literal("list").executes(PortalCommands::groupList))));
     }
 
     // Build the game-master-only branch attached beneath CWP's existing /cwp root.
@@ -58,6 +72,24 @@ public final class PortalCommands {
                         .then(Commands.literal("here").executes(PortalCommands::moveHere))))
                 .then(Commands.literal("link").then(portalIdArgument().then(templateIdArgument()
                         .executes(PortalCommands::link))))
+                .then(Commands.literal("color").then(portalIdArgument()
+                        .then(colorArgument().executes(PortalCommands::color))))
+                .then(Commands.literal("presentation").then(portalIdArgument()
+                        .then(Commands.argument("name", StringArgumentType.string())
+                                .then(Commands.argument("description", StringArgumentType.greedyString())
+                                        .executes(PortalCommands::presentation)))))
+                .then(Commands.literal("entry-policy").then(portalIdArgument()
+                        .then(Commands.argument("policy", StringArgumentType.word())
+                                .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                        ENTRY_POLICIES, builder)).executes(PortalCommands::entryPolicy))))
+                .then(Commands.literal("access").then(portalIdArgument()
+                        .then(Commands.literal("public").executes(context -> setAccess(context, false)))
+                        .then(Commands.literal("private").then(Commands.argument("max_players",
+                                IntegerArgumentType.integer(1, 100))
+                                .executes(context -> setAccess(context, true))))))
+                .then(Commands.literal("difficulty").then(portalIdArgument()
+                        .then(Commands.argument("skulls", IntegerArgumentType.integer(1, 5))
+                                .executes(PortalCommands::difficulty))))
                 .then(Commands.literal("lifetime").then(portalIdArgument()
                         .then(Commands.argument("minutes", IntegerArgumentType.integer(1, 43_200))
                                 .executes(PortalCommands::lifetime))))
@@ -69,17 +101,17 @@ public final class PortalCommands {
 
     // Build portal creation syntax centered on the executing source.
     private static LiteralArgumentBuilder<CommandSourceStack> createBranch() {
+        var lifetime = Commands.argument("lifetime_minutes", IntegerArgumentType.integer(1, 43_200))
+                .executes(PortalCommands::create)
+                .then(colorArgument().executes(PortalCommands::createWithColor));
+        var height = Commands.argument("height", DoubleArgumentType.doubleArg(0.5, 256.0)).then(lifetime);
+        var width = Commands.argument("width", DoubleArgumentType.doubleArg(0.5, 256.0)).then(height);
+        var plane = Commands.argument("plane", StringArgumentType.word())
+                .suggests((context, builder) -> SharedSuggestionProvider.suggest(PLANES, builder)).then(width);
+        var shape = Commands.argument("shape", StringArgumentType.word())
+                .suggests((context, builder) -> SharedSuggestionProvider.suggest(SHAPES, builder)).then(plane);
         return Commands.literal("create").then(Commands.argument("portal_id", StringArgumentType.word())
-                .then(templateIdArgument()
-                        .then(Commands.argument("shape", StringArgumentType.word())
-                                .suggests((context, builder) -> SharedSuggestionProvider.suggest(SHAPES, builder))
-                                .then(Commands.argument("plane", StringArgumentType.word())
-                                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(PLANES, builder))
-                                        .then(Commands.argument("width", DoubleArgumentType.doubleArg(0.5, 256.0))
-                                                .then(Commands.argument("height", DoubleArgumentType.doubleArg(0.5, 256.0))
-                                                        .then(Commands.argument("lifetime_minutes",
-                                                                        IntegerArgumentType.integer(1, 43_200))
-                                                                .executes(PortalCommands::create))))))));
+                .then(templateIdArgument().then(shape)));
     }
 
     // Build independent calendar and repeating timer-window editing commands.
@@ -125,7 +157,12 @@ public final class PortalCommands {
         return Commands.literal("instances")
                 .executes(PortalCommands::instanceList)
                 .then(Commands.literal("list").executes(PortalCommands::instanceList))
-                .then(Commands.literal("expire").then(portalIdArgument().executes(PortalCommands::expire)));
+                .then(Commands.literal("expire").then(portalIdArgument().executes(PortalCommands::expire)))
+                .then(Commands.literal("expire-slot").then(Commands.argument("slot", StringArgumentType.word())
+                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                PortalService.activeInstances(context.getSource().getServer()).stream()
+                                        .map(instance -> instance.slotDimension().toString()).toList(), builder))
+                        .executes(PortalCommands::expireSlot)));
     }
 
     // Show framework template, portal, slot, and active-instance totals.
@@ -156,21 +193,45 @@ public final class PortalCommands {
         if (portal == null) return 0;
         PortalDefinition.Schedule schedule = portal.schedule();
         context.getSource().sendSuccess(() -> Component.literal("Portal " + portal.id() + " -> "
-                + portal.templateId()).withStyle(ChatFormatting.GOLD), false);
+                + portal.templateId() + " · " + portal.effectiveDisplayName()).withStyle(ChatFormatting.GOLD), false);
         context.getSource().sendSuccess(() -> Component.literal("Dimension " + portal.dimension() + ", center "
                 + portal.centerX() + " " + portal.centerY() + " " + portal.centerZ() + ", "
                 + portal.shape().serializedName() + " " + portal.width() + "x" + portal.height() + " on "
-                + portal.plane().serializedName()).withStyle(ChatFormatting.GRAY), false);
+                + portal.plane().serializedName() + ", color "
+                + PortalDefinition.PortalColor.displayName(portal.colorRgb()) + " (#"
+                + String.format("%06X", portal.colorRgb()) + ")").withStyle(ChatFormatting.GRAY), false);
         context.getSource().sendSuccess(() -> Component.literal("Lifetime " + portal.lifetimeSeconds()
                 + "s; calendar " + schedule.weekdays() + " " + schedule.start() + "-" + schedule.end() + " "
                 + schedule.timezone() + "; periodic " + (schedule.periodSeconds() == 0L ? "off"
                 : schedule.openSeconds() + "s every " + schedule.periodSeconds() + "s"))
                 .withStyle(ChatFormatting.GRAY), false);
+        context.getSource().sendSuccess(() -> Component.literal("Description: "
+                + (portal.description().isBlank() ? "(none)" : portal.description()))
+                .withStyle(ChatFormatting.GRAY), false);
+        context.getSource().sendSuccess(() -> Component.literal("Player entry policy: "
+                + portal.entryPolicy().serializedName()).withStyle(ChatFormatting.GRAY), false);
+        context.getSource().sendSuccess(() -> Component.literal("Access: "
+                + portal.admission().mode().serializedName() + (portal.admission().mode() == PortalDefinition.Mode.PRIVATE
+                ? ", max group " + portal.admission().maxPlayers() : ""))
+                .withStyle(ChatFormatting.GRAY), false);
+        context.getSource().sendSuccess(() -> Component.literal("Difficulty: " + portal.difficulty()
+                + "/5 skulls").withStyle(ChatFormatting.GRAY), false);
         return 1;
     }
 
     // Create a directly linked portal at the command source position.
     private static int create(CommandContext<CommandSourceStack> context) {
+        return create(context, PortalDefinition.DEFAULT_COLOR_RGB);
+    }
+
+    // Create a portal using the explicitly selected named color.
+    private static int createWithColor(CommandContext<CommandSourceStack> context) {
+        return create(context, PortalDefinition.PortalColor.parse(
+                StringArgumentType.getString(context, "color")).rgb());
+    }
+
+    // Create a directly linked portal at the command source position with one RGB color.
+    private static int create(CommandContext<CommandSourceStack> context, int colorRgb) {
         try {
             Identifier id = identifierArgument(context, "portal_id");
             Identifier template = identifierArgument(context, "template_id");
@@ -182,12 +243,102 @@ public final class PortalCommands {
                     position.x, position.y, position.z, DoubleArgumentType.getDouble(context, "width"),
                     DoubleArgumentType.getDouble(context, "height"), template,
                     IntegerArgumentType.getInteger(context, "lifetime_minutes") * 60L,
-                    PortalDefinition.Schedule.always());
+                    colorRgb, PortalDefinition.Schedule.always());
             PortalService.create(context.getSource().getServer(), portal);
             return success(context, "Created portal " + id + " linked to " + template);
         } catch (RuntimeException exception) {
             return failure(context, exception);
         }
+    }
+
+    // Change one existing portal's flat render color without altering its geometry or schedule.
+    private static int color(CommandContext<CommandSourceStack> context) {
+        PortalDefinition portal = requirePortal(context);
+        if (portal == null) return 0;
+        PortalDefinition.PortalColor color = PortalDefinition.PortalColor.parse(
+                StringArgumentType.getString(context, "color"));
+        PortalService.update(context.getSource().getServer(), portal.withColor(color.rgb()));
+        return success(context, "Set portal " + portal.id() + " color to " + color.serializedName());
+    }
+
+    // Change the name and description displayed by one portal's travel confirmation screen.
+    private static int presentation(CommandContext<CommandSourceStack> context) {
+        PortalDefinition portal = requirePortal(context);
+        if (portal == null) return 0;
+        String name = StringArgumentType.getString(context, "name").trim();
+        String description = StringArgumentType.getString(context, "description").trim();
+        if (name.isEmpty()) return failure(context, new IllegalArgumentException("Portal name must not be empty"));
+        PortalService.update(context.getSource().getServer(), portal.withPresentation(name, description));
+        return success(context, "Updated presentation text for portal " + portal.id());
+    }
+
+    // Change whether player entry is repeatable, permanent-once, or reset with each instance.
+    private static int entryPolicy(CommandContext<CommandSourceStack> context) {
+        PortalDefinition portal = requirePortal(context);
+        if (portal == null) return 0;
+        PortalDefinition.EntryPolicy policy = PortalDefinition.EntryPolicy.parse(
+                StringArgumentType.getString(context, "policy"));
+        PortalService.update(context.getSource().getServer(), portal.withEntryPolicy(policy));
+        return success(context, "Set portal " + portal.id() + " entry policy to " + policy.serializedName());
+    }
+
+    private static int setAccess(CommandContext<CommandSourceStack> context, boolean privateMode) {
+        PortalDefinition portal = requirePortal(context);
+        if (portal == null) return 0;
+        int max = privateMode ? IntegerArgumentType.getInteger(context, "max_players")
+                : portal.admission().maxPlayers();
+        PortalService.update(context.getSource().getServer(), portal.withAdmission(new PortalDefinition.Admission(
+                privateMode ? PortalDefinition.Mode.PRIVATE : PortalDefinition.Mode.PUBLIC, max)));
+        return success(context, "Set " + portal.id() + " to " + (privateMode ? "private, max " + max : "public"));
+    }
+
+    private static int groupScreen(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) return 0;
+        PortalNetworking.openGroupScreen(player);
+        return 1;
+    }
+
+    private static ServerPlayer groupTarget(CommandContext<CommandSourceStack> context) {
+        String name = StringArgumentType.getString(context, "player");
+        ServerPlayer target = context.getSource().getServer().getPlayerList().getPlayerByName(name);
+        if (target == null) throw new IllegalArgumentException("Player is not online: " + name);
+        return target;
+    }
+
+    private static int groupInvite(CommandContext<CommandSourceStack> context) {
+        try {
+            PortalGroups.invite(context.getSource().getPlayerOrException(), groupTarget(context));
+            return 1;
+        } catch (Exception exception) { return failure(context, new IllegalArgumentException(exception.getMessage())); }
+    }
+
+    private static int groupAccept(CommandContext<CommandSourceStack> context) {
+        try {
+            PortalGroups.accept(context.getSource().getPlayerOrException(), groupTarget(context));
+            return 1;
+        } catch (Exception exception) { return failure(context, new IllegalArgumentException(exception.getMessage())); }
+    }
+
+    private static int groupLeave(CommandContext<CommandSourceStack> context) {
+        PortalGroups.leave(context.getSource().getPlayer());
+        return success(context, "Left portal group");
+    }
+
+    private static int groupList(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) return 0;
+        return success(context, "Portal group: " + String.join(", ",
+                PortalGroups.names(context.getSource().getServer(), player.getUUID())));
+    }
+
+    // Change the one-to-five-skull difficulty displayed before portal travel.
+    private static int difficulty(CommandContext<CommandSourceStack> context) {
+        PortalDefinition portal = requirePortal(context);
+        if (portal == null) return 0;
+        int skulls = IntegerArgumentType.getInteger(context, "skulls");
+        PortalService.update(context.getSource().getServer(), portal.withDifficulty(skulls));
+        return success(context, "Set portal " + portal.id() + " difficulty to " + skulls + " skulls");
     }
 
     // Remove a portal and expire its active instance first.
@@ -343,14 +494,23 @@ public final class PortalCommands {
         return instances.size();
     }
 
-    // Force-expire one portal's active instance.
+    // Force-expire every active instance owned by one portal.
     private static int expire(CommandContext<CommandSourceStack> context) {
         Identifier portal = portalArgument(context);
         if (!PortalService.expire(context.getSource().getServer(), portal)) {
             context.getSource().sendFailure(Component.literal("Portal has no active instance: " + portal));
             return 0;
         }
-        return success(context, "Expired instance for portal " + portal);
+        return success(context, "Expiring all instances for portal " + portal);
+    }
+
+    private static int expireSlot(CommandContext<CommandSourceStack> context) {
+        Identifier slot = Identifier.parse(StringArgumentType.getString(context, "slot"));
+        if (!PortalService.expireInstance(context.getSource().getServer(), slot)) {
+            context.getSource().sendFailure(Component.literal("No active instance in slot " + slot));
+            return 0;
+        }
+        return success(context, "Expiring instance in " + slot);
     }
 
     // Return a player from a leased dimension slot to their remembered source position.
@@ -381,6 +541,12 @@ public final class PortalCommands {
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                         PortalTemplateService.templates(context.getSource().getServer()).stream()
                                 .map(template -> template.id().toString()).toList(), builder));
+    }
+
+    // Create a named portal-color argument with all built-in presets as suggestions.
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> colorArgument() {
+        return Commands.argument("color", StringArgumentType.word())
+                .suggests((context, builder) -> SharedSuggestionProvider.suggest(COLORS, builder));
     }
 
     // Resolve one portal argument or send a consistent unknown-ID error.

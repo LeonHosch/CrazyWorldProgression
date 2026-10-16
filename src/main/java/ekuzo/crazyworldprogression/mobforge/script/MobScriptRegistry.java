@@ -1,0 +1,112 @@
+package ekuzo.crazyworldprogression.mobforge.script;
+
+import ekuzo.crazyworldprogression.mobforge.MobForge;
+import ekuzo.crazyworldprogression.api.mobforge.EntitySpawnService;
+import ekuzo.crazyworldprogression.mobforge.template.MobTemplateValidator;
+import net.fabricmc.loader.api.FabricLoader;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+public final class MobScriptRegistry {
+	private final Path directory = FabricLoader.getInstance().getConfigDir().resolve("mobforge/scripts");
+	private final MobScriptYaml yaml = new MobScriptYaml();
+	private volatile Map<String, MobScript> scripts = Map.of();
+
+	public synchronized ReloadResult reload() {
+		Map<String, MobScript> loaded = new LinkedHashMap<>(); int failures = 0;
+		try {
+			Files.createDirectories(directory);
+			try (var files = Files.list(directory)) {
+				for (Path file : files.filter(Files::isRegularFile).filter(MobScriptRegistry::isYaml).sorted().toList()) {
+					try {
+						MobScript script = yaml.decode(Files.readString(file, StandardCharsets.UTF_8));
+						validate(script);
+						if (loaded.putIfAbsent(script.id(), script) != null) throw new IllegalArgumentException("duplicate script ID: " + script.id());
+					} catch (Exception exception) {
+						failures++; MobForge.LOGGER.warn("Failed to load script {}: {}", file.getFileName(), cleanMessage(exception));
+					}
+				}
+			}
+		} catch (IOException exception) { failures++; MobForge.LOGGER.error("Could not read script directory: {}", exception.getMessage()); }
+		scripts = Map.copyOf(loaded);
+		MobForge.LOGGER.info("Loaded {} MobForge scripts ({} failed).", loaded.size(), failures);
+		return new ReloadResult(loaded.size(), failures);
+	}
+
+	private static void validate(MobScript script) {
+		if (script.id() == null || !MobTemplateValidator.SAFE_ID.matcher(script.id()).matches()) throw new IllegalArgumentException("id must match [a-z0-9_-]+");
+		if (script.steps().isEmpty()) throw new IllegalArgumentException("steps cannot be empty");
+		java.util.Set<String> handles = new java.util.HashSet<>();
+		for (int i = 0; i < script.steps().size(); i++) {
+			MobScript.Step step = script.steps().get(i);
+			if (step instanceof MobScript.SpawnEntityStep spawn) {
+				EntitySpawnService.resolve(spawn.id());
+				if (!spawn.at().matches("[a-z][a-z0-9_]{0,63}")) throw new IllegalArgumentException("steps[" + i + "].at must be an anchor name");
+				if (!spawn.saveAs().matches("[a-z][a-z0-9_]{0,63}") || !handles.add(spawn.saveAs()))
+					throw new IllegalArgumentException("steps[" + i + "].save_as must be a unique handle name");
+			} else if (step instanceof MobScript.WaitUntilStep wait) {
+				ScriptCondition.validate(wait.condition());
+				if (wait.timeoutTicks() < 1 || wait.timeoutTicks() > 1_728_000)
+					throw new IllegalArgumentException("steps[" + i + "].timeout must be between 1 tick and 24 hours");
+				if (!handles.contains(ScriptCondition.referencedHandle(wait.condition()))) throw new IllegalArgumentException("steps[" + i + "] references a handle before spawn: " + wait.condition());
+			} else if (step instanceof MobScript.MobCastStep cast) {
+				if (!handles.contains(ScriptCondition.reference(cast.mob()))) throw new IllegalArgumentException("steps[" + i + "] references a handle before spawn: " + cast.mob());
+				if (MobForge.abilities().get(cast.ability()).isEmpty()) throw new IllegalArgumentException("steps[" + i + "] references unknown ability " + cast.ability());
+			} else if (step instanceof MobScript.SetPhaseStep phase) {
+				if (!handles.contains(ScriptCondition.reference(phase.mob()))) throw new IllegalArgumentException("steps[" + i + "] references a handle before spawn: " + phase.mob());
+				if (!phase.phase().matches("[a-z0-9_./-]{1,64}")) throw new IllegalArgumentException("steps[" + i + "] has invalid phase " + phase.phase());
+			}
+			if (step instanceof MobScript.SpawnStep spawn) {
+				if (MobForge.TEMPLATES.get(spawn.template()).isEmpty()) throw new IllegalArgumentException("steps[" + i + "] references unknown template: " + spawn.template());
+				if (spawn.count() < 1 || spawn.count() > 1000) throw new IllegalArgumentException("steps[" + i + "].count must be between 1 and 1000");
+				if (!finite(spawn.location().x(), spawn.location().y(), spawn.location().z())) throw new IllegalArgumentException("steps[" + i + "].location must be finite");
+				if (!finite(spawn.offset().x(), spawn.offset().y(), spawn.offset().z()) || spawn.offset().x() < 0 || spawn.offset().y() < 0 || spawn.offset().z() < 0)
+					throw new IllegalArgumentException("steps[" + i + "].offset must be finite and non-negative");
+				if (spawn.aiOverride() != null) {
+					var ai = spawn.aiOverride();
+					if (!MobTemplateValidator.AI_MODES.contains(ai.mode())) throw new IllegalArgumentException("steps[" + i + "].ai has unknown mode: " + ai.mode());
+					if ("target_position".equals(ai.mode()) && ai.target() == null) throw new IllegalArgumentException("steps[" + i + "].ai.target is required for target_position");
+					if ("target_player".equals(ai.mode()) && (ai.player() == null || ai.player().isBlank())) throw new IllegalArgumentException("steps[" + i + "].ai.player is required for target_player");
+					if (ai.arrivalRadius() < 0 || !finite(ai.arrivalRadius())) throw new IllegalArgumentException("steps[" + i + "].ai.arrival_radius must be non-negative");
+					if (ai.range() <= 0 || !finite(ai.range())) throw new IllegalArgumentException("steps[" + i + "].ai.range must be greater than zero");
+				}
+			} else if (step instanceof MobScript.SleepStep sleep && (sleep.ticks() < 0 || sleep.ticks() > 1_728_000))
+				throw new IllegalArgumentException("steps[" + i + "] sleep must be between 0 and 24 hours");
+		}
+	}
+
+	public Optional<MobScript> get(String id) { return Optional.ofNullable(scripts.get(id)); }
+	public Collection<MobScript> all() { return scripts.values().stream().sorted(Comparator.comparing(MobScript::id)).toList(); }
+	public synchronized void save(MobScript script) throws IOException {
+		validate(script); Files.createDirectories(directory);
+		Path yamlDestination = directory.resolve(script.id() + ".yaml"); Path ymlDestination = directory.resolve(script.id() + ".yml");
+		Path destination = (Files.exists(yamlDestination) && !Files.exists(ymlDestination) ? yamlDestination : ymlDestination).normalize();
+		if (!destination.getParent().equals(directory.normalize())) throw new IOException("unsafe script path");
+		Path temporary = Files.createTempFile(directory, script.id() + "-", ".tmp");
+		try {
+			Files.writeString(temporary, yaml.encode(script), StandardCharsets.UTF_8);
+			MobScript roundTrip = yaml.decode(Files.readString(temporary, StandardCharsets.UTF_8)); validate(roundTrip);
+			try { Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+			catch (AtomicMoveNotSupportedException ignored) { Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING); }
+		} finally { Files.deleteIfExists(temporary); }
+		reload();
+	}
+	public synchronized boolean delete(String id) throws IOException {
+		if (!MobTemplateValidator.SAFE_ID.matcher(id).matches()) return false;
+		boolean deleted = Files.deleteIfExists(directory.resolve(id + ".yml")); deleted |= Files.deleteIfExists(directory.resolve(id + ".yaml")); reload(); return deleted;
+	}
+	private static boolean finite(double... values) { for (double value : values) if (!Double.isFinite(value)) return false; return true; }
+	private static boolean isYaml(Path path) { String name = path.getFileName().toString().toLowerCase(); return name.endsWith(".yml") || name.endsWith(".yaml"); }
+	private static String cleanMessage(Exception exception) { Throwable cause = exception; while (cause.getCause() != null) cause = cause.getCause(); return cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage(); }
+	public record ReloadResult(int loaded, int failed) { }
+}

@@ -85,5 +85,10 @@
   "banner.crazy-world-progression.encounter.failed": "Kampf gescheitert",
   "banner.crazy-world-progression.encounter.failed.subtitle": "Neustart in %s Sekunden",
   "banner.crazy-world-progression.encounter.clutch": "In letzter Sekunde geschafft!",
-  "banner.crazy-world-progression.encounter.clutch.subtitle": "Der Kampf endete gerade noch rechtzeitig"
+  "banner.crazy-world-progression.encounter.clutch.subtitle": "Der Kampf endete gerade noch rechtzeitig",
+  "message.crazy-world-progression.raid.down": "Du bist am Boden. Fliege nach 5 Sekunden in deinen Wiederbelebungspunkt, um wieder aufzustehen.",
+  "message.crazy-world-progression.raid.down_encounter": "Du bist am Boden. Ein Teammitglied kann dich an deiner Markierung wiederbeleben.",
+  "message.crazy-world-progression.raid.revive_in": "Wiederbelebung in %s s möglich",
+  "message.crazy-world-progression.raid.revive_now": "Fliege in deinen Wiederbelebungspunkt, um aufzustehen",
+  "message.crazy-world-progression.raid.revived": "Du bist wieder auf den Beinen."
 }

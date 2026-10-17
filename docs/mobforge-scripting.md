@@ -111,6 +111,15 @@ Scripted portal `add` locations are previewed there in the same purple, using ea
 
 Each `encounter_end()` gives every party member in the instance a raid checkpoint for 24 hours. A new run, or a run restarted after a wipe, starts directly after the party leader's last completed `encounter_end()`. If that step has a `spawn`, players are moved there and it stays the rally point. Loot, achievements and other rewards right after it are skipped until the next `encounter_start()`, so they are not given twice. Without a `spawn`, players stay at the pocket's normal spawn.
 
+## Deaths in a raid
+
+Players never really die inside a raid instance. Instead they go down: no death screen, they become spectators at their **revive point**, and a "Revive <name>" marker appears there. Their items only drop if the portal does not keep inventory, same as before. A downed spectator cannot fly more than 10 blocks from the revive point.
+
+- The revive point is where they went down. If they fell out of the world, it is the last spot where they stood on solid ground, and they are moved there.
+- If they go down again within 5 seconds of getting back up, or within 20 seconds when falling out of the world or drowning, the revive point is the checkpoint spawn instead (the last `encounter_end` spawn, or the pocket's spawn).
+- Outside an encounter, after 5 seconds they can fly into their revive point to get back up there. The action bar counts down and then says so.
+- During an encounter there is no self-revive: a teammate revives them at the marker (one revive each), or the encounter wipes when everyone is down. Players who are down when an encounter starts stay down and can be revived by teammates.
+
 ## Wipes
 
 When every party member is down, or a `wipe()` step runs, the encounter fails: an "Encounter failed" banner shows and the encounter resets 5 seconds later, back to the checkpoint and rally point, with everyone's previous game mode restored. The script keeps running during those 5 seconds, so if it reaches `encounter_end()` in time (for example, the boss dies to damage already dealt), the encounter counts as cleared: rewards and the checkpoint are given, everyone respawns at that step's spawn, and a "Cleared in the clutch!" banner shows.

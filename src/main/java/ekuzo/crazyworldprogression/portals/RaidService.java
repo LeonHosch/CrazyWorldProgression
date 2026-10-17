@@ -101,8 +101,166 @@ public final class RaidService {
         }
     }
 
+    /** A downed raid player: their revive point and when they went down. Lost on restart (rebuilt on join). */
+    private record Down(String slot, Vec3 point, long downedTick) { }
+    private static final Map<MinecraftServer, Map<UUID, Down>> DOWNS = new java.util.WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<UUID, Long>> LAST_REVIVE = new java.util.WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<UUID, Vec3>> LAST_SAFE = new java.util.WeakHashMap<>();
+
+    private static Map<UUID, Down> downs(MinecraftServer server) {
+        return DOWNS.computeIfAbsent(server, ignored -> new HashMap<>());
+    }
+
+    /** The checkpoint spawn: the last encounter_end spawn, or the pocket's own spawn. */
+    private static Vec3 rallyPoint(MinecraftServer server, PortalData.StoredInstance instance) {
+        RaidData.Spot moved = spawnPoint(server, instance);
+        if (moved != null) return new Vec3(moved.x(), moved.y(), moved.z());
+        PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, instance.templateId());
+        if (template == null) return new Vec3(instance.originX() + 0.5, instance.originY() + 1.0, instance.originZ() + 0.5);
+        return new Vec3(instance.originX() + template.spawnX() + 0.5, instance.originY() + template.spawnY(),
+                instance.originZ() + template.spawnZ() + 0.5);
+    }
+
+    /**
+     * Raid deaths do not kill: the player is downed as a spectator at a revive point. Returns true when the
+     * death was replaced this way (the death itself is then cancelled).
+     */
+    private static boolean down(ServerPlayer player, net.minecraft.world.damagesource.DamageSource source) {
+        MinecraftServer server = player.level().getServer();
+        Identifier slot = player.level().dimension().identifier();
+        if (!isRaid(server, slot)) return false;
+        PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot.toString());
+        String playerId = player.getUUID().toString();
+        if (instance == null || !instance.admittedPlayers().contains(playerId)) return false;
+        player.setHealth(player.getMaxHealth());
+        if (player.isSpectator()) return true;
+        ServerLevel level = player.level();
+        boolean fellOut = source.is(net.minecraft.world.damagesource.DamageTypes.FELL_OUT_OF_WORLD)
+                || player.getY() < level.getMinY();
+        boolean drowned = source.is(net.minecraft.world.damagesource.DamageTypes.DROWN);
+        long now = server.getTickCount();
+        Long revived = LAST_REVIVE.computeIfAbsent(server, ignored -> new HashMap<>()).get(player.getUUID());
+        Vec3 point;
+        if (RaidDowns.useCheckpoint(revived == null ? -1L : now - revived, fellOut || drowned)) point = rallyPoint(server, instance);
+        else if (fellOut) point = LAST_SAFE.computeIfAbsent(server, ignored -> new HashMap<>())
+                .getOrDefault(player.getUUID(), rallyPoint(server, instance));
+        else point = player.position();
+        if (Boolean.FALSE.equals(PortalService.keepInventoryOverride(player))) player.getInventory().dropAll();
+        player.clearFire();
+        player.setAirSupply(player.getMaxAirSupply());
+        player.removeAllEffects();
+        player.setDeltaMovement(Vec3.ZERO);
+        RaidData data = RaidData.get(server);
+        RaidData.Attempt before = data.get(slot.toString());
+        if (before == null) before = RaidData.Attempt.first();
+        Map<String, String> modes = new HashMap<>(before.originalModes());
+        modes.putIfAbsent(playerId, player.gameMode.getGameModeForPlayer().getName());
+        player.setGameMode(GameType.SPECTATOR);
+        player.teleportTo(level, point.x, point.y, point.z, Set.of(), player.getYRot(), player.getXRot(), false);
+        player.resetFallDistance();
+        downs(server).put(player.getUUID(), new Down(slot.toString(), point, now));
+        RaidData.Spot spot = new RaidData.Spot(point.x, point.y, point.z);
+        boolean encounter = inEncounter(server, slot);
+        Map<String, RaidData.Spot> deaths = new HashMap<>(before.deaths());
+        if (encounter) deaths.put(playerId, spot);
+        RaidData.Attempt after = new RaidData.Attempt(before.number(), deaths, before.spentRevives(),
+                before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive());
+        data.put(slot.toString(), after);
+        if (encounter && allDown(server, instance, after)) {
+            scheduleWipe(server, instance);
+        } else {
+            spawnMarker(player, spot);
+            player.sendSystemMessage(Component.translatableWithFallback(encounter
+                    ? "message.crazy-world-progression.raid.down_encounter" : "message.crazy-world-progression.raid.down",
+                    encounter ? "You are down. A teammate can revive you at your marker."
+                            : "You are down. Fly into your revive point after 5 seconds to get back up."));
+        }
+        return true;
+    }
+
+    private static void reviveSelf(ServerPlayer player, Down down) {
+        MinecraftServer server = player.level().getServer();
+        RaidData data = RaidData.get(server);
+        RaidData.Attempt before = data.get(down.slot());
+        String mode = null;
+        if (before != null) {
+            Map<String, String> modes = new HashMap<>(before.originalModes());
+            mode = modes.remove(player.getUUID().toString());
+            data.put(down.slot(), new RaidData.Attempt(before.number(), before.deaths(), before.spentRevives(),
+                    before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive()));
+        }
+        finishRevive(player, down.point(), mode);
+        player.sendOverlayMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.revived",
+                "You got back up."));
+    }
+
+    /** Shared end of every revive: back in the old game mode at the point, remembered for the quick-death rule. */
+    private static void finishRevive(ServerPlayer player, Vec3 point, String mode) {
+        MinecraftServer server = player.level().getServer();
+        player.teleportTo(player.level(), point.x, point.y, point.z, Set.of(), player.getYRot(), player.getXRot(), false);
+        restoreMode(player, mode);
+        player.setHealth(player.getMaxHealth());
+        player.resetFallDistance();
+        removeMarker(player.level(), player.getUUID());
+        downs(server).remove(player.getUUID());
+        LAST_REVIVE.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(), (long) server.getTickCount());
+    }
+
+    /** Leash, self-revive hints and checks, and last safe ground positions for void deaths. */
+    private static void tickDowns(MinecraftServer server) {
+        long now = server.getTickCount();
+        Map<UUID, Down> downs = downs(server);
+        for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
+            if (!isRaid(server, instance.slotDimension())) continue;
+            ServerLevel level = level(server, instance.slotDimension());
+            if (level == null) continue;
+            boolean encounter = inEncounter(server, instance.slotDimension());
+            RaidData.Attempt attempt = RaidData.get(server).get(instance.slotDimension().toString());
+            for (ServerPlayer player : List.copyOf(level.players())) {
+                if (!player.isSpectator()) {
+                    if (player.onGround() && !player.isInWater() && !player.isInLava())
+                        LAST_SAFE.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(), player.position());
+                    continue;
+                }
+                Down down = downs.get(player.getUUID());
+                if (down == null && attempt != null && attempt.deaths().containsKey(player.getUUID().toString())) {
+                    RaidData.Spot spot = attempt.deaths().get(player.getUUID().toString());
+                    down = new Down(instance.slotDimension().toString(), new Vec3(spot.x(), spot.y(), spot.z()), now);
+                    downs.put(player.getUUID(), down);
+                }
+                if (down == null) continue;
+                if (player.getCamera() != player) player.setCamera(player);
+                Vec3 clamped = RaidDowns.leash(down.point(), player.position(), RaidDowns.LEASH_RADIUS);
+                if (clamped != player.position())
+                    player.teleportTo(level, clamped.x, clamped.y, clamped.z, Set.of(), player.getYRot(), player.getXRot(), false);
+                if (encounter) continue;
+                long ticksDown = now - down.downedTick();
+                double distance = player.position().distanceTo(down.point());
+                if (RaidDowns.canSelfRevive(false, ticksDown, distance)) {
+                    reviveSelf(player, down);
+                } else if (now % 10L == 0L) {
+                    long seconds = (RaidDowns.SELF_REVIVE_DELAY_TICKS - ticksDown + 19L) / 20L;
+                    player.sendOverlayMessage(seconds > 0
+                            ? Component.translatableWithFallback("message.crazy-world-progression.raid.revive_in",
+                                    "You can revive in %s s", seconds)
+                            : Component.translatableWithFallback("message.crazy-world-progression.raid.revive_now",
+                                    "Fly into your revive point to revive"));
+                }
+            }
+        }
+        downs.values().removeIf(down -> !PortalData.get(server).instances().containsKey(down.slot()));
+    }
+
+    /** Clears down records of one instance after a wipe or a completed encounter restored everyone. */
+    private static void clearDowns(MinecraftServer server, Identifier slot) {
+        downs(server).values().removeIf(down -> down.slot().equals(slot.toString()));
+    }
+
     public static void initialize() {
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(RaidService::tickWipes);
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(RaidService::tickDowns);
+        ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) ->
+                !(entity instanceof ServerPlayer player) || !down(player, source));
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(PENDING_WIPES::remove);
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayer player) onDeath(player);
@@ -161,7 +319,11 @@ public final class RaidService {
         RaidData.Attempt before = data.get(slot.toString());
         if (before == null) before = RaidData.Attempt.first();
         if (!before.deaths().isEmpty()) throw new IllegalStateException("Cannot start an encounter while players are down");
-        data.put(slot.toString(), new RaidData.Attempt(before.number(), Map.of(), List.of(),
+        Map<String, RaidData.Spot> stillDown = new HashMap<>();
+        for (Map.Entry<UUID, Down> entry : downs(server).entrySet())
+            if (entry.getValue().slot().equals(slot.toString())) stillDown.put(entry.getKey().toString(),
+                    new RaidData.Spot(entry.getValue().point().x, entry.getValue().point().y, entry.getValue().point().z));
+        data.put(slot.toString(), new RaidData.Attempt(before.number(), stillDown, List.of(),
                 Map.of(), before.pendingRespawn(), before.originalModes(), true));
         EncounterBanner.show(level.players(), EncounterBanner.Kind.STARTED, "");
     }
@@ -265,13 +427,24 @@ public final class RaidService {
     }
 
     static void onJoin(ServerPlayer player) {
-        if (inEncounter(player.level().getServer(), player.level().dimension().identifier())) {
-            RaidData.Attempt attempt = RaidData.get(player.level().getServer())
-                    .get(player.level().dimension().identifier().toString());
-            if (attempt != null && attempt.deaths().containsKey(player.getUUID().toString())) {
-                player.setGameMode(GameType.SPECTATOR);
-                rally(player);
-            }
+        MinecraftServer server = player.level().getServer();
+        Identifier slot = player.level().dimension().identifier();
+        if (!isRaid(server, slot)) return;
+        RaidData.Attempt attempt = RaidData.get(server).get(slot.toString());
+        String id = player.getUUID().toString();
+        if (attempt != null && attempt.deaths().containsKey(id)) {
+            RaidData.Spot spot = attempt.deaths().get(id);
+            player.setGameMode(GameType.SPECTATOR);
+            player.teleportTo(player.level(), spot.x(), spot.y(), spot.z(), Set.of(), player.getYRot(), player.getXRot(), false);
+            downs(server).put(player.getUUID(), new Down(slot.toString(), new Vec3(spot.x(), spot.y(), spot.z()),
+                    server.getTickCount()));
+        } else if (player.isSpectator() && attempt != null && attempt.originalModes().containsKey(id)
+                && !downs(server).containsKey(player.getUUID())) {
+            Map<String, String> modes = new HashMap<>(attempt.originalModes());
+            restoreMode(player, modes.remove(id));
+            RaidData.get(server).put(slot.toString(), new RaidData.Attempt(attempt.number(), attempt.deaths(),
+                    attempt.spentRevives(), attempt.portalEntries(), attempt.pendingRespawn(), modes, attempt.encounterActive()));
+            rally(player);
         }
     }
 
@@ -388,9 +561,8 @@ public final class RaidService {
         }
         data.put(slot.toString(), new RaidData.Attempt(before.number(), deaths, spent,
                 before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive()));
-        restoreMode(target, mode);
-        target.resetFallDistance();
         marker.discard();
+        finishRevive(target, new Vec3(spot.x(), spot.y(), spot.z()), mode);
         reviver.sendSystemMessage(Component.literal("Revived " + target.getGameProfile().name() + ". Your revive is spent."));
         target.sendSystemMessage(Component.literal("You were revived by " + reviver.getGameProfile().name()));
     }
@@ -398,6 +570,7 @@ public final class RaidService {
     private static void wipe(MinecraftServer server, PortalData.StoredInstance instance, RaidData.Attempt before) {
         ServerLevel level = level(server, instance.slotDimension());
         if (level == null) return;
+        clearDowns(server, instance.slotDimension());
         clearEffects(level);
         clearMarkers(level);
         resetEncounter(server, instance);
@@ -432,6 +605,7 @@ public final class RaidService {
         if (before == null) return;
         java.util.Map<String, Long> pendingWipes = PENDING_WIPES.get(server);
         boolean clutch = pendingWipes != null && pendingWipes.remove(slot.toString()) != null;
+        clearDowns(server, slot);
         clearEffects(level);
         ekuzo.crazyworldprogression.mobforge.MobForge.SCRIPT_EXECUTOR.clearPocketState(
                 PortalService.instanceId(PortalData.get(server).instances().get(slot.toString())));

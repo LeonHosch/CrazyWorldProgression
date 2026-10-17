@@ -85,5 +85,10 @@
   "banner.crazy-world-progression.encounter.failed": "Encounter failed",
   "banner.crazy-world-progression.encounter.failed.subtitle": "Resetting in %s seconds",
   "banner.crazy-world-progression.encounter.clutch": "Cleared in the clutch!",
-  "banner.crazy-world-progression.encounter.clutch.subtitle": "The encounter ended just in time"
+  "banner.crazy-world-progression.encounter.clutch.subtitle": "The encounter ended just in time",
+  "message.crazy-world-progression.raid.down": "You are down. Fly into your revive point after 5 seconds to get back up.",
+  "message.crazy-world-progression.raid.down_encounter": "You are down. A teammate can revive you at your marker.",
+  "message.crazy-world-progression.raid.revive_in": "You can revive in %s s",
+  "message.crazy-world-progression.raid.revive_now": "Fly into your revive point to revive",
+  "message.crazy-world-progression.raid.revived": "You got back up."
 }

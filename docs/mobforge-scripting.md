@@ -96,7 +96,7 @@ portal(portal="cwp:boss_gate", action="add", location="after_adds", position={"x
 encounter_end()
 ```
 
-Configure the pocket's entrance portal as **Private** with **Raid mode**, and set its group limit to the team size. A projected Coordinates portal with **Once per attempt** can serve as the encounter entrance. On a wipe, the pocket scripts restart and each player's once-per-attempt entry record clears.
+Configure the pocket's entrance portal as a **Dungeon** with **Raid mode**, and set its group limit to the team size. A projected Coordinates portal with **Once per attempt** can serve as the encounter entrance. On a wipe, the pocket scripts restart and each player's once-per-attempt entry record clears.
 
 A wipe, `encounter_end()`, or raid instance end removes all effects from players in that instance and clears the script's variables. The player list and live count variables can be reused in a later encounter.
 

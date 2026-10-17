@@ -342,7 +342,7 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
                     || maxPlayers < 1 || maxPlayers > 100) {
                 throw new IllegalArgumentException("Portal group size must be between 1 and 100");
             }
-            if (raidMode && mode != Mode.PRIVATE) throw new IllegalArgumentException("Raid mode requires private group access");
+            if (raidMode && mode != Mode.PRIVATE) throw new IllegalArgumentException("Raid mode requires dungeon access");
         }
 
         public Admission(Mode mode, int maxPlayers, boolean allowBuilding, Destination destination,
@@ -429,7 +429,12 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
 
     public enum Mode {
         PUBLIC, PRIVATE;
-        public static Mode parse(String value) { return valueOf(value.trim().toUpperCase(Locale.ROOT)); }
+        /** "Dungeon" is the player-facing name of PRIVATE; the saved value stays "private". */
+        public static Mode parse(String value) {
+            String normalized = value.trim().toUpperCase(Locale.ROOT);
+            return valueOf(normalized.equals("DUNGEON") ? "PRIVATE" : normalized);
+        }
+        public String displayName() { return this == PRIVATE ? "Dungeon" : "Public"; }
         public String serializedName() { return name().toLowerCase(Locale.ROOT); }
     }
 

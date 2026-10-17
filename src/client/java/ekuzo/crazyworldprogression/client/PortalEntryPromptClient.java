@@ -193,8 +193,8 @@ public final class PortalEntryPromptClient {
             } else if (payload.destinationKind().equals("coordinates")) {
                 graphics.text(font, Component.literal("Coordinate portal"), textX, y + 15, 0xFFD6D9DF, false);
             } else if (payload.accessMode().equals("private")) {
-                graphics.text(font, Component.literal("Private group · max " + payload.maxPlayers()
-                        + " players · roster locks when travel starts"), textX, y + 15, 0xFFD6D9DF, false);
+                graphics.text(font, Component.literal("Dungeon · party of up to " + payload.maxPlayers()
+                        + " players · each party gets its own instance"), textX, y + 15, 0xFFD6D9DF, false);
             } else {
                 graphics.text(font, Component.literal("Public · shared instance"), textX, y + 15,
                         0xFFD6D9DF, false);

@@ -34,7 +34,7 @@ public final class InstanceInvites {
         MinecraftServer server = inviter.level().getServer();
         PortalData.StoredInstance instance = PortalService.currentInstance(inviter);
         if (instance == null || instance.admittedPlayers().isEmpty())
-            throw new IllegalStateException("You can only invite from inside a running private instance");
+            throw new IllegalStateException("You can only invite from inside a running dungeon");
         if (!instance.admittedPlayers().contains(inviter.getUUID().toString()))
             throw new IllegalStateException("Only party members can invite");
         if (instance.admittedPlayers().contains(target.getUUID().toString()))

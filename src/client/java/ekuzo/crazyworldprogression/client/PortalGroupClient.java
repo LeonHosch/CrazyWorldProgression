@@ -57,7 +57,7 @@ public final class PortalGroupClient {
             graphics.text(font, Component.literal("Portal group"), left + 16, top + 16, 0xFFE6DFFF, false);
             drawWrapped(graphics, "Members: " + state.members(), top + 42, 0xFFD8D8D8);
             drawWrapped(graphics, "Online: " + state.online(), top + 70, 0xFFAAAAAA);
-            graphics.text(font, Component.literal("Enter together at a private portal. Leader confirms travel."),
+            graphics.text(font, Component.literal("Enter a dungeon together. The leader starts it."),
                     left + 16, top + 112, 0xFFBBBBBB, false);
             super.extractRenderState(graphics, mouseX, mouseY, delta);
         }

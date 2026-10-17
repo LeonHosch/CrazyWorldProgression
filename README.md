@@ -512,7 +512,7 @@ CWP generates commands from every registered currency. In these examples, `renow
 | `/cwp portals presentation <portal> <quoted_name> <description>` | Game master | Set the name and description shown before travel |
 | `/cwp portals entry-policy <portal> <repeatable|once_per_instance|once_ever>` | Game master | Configure per-player portal reuse and reset behavior |
 | `/cwp portals access <portal> public` | Game master | Share one running instance among all entrants |
-| `/cwp portals access <portal> private <max_players>` | Game master | Create sealed group instances with a player limit |
+| `/cwp portals access <portal> dungeon <max_players>` | Game master | Make the portal a Dungeon: each party gets its own instance (`private` still works) |
 | `/portal group [invite <player>|accept <leader>|leave|list]` | Player | Manage a pre-entry private portal group; bare command opens the group screen |
 | `/cwp portals difficulty <portal> <1-5>` | Game master | Set the skull rating and confirmation-screen color |
 | `/cwp portals move <portal> here` | Game master | Move a placed portal to the command source and dimension |

@@ -319,7 +319,7 @@ public final class PortalService {
                 && portal.admission().mode() == PortalDefinition.Mode.PRIVATE
                 && playerInstance(server, portal.id(), player.getUUID()) == null
                 && !groupRisk && !PortalGroups.leader(server, player.getUUID()).equals(player.getUUID())) {
-            player.sendOverlayMessage(Component.literal("Your group leader must confirm private portal travel"));
+            player.sendOverlayMessage(Component.literal("Your party leader must start the dungeon"));
             return;
         }
         if (groupRisk) {
@@ -720,7 +720,7 @@ public final class PortalService {
             return;
         }
         UUID leader = PortalGroups.leader(server, player.getUUID());
-        if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your group leader can start private travel");
+        if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your party leader can start this dungeon");
         List<UUID> members = PortalGroups.members(server, leader);
         if (members.size() > portal.admission().maxPlayers()) {
             throw new IllegalStateException("group exceeds this portal's " + portal.admission().maxPlayers() + " player limit");

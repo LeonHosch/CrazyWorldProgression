@@ -85,6 +85,9 @@ public final class PortalCommands {
                                         ENTRY_POLICIES, builder)).executes(PortalCommands::entryPolicy))))
                 .then(Commands.literal("access").then(portalIdArgument()
                         .then(Commands.literal("public").executes(context -> setAccess(context, false)))
+                        .then(Commands.literal("dungeon").then(Commands.argument("max_players",
+                                IntegerArgumentType.integer(1, 100))
+                                .executes(context -> setAccess(context, true))))
                         .then(Commands.literal("private").then(Commands.argument("max_players",
                                 IntegerArgumentType.integer(1, 100))
                                 .executes(context -> setAccess(context, true))))))
@@ -303,7 +306,7 @@ public final class PortalCommands {
         try {
             PortalService.update(context.getSource().getServer(), portal.withAdmission(portal.admission().withAccess(
                     privateMode ? PortalDefinition.Mode.PRIVATE : PortalDefinition.Mode.PUBLIC, max)));
-            return success(context, "Set " + portal.id() + " to " + (privateMode ? "private, max " + max : "public"));
+            return success(context, "Set " + portal.id() + " to " + (privateMode ? "dungeon, max party " + max : "public"));
         } catch (RuntimeException exception) {
             return failure(context, exception);
         }

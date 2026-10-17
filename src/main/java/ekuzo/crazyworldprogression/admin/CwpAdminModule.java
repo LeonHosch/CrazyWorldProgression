@@ -82,7 +82,7 @@ public final class CwpAdminModule {
     private static final List<String> PORTAL_COLORS = Arrays.stream(PortalDefinition.PortalColor.values())
             .map(color -> PortalDefinition.PortalColor.displayName(color.rgb())).toList();
     private static final List<String> ENTRY_POLICIES = List.of("Repeatable", "Once per instance", "Once per attempt", "Once ever");
-    private static final List<String> ACCESS_MODES = List.of("Public", "Private");
+    private static final List<String> ACCESS_MODES = List.of("Public", "Dungeon");
     private static final List<String> DAYTIMES = List.of("Dawn", "Morning", "Noon", "Dusk", "Night", "Midnight");
     private static final List<String> WEATHER_STATES = List.of("Clear", "Rain", "Thunder");
     private static final List<String> DIFFICULTIES = List.of("1 skull", "2 skulls", "3 skulls", "4 skulls", "5 skulls");
@@ -461,17 +461,17 @@ public final class CwpAdminModule {
                 List.of(AdminPanelRegistry.AdminField.select("portal_entry_policy", "Entry policy",
                         creating ? "Repeatable" : entryPolicyLabel(portal.entryPolicy()), ENTRY_POLICIES)), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Instance access",
-                "Public uses one shared instance for everyone. Group size applies only to private access.",
+                "Public uses one shared instance for everyone. A Dungeon gives each party its own instance; the party limit applies only there.",
                 creating || portal.admission().mode() == PortalDefinition.Mode.PRIVATE
                         ? List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
-                                        creating ? "Public" : "Private", ACCESS_MODES),
-                                textField("portal_max_players", "Private group limit (ignored for public)",
+                                        creating ? "Public" : "Dungeon", ACCESS_MODES),
+                                textField("portal_max_players", "Dungeon party limit (ignored for public)",
                                         Integer.toString(creating ? 4 : portal.admission().maxPlayers()), "4", 3,
                                         List.of()))
                         : List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
                                 "Public", ACCESS_MODES)), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Raid attempt",
-                "Private group raids keep the instance through a wipe and reset the encounter for another try.",
+                "Raids are dungeons with strict encounters: one revive each, and a wipe resets the encounter for another try.",
                 List.of(AdminPanelRegistry.AdminField.select("portal_raid_mode", "Raid mode",
                         !creating && portal.raidMode() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Building",

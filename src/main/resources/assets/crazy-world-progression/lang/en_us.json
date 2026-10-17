@@ -62,5 +62,11 @@
   "screen.crazy-world-progression.titles.equipped": "Equipped",
   "screen.crazy-world-progression.titles.loading": "Loading your titles…",
   "screen.crazy-world-progression.titles.empty": "You have not unlocked any titles yet. Complete achievements to earn them.",
-  "screen.crazy-world-progression.titles.unavailable": "This server does not support titles."
+  "screen.crazy-world-progression.titles.unavailable": "This server does not support titles.",
+  "message.crazy-world-progression.postmaster.delivered": "Your inventory was full, so %s loot item(s) were sent to your postmaster. %s",
+  "message.crazy-world-progression.postmaster.half_full": "Your postmaster is more than half full (%s/%s slots). Please clear it soon. %s",
+  "message.crazy-world-progression.postmaster.dropped": "Your postmaster is full! %s loot item(s) dropped on the ground at your feet. Anyone can pick them up.",
+  "message.crazy-world-progression.postmaster.open": "[Open postmaster]",
+  "message.crazy-world-progression.loot.announce": "%s just got %s",
+  "message.crazy-world-progression.loot.announce_count": "%s just got %sx %s"
 }

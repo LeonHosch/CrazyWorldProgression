@@ -5,9 +5,14 @@ import ekuzo.crazyworldprogression.currency.CurrencyRegistry;
 import ekuzo.crazyworldprogression.currency.CurrencyService;
 import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.mobforge.script.MobScript;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
@@ -160,13 +165,32 @@ public final class LootPoolService {
             postmasterItems += delivery.postmasterItems();
             droppedItems += delivery.droppedItems();
         }
-        if (postmasterItems > 0) player.sendSystemMessage(Component.literal(
-                postmasterItems + " loot item(s) went to your postmaster because your inventory was full. Use /postmaster to collect them."));
+        notifyDelivery(player, postmasterItems, droppedItems);
+    }
+
+    /** One message per roll for postmaster deliveries, a half-full warning, and items dropped on the ground. */
+    private static void notifyDelivery(ServerPlayer player, int postmasterItems, int droppedItems) {
+        if (postmasterItems > 0) player.sendSystemMessage(Component.translatableWithFallback(
+                "message.crazy-world-progression.postmaster.delivered",
+                "Your inventory was full, so %s loot item(s) were sent to your postmaster. %s",
+                postmasterItems, postmasterLink()).withStyle(ChatFormatting.YELLOW));
         int used = PostmasterService.usedSlots(player);
-        if (used > PostmasterService.SLOTS / 2) player.sendSystemMessage(Component.literal(
-                "Warning: your postmaster is more than half full (" + used + "/" + PostmasterService.SLOTS + " slots)."));
-        if (droppedItems > 0) player.sendSystemMessage(Component.literal(
-                "Your postmaster was full. " + droppedItems + " loot item(s) dropped on the floor and anyone can pick them up."));
+        if (used > PostmasterService.SLOTS / 2) player.sendSystemMessage(Component.translatableWithFallback(
+                "message.crazy-world-progression.postmaster.half_full",
+                "Your postmaster is more than half full (%s/%s slots). Please clear it soon. %s",
+                used, PostmasterService.SLOTS, postmasterLink()).withStyle(ChatFormatting.GOLD));
+        if (droppedItems > 0) player.sendSystemMessage(Component.translatableWithFallback(
+                "message.crazy-world-progression.postmaster.dropped",
+                "Your postmaster is full! %s loot item(s) dropped on the ground at your feet. Anyone can pick them up.",
+                droppedItems).withStyle(ChatFormatting.RED));
+    }
+
+    private static MutableComponent postmasterLink() {
+        return Component.translatableWithFallback("message.crazy-world-progression.postmaster.open",
+                        "[Open postmaster]")
+                .withStyle(style -> style.withColor(ChatFormatting.AQUA).withUnderlined(true)
+                        .withClickEvent(new ClickEvent.RunCommand("/postmaster"))
+                        .withHoverEvent(new HoverEvent.ShowText(Component.literal("/postmaster"))));
     }
 
     /** Rolls a validated pool and returns the item and currency rewards it produced. */
@@ -211,25 +235,60 @@ public final class LootPoolService {
         int stackSize = Math.max(1, item.getDefaultMaxStackSize());
         int stored = 0;
         int dropped = 0;
-        ItemStack display = new ItemStack(item);
+        int total = amount;
         while (amount > 0) {
             int count = Math.min(amount, stackSize);
             ItemStack stack = new ItemStack(item, count);
-            player.addItem(stack);
+            // Only offer what really fits: in creative mode, Inventory.add deletes items that do not fit.
+            int fits = Math.min(count, roomFor(player.getInventory().getNonEquipmentItems(), stack));
+            if (fits > 0) {
+                ItemStack given = stack.split(fits);
+                player.getInventory().add(given);
+                if (!given.isEmpty()) stack.grow(given.getCount());
+            }
             if (!stack.isEmpty()) {
                 PostmasterService.DepositResult result = PostmasterService.deposit(player, stack);
                 stored += result.stored();
                 if (result.overflow() > 0) {
-                    player.drop(stack.copyWithCount(result.overflow()), false);
+                    dropAtFeet(player, stack.copyWithCount(result.overflow()));
                     dropped += result.overflow();
                 }
             }
             amount -= count;
         }
-        if (reward.showInChat()) server.getPlayerList().broadcastSystemMessage(
-                Component.literal(player.getGameProfile().name() + " hat '")
-                        .append(display.getStyledHoverName()).append("' bekommen"), false);
+        player.containerMenu.broadcastChanges();
+        if (reward.showInChat()) server.getPlayerList().broadcastSystemMessage(announcement(player,
+                new ItemStack(item, total)), false);
         return new Delivery(stored, dropped);
+    }
+
+    /** "Player just got [Item]" with the item's tooltip on hover; the count is shown when more than one. */
+    static Component announcement(ServerPlayer player, ItemStack stack) {
+        Component itemName = stack.getDisplayName();
+        return stack.getCount() > 1
+                ? Component.translatableWithFallback("message.crazy-world-progression.loot.announce_count",
+                        "%s just got %sx %s", player.getDisplayName(), stack.getCount(), itemName)
+                : Component.translatableWithFallback("message.crazy-world-progression.loot.announce",
+                        "%s just got %s", player.getDisplayName(), itemName);
+    }
+
+    /** How many of this stack fit into the given inventory slots without anything being lost. */
+    static int roomFor(List<ItemStack> slots, ItemStack stack) {
+        int room = 0;
+        for (ItemStack slot : slots) {
+            if (slot.isEmpty()) room += stack.getMaxStackSize();
+            else if (ItemStack.isSameItemSameComponents(slot, stack))
+                room += Math.max(0, slot.getMaxStackSize() - slot.getCount());
+        }
+        return room;
+    }
+
+    /** Drops the item at the player's position, not thrown ahead like a Q drop. */
+    private static void dropAtFeet(ServerPlayer player, ItemStack stack) {
+        ItemEntity entity = new ItemEntity(player.level(), player.getX(), player.getY() + 0.25, player.getZ(),
+                stack, 0.0, 0.1, 0.0);
+        entity.setDefaultPickUpDelay();
+        player.level().addFreshEntity(entity);
     }
 
     private record Delivery(int postmasterItems, int droppedItems) { }

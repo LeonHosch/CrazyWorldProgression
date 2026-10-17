@@ -157,9 +157,12 @@ final class AdminLootPoolEditor {
             }
             default -> {
                 title = entry.target().toString();
-                detail = odds + " · " + amountLabel(entry) + (entry.showInChat() ? " · chat" : "");
+                detail = odds + " · " + amountLabel(entry);
             }
         }
+        if (entry.kind().equals("item"))
+            actions.add(new AdminPanelRegistry.AdminAction("loot.chat|" + base,
+                    entry.showInChat() ? "Chat: on" : "Chat: off", false));
         actions.add(AdminPanelRegistry.AdminAction.navigate("Edit", ENTRY + pool.id() + "/" + index));
         actions.add(new AdminPanelRegistry.AdminAction("loot.up|" + base, "↑", false));
         actions.add(new AdminPanelRegistry.AdminAction("loot.down|" + base, "↓", false));
@@ -194,7 +197,7 @@ final class AdminLootPoolEditor {
                 List.of(field("min", "Min", "1", Integer.toString(reward.min()), List.of()),
                         field("max", "Max", "1", Integer.toString(reward.max()), List.of())), List.of()));
         if (reward.kind().equals("item")) rows.add(AdminPanelRegistry.AdminEntry.editor("Announcement",
-                "Show in chat", "Tell everyone when a player gets this item.",
+                "Show in chat", "Off by default. When on, chat shows \"<player> just got <item>\" to everyone.",
                 List.of(AdminPanelRegistry.AdminField.select("show_in_chat", "Show in chat",
                         reward.showInChat() ? "Yes" : "No", List.of("No", "Yes"))), List.of()));
         rows.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Save entry", "Changes are saved to this world.",
@@ -279,6 +282,14 @@ final class AdminLootPoolEditor {
                 saveEntries(server, pool, entries);
                 if (old.kind().equals("pool")) LootPoolService.deleteIfUnused(server, old.target());
                 return AdminPanelRegistry.ActionResult.success("Removed entry", EDIT + id);
+            }
+            case "loot.chat" -> {
+                if (!old.kind().equals("item")) throw new IllegalArgumentException("Only items can be announced in chat");
+                entries.set(index, new LootPoolData.Entry(old.kind(), old.target(), old.chance(), old.weight(),
+                        old.min(), old.max(), !old.showInChat()));
+                saveEntries(server, pool, entries);
+                return AdminPanelRegistry.ActionResult.success(old.showInChat()
+                        ? "Chat announcement off for " + old.target() : "Chat announcement on for " + old.target(), EDIT + id);
             }
             case "loot.up" -> { if (index > 0) Collections.swap(entries, index, index - 1); }
             case "loot.down" -> { if (index < entries.size() - 1) Collections.swap(entries, index, index + 1); }

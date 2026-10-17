@@ -59,4 +59,27 @@ class PostmasterServiceTest {
         assertTrue(ItemStack.matches(named, restored.slots(player).get(18)));
         assertTrue(restored.slots(player).get(19).isEmpty());
     }
+
+    @Test void inventoryRoomCountsOnlyWhatReallyFits() {
+        List<ItemStack> inventory = new ArrayList<>();
+        inventory.add(new ItemStack(Items.DIAMOND, 60));
+        inventory.add(new ItemStack(Items.STONE, 64));
+        inventory.add(new ItemStack(Items.DIAMOND_SWORD));
+        for (int i = 3; i < 36; i++) inventory.add(new ItemStack(Items.STONE, 64));
+        assertEquals(4, LootPoolService.roomFor(inventory, new ItemStack(Items.DIAMOND, 10)));
+        assertEquals(0, LootPoolService.roomFor(inventory, new ItemStack(Items.GOLD_INGOT, 5)));
+        assertEquals(0, LootPoolService.roomFor(inventory, new ItemStack(Items.DIAMOND_SWORD)));
+        inventory.set(5, ItemStack.EMPTY);
+        assertEquals(64, LootPoolService.roomFor(inventory, new ItemStack(Items.GOLD_INGOT, 5)));
+        assertEquals(1, LootPoolService.roomFor(inventory, new ItemStack(Items.DIAMOND_SWORD)));
+    }
+
+    @Test void chatAnnouncementIsOffUnlessSaved() {
+        var entry = new LootPoolData.Entry("item", net.minecraft.resources.Identifier.parse("minecraft:diamond"),
+                10000, 1, 1, 1);
+        assertEquals(false, entry.showInChat());
+        var json = LootPoolData.Entry.CODEC.encodeStart(JsonOps.INSTANCE, entry).getOrThrow().getAsJsonObject();
+        json.remove("show_in_chat");
+        assertEquals(false, LootPoolData.Entry.CODEC.parse(JsonOps.INSTANCE, json).getOrThrow().showInChat());
+    }
 }

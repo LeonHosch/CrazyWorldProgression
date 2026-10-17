@@ -62,5 +62,11 @@
   "screen.crazy-world-progression.titles.equipped": "Ausgerüstet",
   "screen.crazy-world-progression.titles.loading": "Titel werden geladen…",
   "screen.crazy-world-progression.titles.empty": "Du hast noch keine Titel freigeschaltet. Schließe Erfolge ab, um welche zu verdienen.",
-  "screen.crazy-world-progression.titles.unavailable": "Dieser Server unterstützt keine Titel."
+  "screen.crazy-world-progression.titles.unavailable": "Dieser Server unterstützt keine Titel.",
+  "message.crazy-world-progression.postmaster.delivered": "Dein Inventar war voll, deshalb wurden %s Beutegegenstände an deinen Postmeister geschickt. %s",
+  "message.crazy-world-progression.postmaster.half_full": "Dein Postmeister ist mehr als halb voll (%s/%s Plätze). Bitte leere ihn bald. %s",
+  "message.crazy-world-progression.postmaster.dropped": "Dein Postmeister ist voll! %s Beutegegenstände sind vor deinen Füßen auf den Boden gefallen. Jeder kann sie aufheben.",
+  "message.crazy-world-progression.postmaster.open": "[Postmeister öffnen]",
+  "message.crazy-world-progression.loot.announce": "%s hat gerade %s bekommen",
+  "message.crazy-world-progression.loot.announce_count": "%s hat gerade %sx %s bekommen"
 }

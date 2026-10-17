@@ -47,8 +47,9 @@ public final class InstanceInvites {
                 instance.slotDimension(), instance.createdEpochMillis(), instance.portalId(), inviter.getUUID(),
                 server.getTickCount() + INVITE_TICKS));
         String name = inviter.getGameProfile().name();
+        target.sendSystemMessage(directions(target, portal).withStyle(ChatFormatting.YELLOW));
         target.sendSystemMessage(Component.literal(name + " invited you to " + portal.effectiveDisplayName()
-                        + ". Go to its entrance portal and walk in, or click when you are there: ")
+                        + ". Walk into its entrance portal, or click when you are there: ")
                 .append(Component.literal("[Join]").withStyle(style -> style.withColor(ChatFormatting.GREEN)
                         .withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/party accept " + name))
                         .withHoverEvent(new HoverEvent.ShowText(Component.literal("/party accept " + name))))));
@@ -82,12 +83,38 @@ public final class InstanceInvites {
             throw new IllegalStateException("That instance has ended");
         }
         PortalDefinition portal = PortalService.portal(server, invite.portalId());
-        if (portal == null || !player.level().dimension().identifier().equals(portal.dimension())
-                || !portal.isNear(player.position().add(0.0, 0.9, 0.0), ACCEPT_DISTANCE))
-            throw new IllegalStateException("Go to the entrance portal of " + (portal == null ? "that instance"
-                    : portal.effectiveDisplayName()) + " to join");
+        if (portal == null) throw new IllegalStateException("That instance's entrance portal no longer exists");
+        if (!player.level().dimension().identifier().equals(portal.dimension())
+                || !portal.isNear(player.position().add(0.0, 0.9, 0.0), ACCEPT_DISTANCE)) {
+            player.sendSystemMessage(directions(player, portal).withStyle(ChatFormatting.YELLOW));
+            return;
+        }
         consume(server, player.getUUID());
         PortalService.joinRunningInstance(player, instance);
+    }
+
+    /** "Go to the entrance portal of X at X 120, Y 64, Z -40 in the Overworld (85 blocks away) to join." */
+    static net.minecraft.network.chat.MutableComponent directions(ServerPlayer player, PortalDefinition portal) {
+        long x = Math.round(portal.centerX()), y = Math.round(portal.centerY()), z = Math.round(portal.centerZ());
+        Component dimension = dimensionName(portal.dimension());
+        if (player.level().dimension().identifier().equals(portal.dimension())) {
+            long distance = Math.round(Math.sqrt(player.distanceToSqr(portal.centerX(), portal.centerY(), portal.centerZ())));
+            return Component.translatableWithFallback("message.crazy-world-progression.invite.go_to_portal",
+                    "Go to the entrance portal of %s at X %s, Y %s, Z %s in %s (%s blocks away) to join.",
+                    portal.effectiveDisplayName(), x, y, z, dimension, distance);
+        }
+        return Component.translatableWithFallback("message.crazy-world-progression.invite.go_to_portal_elsewhere",
+                "Go to the entrance portal of %s at X %s, Y %s, Z %s in %s to join.",
+                portal.effectiveDisplayName(), x, y, z, dimension);
+    }
+
+    private static Component dimensionName(Identifier dimension) {
+        return switch (dimension.toString()) {
+            case "minecraft:overworld" -> Component.translatableWithFallback("message.crazy-world-progression.dimension.overworld", "the Overworld");
+            case "minecraft:the_nether" -> Component.translatableWithFallback("message.crazy-world-progression.dimension.nether", "the Nether");
+            case "minecraft:the_end" -> Component.translatableWithFallback("message.crazy-world-progression.dimension.end", "the End");
+            default -> Component.literal(dimension.toString());
+        };
     }
 
     private static Invite valid(MinecraftServer server, UUID playerId) {

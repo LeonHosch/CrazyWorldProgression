@@ -76,5 +76,10 @@
   "banner.crazy-world-progression.encounter.wiped": "Raid wiped",
   "banner.crazy-world-progression.encounter.wiped.subtitle": "Attempt %s is ready",
   "banner.crazy-world-progression.encounter.resumed": "Checkpoint",
-  "banner.crazy-world-progression.encounter.resumed.subtitle": "Resuming at encounter %s"
+  "banner.crazy-world-progression.encounter.resumed.subtitle": "Resuming at encounter %s",
+  "message.crazy-world-progression.invite.go_to_portal": "Go to the entrance portal of %s at X %s, Y %s, Z %s in %s (%s blocks away) to join.",
+  "message.crazy-world-progression.invite.go_to_portal_elsewhere": "Go to the entrance portal of %s at X %s, Y %s, Z %s in %s to join.",
+  "message.crazy-world-progression.dimension.overworld": "the Overworld",
+  "message.crazy-world-progression.dimension.nether": "the Nether",
+  "message.crazy-world-progression.dimension.end": "the End"
 }

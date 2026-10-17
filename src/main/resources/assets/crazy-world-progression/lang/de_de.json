@@ -76,5 +76,10 @@
   "banner.crazy-world-progression.encounter.wiped": "Raid gescheitert",
   "banner.crazy-world-progression.encounter.wiped.subtitle": "Versuch %s ist bereit",
   "banner.crazy-world-progression.encounter.resumed": "Checkpoint",
-  "banner.crazy-world-progression.encounter.resumed.subtitle": "Weiter ab Kampf %s"
+  "banner.crazy-world-progression.encounter.resumed.subtitle": "Weiter ab Kampf %s",
+  "message.crazy-world-progression.invite.go_to_portal": "Geh zum Eingangsportal von %s bei X %s, Y %s, Z %s in %s (%s Blöcke entfernt), um beizutreten.",
+  "message.crazy-world-progression.invite.go_to_portal_elsewhere": "Geh zum Eingangsportal von %s bei X %s, Y %s, Z %s in %s, um beizutreten.",
+  "message.crazy-world-progression.dimension.overworld": "der Oberwelt",
+  "message.crazy-world-progression.dimension.nether": "dem Nether",
+  "message.crazy-world-progression.dimension.end": "dem End"
 }

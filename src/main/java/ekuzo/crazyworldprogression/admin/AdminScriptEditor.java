@@ -28,7 +28,7 @@ final class AdminScriptEditor {
     private static final Map<MinecraftServer, Map<UUID, Map<String, Draft>>> DRAFTS = new WeakHashMap<>();
     private static final List<String> TYPES = List.of("Spawn mobs", "Sleep", "If", "While",
             "Event box", "Check redstone power", "Spawn portal", "Track counter", "Variable",
-            "Particles", "Explosion", "Play sound", "Apply effect", "Remove effect", "Loot pool", "Unlock achievement", "Encounter start", "Encounter end",
+            "Particles", "Explosion", "Play sound", "Apply effect", "Remove effect", "Loot pool", "Unlock achievement", "Encounter start", "Encounter end", "Wipe",
             "Spawn building", "Despawn building");
     private static final List<String> ADVANCED_TYPES = List.of("Spawn wave", "Spawn entity", "Wait",
             "Mob cast", "Set phase", "Trigger event", "Reward currency", "Reward item", "Reward loot table",
@@ -216,6 +216,9 @@ final class AdminScriptEditor {
                                         step.value("source"), List.of("mob kills", "event box triggers")),
                                 field(prefix, step, "source_id", "Mob ID or event box name"),
                                 field(prefix, step, "variable", "Variable name")), List.of()));
+                case "Wipe" -> rows.add(row(section, "Fail the encounter",
+                        "Everyone is downed as a spectator; the encounter resets after 5 seconds unless Encounter end runs first.",
+                        List.of(), List.of()));
                 case "Encounter start" -> rows.add(row(section, "Raid encounter",
                         "Begin the one-revive-per-player attempt. Clears script mobs, buildings, portals, eventboxes and sensors.",
                         List.of(), List.of()));
@@ -637,7 +640,7 @@ final class AdminScriptEditor {
                     form.fields.put("source", "mob kills"); form.fields.put("source_id", "minecraft:zombie");
                     form.fields.put("variable", "kills");
                 }
-                case "Encounter start" -> { }
+                case "Encounter start", "Wipe" -> { }
                 case "Encounter end" -> {
                     form.fields.put("spawn_enabled", "No");
                     form.fields.put("x", player == null ? "0" : Double.toString(player.getX()));
@@ -843,6 +846,8 @@ final class AdminScriptEditor {
                 form.fields.put("amplifier", Integer.toString(value.amplifier()));
             } else if (step instanceof MobScript.EncounterStartStep) {
                 form = empty("Encounter start", null);
+            } else if (step instanceof MobScript.WipeStep) {
+                form = empty("Wipe", null);
             } else if (step instanceof MobScript.EncounterEndStep || step instanceof MobScript.RaidCompleteStep) {
                 form = empty("Encounter end", null);
                 MobScript.Position spawn = step instanceof MobScript.EncounterEndStep end ? end.spawn() : null;
@@ -914,6 +919,7 @@ final class AdminScriptEditor {
                         (value("source").equals("mob kills") ? "kills" : "box_triggers")
                                 + "('" + value("source_id") + "')", value("variable"), "increment", "1");
                 case "Encounter start" -> new MobScript.EncounterStartStep();
+                case "Wipe" -> new MobScript.WipeStep();
                 case "Encounter end" -> new MobScript.EncounterEndStep("Yes".equals(value("spawn_enabled"))
                         ? new MobScript.Position(number("x"), number("y"), number("z")) : null);
                 case "Spawn building", "Despawn building" -> new MobScript.BuildingStep(

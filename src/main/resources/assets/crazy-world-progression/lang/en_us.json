@@ -81,5 +81,9 @@
   "message.crazy-world-progression.invite.go_to_portal_elsewhere": "Go to the entrance portal of %s at X %s, Y %s, Z %s in %s to join.",
   "message.crazy-world-progression.dimension.overworld": "the Overworld",
   "message.crazy-world-progression.dimension.nether": "the Nether",
-  "message.crazy-world-progression.dimension.end": "the End"
+  "message.crazy-world-progression.dimension.end": "the End",
+  "banner.crazy-world-progression.encounter.failed": "Encounter failed",
+  "banner.crazy-world-progression.encounter.failed.subtitle": "Resetting in %s seconds",
+  "banner.crazy-world-progression.encounter.clutch": "Cleared in the clutch!",
+  "banner.crazy-world-progression.encounter.clutch.subtitle": "The encounter ended just in time"
 }

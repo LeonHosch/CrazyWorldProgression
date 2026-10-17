@@ -28,7 +28,9 @@ public final class EncounterBanner {
         STARTED(0x55FF55, "Encounter started", "Each player has one revive"),
         COMPLETE(0xFFD700, "Encounter complete", "Revives and entry locks reset"),
         WIPED(0xFF5555, "Raid wiped", "Attempt %s is ready"),
-        RESUMED(0x55FFFF, "Checkpoint", "Resuming at encounter %s");
+        RESUMED(0x55FFFF, "Checkpoint", "Resuming at encounter %s"),
+        FAILED(0xFF5555, "Encounter failed", "Resetting in %s seconds"),
+        CLUTCH(0xFFD700, "Cleared in the clutch!", "The encounter ended just in time");
 
         final int color;
         final String title;

@@ -32,7 +32,78 @@ public final class RaidService {
     private static final String MARKER = "cwp.raid.revive.";
     private RaidService() { }
 
+    /** Seconds between a wipe and the encounter reset; an encounter_end in this window is a clutch clear. */
+    public static final int WIPE_DELAY_SECONDS = 5;
+    private static final java.util.Map<MinecraftServer, java.util.Map<String, Long>> PENDING_WIPES = new java.util.WeakHashMap<>();
+
+    /** Tick at which a wipe started at the given tick resets the encounter. */
+    static long wipeResetTick(long wipeTick) {
+        return wipeTick + WIPE_DELAY_SECONDS * 20L;
+    }
+
+    /** What happens to a pending wipe: still waiting, reset now, or none pending. */
+    enum WipeState { NONE, WAITING, RESET }
+
+    static WipeState wipeState(Long resetTick, long now) {
+        if (resetTick == null) return WipeState.NONE;
+        return now >= resetTick ? WipeState.RESET : WipeState.WAITING;
+    }
+
+    public static boolean wipePending(MinecraftServer server, Identifier slot) {
+        return PENDING_WIPES.getOrDefault(server, java.util.Map.of()).containsKey(slot.toString());
+    }
+
+    /**
+     * The wipe step (and /cwp wipe): every participant still standing is downed in place as a spectator, without
+     * dying, so nothing drops. Then the same 5-second window as a natural wipe starts.
+     */
+    public static void forceWipe(ServerLevel level) {
+        MinecraftServer server = level.getServer();
+        Identifier slot = level.dimension().identifier();
+        if (!isRaid(server, slot)) throw new IllegalStateException("A wipe requires a raid instance");
+        PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot.toString());
+        RaidData data = RaidData.get(server);
+        RaidData.Attempt before = data.get(slot.toString());
+        if (before == null) before = RaidData.Attempt.first();
+        Map<String, RaidData.Spot> deaths = new HashMap<>(before.deaths());
+        Map<String, String> modes = new HashMap<>(before.originalModes());
+        for (ServerPlayer player : List.copyOf(level.players())) {
+            String id = player.getUUID().toString();
+            if (!instance.admittedPlayers().contains(id) || player.isDeadOrDying() || deaths.containsKey(id)) continue;
+            deaths.put(id, deathSpot(player, instance));
+            modes.putIfAbsent(id, player.gameMode.getGameModeForPlayer().getName());
+            player.setGameMode(GameType.SPECTATOR);
+        }
+        data.put(slot.toString(), new RaidData.Attempt(before.number(), deaths, before.spentRevives(),
+                before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive()));
+        scheduleWipe(server, instance);
+    }
+
+    private static void scheduleWipe(MinecraftServer server, PortalData.StoredInstance instance) {
+        java.util.Map<String, Long> pending = PENDING_WIPES.computeIfAbsent(server, ignored -> new HashMap<>());
+        if (pending.containsKey(instance.slotDimension().toString())) return;
+        pending.put(instance.slotDimension().toString(), wipeResetTick(server.getTickCount()));
+        ServerLevel level = level(server, instance.slotDimension());
+        if (level != null) clearMarkers(level);
+        EncounterBanner.show(onlineParticipants(server, instance), EncounterBanner.Kind.FAILED,
+                Integer.toString(WIPE_DELAY_SECONDS));
+    }
+
+    private static void tickWipes(MinecraftServer server) {
+        java.util.Map<String, Long> pending = PENDING_WIPES.get(server);
+        if (pending == null || pending.isEmpty()) return;
+        for (String slot : List.copyOf(pending.keySet())) {
+            if (wipeState(pending.get(slot), server.getTickCount()) != WipeState.RESET) continue;
+            pending.remove(slot);
+            PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot);
+            RaidData.Attempt attempt = RaidData.get(server).get(slot);
+            if (instance != null && attempt != null) wipe(server, instance, attempt);
+        }
+    }
+
     public static void initialize() {
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(RaidService::tickWipes);
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(PENDING_WIPES::remove);
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayer player) onDeath(player);
         });
@@ -102,6 +173,8 @@ public final class RaidService {
     }
 
     static void remove(MinecraftServer server, Identifier slot) {
+        java.util.Map<String, Long> pendingWipes = PENDING_WIPES.get(server);
+        if (pendingWipes != null) pendingWipes.remove(slot.toString());
         ServerLevel instanceLevel = level(server, slot);
         if (instanceLevel != null && isRaid(server, slot)) clearEffects(instanceLevel);
         RaidData.Attempt attempt = RaidData.get(server).get(slot.toString());
@@ -229,7 +302,7 @@ public final class RaidService {
         RaidData.Attempt after = new RaidData.Attempt(before.number(), deaths, before.spentRevives(),
                 before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive());
         data.put(slot.toString(), after);
-        if (allDown(server, instance, after)) wipe(server, instance, after);
+        if (allDown(server, instance, after)) scheduleWipe(server, instance);
         else spawnMarker(player, after.deaths().get(player.getUUID().toString()));
     }
 
@@ -357,6 +430,8 @@ public final class RaidService {
         RaidData data = RaidData.get(server);
         RaidData.Attempt before = data.get(slot.toString());
         if (before == null) return;
+        java.util.Map<String, Long> pendingWipes = PENDING_WIPES.get(server);
+        boolean clutch = pendingWipes != null && pendingWipes.remove(slot.toString()) != null;
         clearEffects(level);
         ekuzo.crazyworldprogression.mobforge.MobForge.SCRIPT_EXECUTOR.clearPocketState(
                 PortalService.instanceId(PortalData.get(server).instances().get(slot.toString())));
@@ -374,9 +449,13 @@ public final class RaidService {
             if (player.isDeadOrDying()) continue;
             if (before.originalModes().containsKey(player.getUUID().toString()))
                 restoreMode(player, before.originalModes().get(player.getUUID().toString()));
-            if (before.deaths().containsKey(player.getUUID().toString())) rally(player, PortalData.get(server).instances().get(slot.toString()));
+            // After a clutch clear everyone goes to the (new) spawn; otherwise only downed players do.
+            if (clutch || before.deaths().containsKey(player.getUUID().toString()))
+                rally(player, PortalData.get(server).instances().get(slot.toString()));
         }
-        EncounterBanner.show(level.players(), EncounterBanner.Kind.COMPLETE, "");
+        PortalData.StoredInstance current = PortalData.get(server).instances().get(slot.toString());
+        EncounterBanner.show(current == null ? level.players() : onlineParticipants(server, current),
+                clutch ? EncounterBanner.Kind.CLUTCH : EncounterBanner.Kind.COMPLETE, "");
     }
 
     private static void resetEncounter(MinecraftServer server, PortalData.StoredInstance instance) {

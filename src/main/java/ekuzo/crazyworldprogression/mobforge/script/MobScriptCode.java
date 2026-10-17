@@ -84,8 +84,8 @@ public final class MobScriptCode {
                 Object body = arguments(call.group(2), lineNumber);
                 if (name.equals("sleep") && body instanceof Map<?, ?> map && map.size() == 1 && map.containsKey("duration"))
                     body = map.get("duration");
-				if ((name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end"))
-						&& body instanceof Map<?, ?> map && map.isEmpty()) body = true;
+				if ((name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end")
+						|| name.equals("wipe")) && body instanceof Map<?, ?> map && map.isEmpty()) body = true;
                 steps.add(Map.of(name, body));
             }
         }
@@ -113,8 +113,8 @@ public final class MobScriptCode {
                 out.append("while ").append(loop.get("condition")).append(", max_iterations=")
                         .append(loop.get("max_iterations")).append(":\n"); depth++;
             } else if (name.equals("sleep")) out.append("sleep(duration=").append(JSON.toJson(body)).append(")\n");
-            else if ((name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end"))
-                    && !(body instanceof Map<?, ?>))
+            else if ((name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end")
+                    || name.equals("wipe")) && !(body instanceof Map<?, ?>))
                 out.append(name).append("()\n");
             else if (body instanceof Map<?, ?> fields) {
                 List<String> args = new ArrayList<>();

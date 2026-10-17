@@ -64,7 +64,18 @@ public final class CwpAdminCommands {
                 .then(statsBranch())
                 .then(PortalCommands.adminBranch())
                 .then(Commands.literal("sources").executes(CwpAdminCommands::sources))
-                .then(Commands.literal("reload").executes(CwpAdminCommands::reload)));
+                .then(Commands.literal("reload").executes(CwpAdminCommands::reload))
+                .then(Commands.literal("wipe").executes(context -> {
+                    try {
+                        ekuzo.crazyworldprogression.portals.RaidService.forceWipe(
+                                context.getSource().getPlayerOrException().level());
+                        return 1;
+                    } catch (Exception exception) {
+                        context.getSource().sendFailure(net.minecraft.network.chat.Component.literal(
+                                exception.getMessage() == null ? "Wipe failed" : exception.getMessage()));
+                        return 0;
+                    }
+                })));
     }
 
     // Open CWP's modular administration dashboard for the executing game master.

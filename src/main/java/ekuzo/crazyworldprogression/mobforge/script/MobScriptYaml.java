@@ -67,6 +67,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("effect")) return effect(map(step.get("effect"), field + ".effect"), field);
 		if (step.containsKey("raid_complete")) return new MobScript.RaidCompleteStep();
 		if (step.containsKey("encounter_start")) return new MobScript.EncounterStartStep();
+		if (step.containsKey("wipe")) return new MobScript.WipeStep();
 		if (step.containsKey("encounter_end")) return encounterEnd(step.get("encounter_end"), field + ".encounter_end");
 		String type = string(step.get("type"), field + ".type");
 		return switch (type) {
@@ -100,6 +101,7 @@ public final class MobScriptYaml {
 			case "effect" -> effect(step, field);
 			case "raid_complete" -> new MobScript.RaidCompleteStep();
 			case "encounter_start" -> new MobScript.EncounterStartStep();
+			case "wipe" -> new MobScript.WipeStep();
 			case "encounter_end" -> encounterEnd(step, field);
 			default -> throw new IllegalArgumentException(field + ".type is unknown: " + type);
 		};
@@ -379,6 +381,7 @@ public final class MobScriptYaml {
 							"action", effect.action(), "amplifier", effect.amplifier())));
 			else if (step instanceof MobScript.RaidCompleteStep) steps.add(Map.of("raid_complete", true));
 			else if (step instanceof MobScript.EncounterStartStep) steps.add(Map.of("encounter_start", true));
+			else if (step instanceof MobScript.WipeStep) steps.add(Map.of("wipe", true));
 			else if (step instanceof MobScript.EncounterEndStep end) steps.add(Map.of("encounter_end", end.spawn() == null ? true
 					: Map.of("spawn", position(end.spawn().x(), end.spawn().y(), end.spawn().z()))));
 		}

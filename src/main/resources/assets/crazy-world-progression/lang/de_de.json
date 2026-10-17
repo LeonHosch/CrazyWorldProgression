@@ -81,5 +81,9 @@
   "message.crazy-world-progression.invite.go_to_portal_elsewhere": "Geh zum Eingangsportal von %s bei X %s, Y %s, Z %s in %s, um beizutreten.",
   "message.crazy-world-progression.dimension.overworld": "der Oberwelt",
   "message.crazy-world-progression.dimension.nether": "dem Nether",
-  "message.crazy-world-progression.dimension.end": "dem End"
+  "message.crazy-world-progression.dimension.end": "dem End",
+  "banner.crazy-world-progression.encounter.failed": "Kampf gescheitert",
+  "banner.crazy-world-progression.encounter.failed.subtitle": "Neustart in %s Sekunden",
+  "banner.crazy-world-progression.encounter.clutch": "In letzter Sekunde geschafft!",
+  "banner.crazy-world-progression.encounter.clutch.subtitle": "Der Kampf endete gerade noch rechtzeitig"
 }

@@ -8,7 +8,7 @@ import java.util.List;
 public record MobScript(String id, List<Step> steps) {
 	public MobScript { steps = steps == null ? List.of() : List.copyOf(steps); }
 
-	public sealed interface Step permits SpawnStep, SpawnMobsStep, SleepStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, EffectStep, EncounterStartStep, EncounterEndStep, RaidCompleteStep { }
+	public sealed interface Step permits SpawnStep, SpawnMobsStep, SleepStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, EffectStep, EncounterStartStep, EncounterEndStep, RaidCompleteStep, WipeStep { }
 	public record Position(double x, double y, double z) { }
 	public record Offset(double x, double y, double z) {
 		public static final Offset NONE = new Offset(0, 0, 0);
@@ -76,6 +76,8 @@ public record MobScript(String id, List<Step> steps) {
 	}
 	public record RaidCompleteStep() implements Step { }
 	public record EncounterStartStep() implements Step { }
+	/** Fail the encounter: everyone is downed, and after 5 seconds the encounter resets unless it ends first. */
+	public record WipeStep() implements Step { }
 	/**
 	 * Ends a raid encounter. The optional spawn becomes the instance's rally, respawn and rejoin point, and is
 	 * where a run resumed from this checkpoint starts.

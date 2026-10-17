@@ -431,10 +431,14 @@ public final class MobScriptExecutor {
 				run.step++;
 				run.encountersCompleted++;
 				clearScriptManaged(run);
-				RaidService.complete(run.level);
+				// Store the new spawn first so a clutch clear (wipe pending) respawns everyone there.
 				if (end.spawn() != null) RaidService.moveSpawn(run.level, end.spawn().x(), end.spawn().y(),
 						end.spawn().z(), false);
+				RaidService.complete(run.level);
 				RaidCheckpoints.encounterCompleted(run.level, run.encountersCompleted);
+			} else if (step instanceof MobScript.WipeStep) {
+				run.step++;
+				RaidService.forceWipe(run.level);
 			}
 		}
 		return run.watches.isEmpty();

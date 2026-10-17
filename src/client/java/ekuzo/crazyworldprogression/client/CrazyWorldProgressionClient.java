@@ -9,6 +9,7 @@ public class CrazyWorldProgressionClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		EchelonClientSettings.initialize();
 		TitleClient.initialize();
+		EncounterBannerClient.initialize();
 		// Client initialization remains visible here so startup ownership is easy to follow.
 		AdminPanelClient.initialize();
 		AreaSelectionClient.initialize();

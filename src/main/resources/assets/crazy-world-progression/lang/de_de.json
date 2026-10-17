@@ -68,5 +68,11 @@
   "message.crazy-world-progression.postmaster.dropped": "Dein Postmeister ist voll! %s Beutegegenstände sind vor deinen Füßen auf den Boden gefallen. Jeder kann sie aufheben.",
   "message.crazy-world-progression.postmaster.open": "[Postmeister öffnen]",
   "message.crazy-world-progression.loot.announce": "%s hat gerade %s bekommen",
-  "message.crazy-world-progression.loot.announce_count": "%s hat gerade %sx %s bekommen"
+  "message.crazy-world-progression.loot.announce_count": "%s hat gerade %sx %s bekommen",
+  "banner.crazy-world-progression.encounter.started": "Kampf begonnen",
+  "banner.crazy-world-progression.encounter.started.subtitle": "Jeder Spieler hat eine Wiederbelebung",
+  "banner.crazy-world-progression.encounter.complete": "Kampf gewonnen",
+  "banner.crazy-world-progression.encounter.complete.subtitle": "Wiederbelebungen und Eintrittssperren zurückgesetzt",
+  "banner.crazy-world-progression.encounter.wiped": "Raid gescheitert",
+  "banner.crazy-world-progression.encounter.wiped.subtitle": "Versuch %s ist bereit"
 }

@@ -56,6 +56,7 @@ public final class PortalService {
     public static void initialize() {
         RaidService.initialize();
         InstanceEntityLeases.initialize();
+        EncounterBanner.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             rebuildIndex(server);
             expireDueInstances(server, Instant.now().toEpochMilli());

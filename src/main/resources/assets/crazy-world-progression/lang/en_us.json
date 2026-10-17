@@ -68,5 +68,11 @@
   "message.crazy-world-progression.postmaster.dropped": "Your postmaster is full! %s loot item(s) dropped on the ground at your feet. Anyone can pick them up.",
   "message.crazy-world-progression.postmaster.open": "[Open postmaster]",
   "message.crazy-world-progression.loot.announce": "%s just got %s",
-  "message.crazy-world-progression.loot.announce_count": "%s just got %sx %s"
+  "message.crazy-world-progression.loot.announce_count": "%s just got %sx %s",
+  "banner.crazy-world-progression.encounter.started": "Encounter started",
+  "banner.crazy-world-progression.encounter.started.subtitle": "Each player has one revive",
+  "banner.crazy-world-progression.encounter.complete": "Encounter complete",
+  "banner.crazy-world-progression.encounter.complete.subtitle": "Revives and entry locks reset",
+  "banner.crazy-world-progression.encounter.wiped": "Raid wiped",
+  "banner.crazy-world-progression.encounter.wiped.subtitle": "Attempt %s is ready"
 }

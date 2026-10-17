@@ -71,8 +71,7 @@ public final class RaidService {
         if (!before.deaths().isEmpty()) throw new IllegalStateException("Cannot start an encounter while players are down");
         data.put(slot.toString(), new RaidData.Attempt(before.number(), Map.of(), List.of(),
                 Map.of(), before.pendingRespawn(), before.originalModes(), true));
-        for (ServerPlayer player : level.players())
-            player.sendSystemMessage(Component.literal("Encounter started. Each player has one revive."));
+        EncounterBanner.show(level.players(), EncounterBanner.Kind.STARTED, "");
     }
 
     private static boolean inEncounter(MinecraftServer server, Identifier dimension) {
@@ -127,14 +126,44 @@ public final class RaidService {
                 before.spentRevives(), entries, before.pendingRespawn(), before.originalModes(), before.encounterActive()));
     }
 
+    /**
+     * Vanilla removes a dead player's body from the world about a second after death, so an instance looks
+     * empty while its only player is on the death screen. Keep it while any admitted, online player is dead
+     * or is recorded as down / waiting to respawn here, whether or not the encounter is active.
+     */
     static boolean retainEmpty(MinecraftServer server, PortalData.StoredInstance instance) {
-        if (!inEncounter(server, instance.slotDimension())) return false;
+        if (!isRaid(server, instance.slotDimension())) return false;
         RaidData.Attempt attempt = RaidData.get(server).get(instance.slotDimension().toString());
-        if (attempt == null) return false;
-        return instance.admittedPlayers().stream().anyMatch(id -> {
-            try { return server.getPlayerList().getPlayer(UUID.fromString(id)) != null; }
-            catch (IllegalArgumentException ignored) { return false; }
-        }) && (!attempt.deaths().isEmpty() || !attempt.pendingRespawn().isEmpty());
+        java.util.Set<String> dead = new java.util.HashSet<>();
+        java.util.Set<String> online = new java.util.HashSet<>();
+        for (String id : instance.admittedPlayers()) {
+            ServerPlayer player;
+            try { player = server.getPlayerList().getPlayer(UUID.fromString(id)); }
+            catch (IllegalArgumentException ignored) { continue; }
+            if (player == null) continue;
+            online.add(id);
+            if (player.isDeadOrDying()) dead.add(id);
+        }
+        return keepWhileRespawning(online, dead, attempt == null ? java.util.Set.of() : attempt.deaths().keySet(),
+                attempt == null ? List.of() : attempt.pendingRespawn());
+    }
+
+    static boolean keepWhileRespawning(java.util.Set<String> online, java.util.Set<String> dead,
+                                       java.util.Set<String> down, List<String> pendingRespawn) {
+        for (String id : online)
+            if (dead.contains(id) || down.contains(id) || pendingRespawn.contains(id)) return true;
+        return false;
+    }
+
+    private static List<ServerPlayer> onlineParticipants(MinecraftServer server, PortalData.StoredInstance instance) {
+        List<ServerPlayer> players = new ArrayList<>();
+        for (String id : instance.admittedPlayers()) {
+            try {
+                ServerPlayer player = server.getPlayerList().getPlayer(UUID.fromString(id));
+                if (player != null) players.add(player);
+            } catch (IllegalArgumentException ignored) { }
+        }
+        return players;
     }
 
     static void onJoin(ServerPlayer player) {
@@ -287,8 +316,10 @@ public final class RaidService {
             if (before.originalModes().containsKey(player.getUUID().toString()))
                 restoreMode(player, before.originalModes().get(player.getUUID().toString()));
             rally(player, instance);
-            player.sendSystemMessage(Component.literal("Raid wiped. Attempt " + (before.number() + 1) + " is ready."));
         }
+        // Dead players get the banner too; it is still showing when they respawn quickly.
+        EncounterBanner.show(onlineParticipants(server, instance), EncounterBanner.Kind.WIPED,
+                Integer.toString(before.number() + 1));
     }
 
     /** Scripted encounter completion releases entry locks and revive charges without destroying the instance. */
@@ -317,8 +348,8 @@ public final class RaidService {
             if (before.originalModes().containsKey(player.getUUID().toString()))
                 restoreMode(player, before.originalModes().get(player.getUUID().toString()));
             if (before.deaths().containsKey(player.getUUID().toString())) rally(player, PortalData.get(server).instances().get(slot.toString()));
-            player.sendSystemMessage(Component.literal("Encounter complete. Revives and entry locks reset."));
         }
+        EncounterBanner.show(level.players(), EncounterBanner.Kind.COMPLETE, "");
     }
 
     private static void resetEncounter(MinecraftServer server, PortalData.StoredInstance instance) {

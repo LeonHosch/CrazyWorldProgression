@@ -3,7 +3,6 @@ package ekuzo.crazyworldprogression.portals;
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.buildings.BuildingService;
-import ekuzo.crazyworldprogression.cleanup.BlockCleanupBudget;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -40,7 +39,6 @@ public final class PortalService {
     private static final double GROUP_ENTRY_DISTANCE = 20.0;
     private static final long PROMPT_LIFETIME_TICKS = 600L;
     private static final long COORDINATE_TRAVEL_COOLDOWN_TICKS = 20L;
-    private static final int CLEANUP_BLOCKS_PER_TICK = BlockCleanupBudget.PER_TICK;
     private static final BlockPos INSTANCE_CENTER = new BlockPos(0, 64, 0);
     private static final Map<MinecraftServer, Map<Identifier, List<PortalDefinition>>> PORTALS_BY_DIMENSION =
             new WeakHashMap<>();
@@ -65,6 +63,7 @@ public final class PortalService {
         RaidService.initialize();
         InstanceEntityLeases.initialize();
         InstanceBuilds.initialize();
+        ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
         Parties.initialize();
         EncounterBanner.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
@@ -99,7 +98,6 @@ public final class PortalService {
                 CLEANUPS.remove(server);
             }
             BuildingService.clearScheduledState(server);
-            BlockCleanupBudget.clear(server);
             PortalNetworking.clear(server);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(PocketEditorService::flushAutoSaves);
@@ -521,7 +519,10 @@ public final class PortalService {
         PocketEditorService.tickAutoSave(server);
         ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.tick(server);
         PortalPreviewNetworking.tick(server);
-        if (!BuildingService.tickScheduledClears(server, CLEANUP_BLOCKS_PER_TICK)) processCleanups(server);
+        // Block work by priority after scripts: instance creation (and its clears), then deletion cleanup.
+        BuildingService.tickScheduledClears(server);
+        InstanceBuilds.tick(server);
+        processCleanups(server);
         tickPreparing(server);
         restoreVehicleMomentum(server, tick);
         if (tick % 20L == 0L) expireEmptyPrivateInstances(server);
@@ -1059,9 +1060,9 @@ public final class PortalService {
         synchronized (CLEANUPS) {
             tasks = new HashMap<>(CLEANUPS.computeIfAbsent(server, ignored -> new HashMap<>()));
         }
-        int budget = CLEANUP_BLOCKS_PER_TICK;
         for (Map.Entry<Identifier, CleanupTask> entry : tasks.entrySet()) {
-            if (budget <= 0) break;
+            if (!ekuzo.crazyworldprogression.cleanup.TickBudget.available(server,
+                    ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.CLEANUP)) break;
             CleanupTask task = entry.getValue();
             ServerLevel level = server.getLevel(dimensionKey(task.instance().slotDimension()));
             if (level == null) continue;
@@ -1070,12 +1071,11 @@ public final class PortalService {
             long buildingIndex = task.buildingIndex();
             boolean clearingBuildings = next < 0L;
             if (clearingBuildings) {
-                buildingIndex = BuildingService.clearInstanceBatch(level, buildingIndex, budget);
+                buildingIndex = BuildingService.clearInstanceBatch(level, buildingIndex,
+                        ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.CLEANUP);
             } else {
-                next = PortalTemplateService.clearBatch(level, task.instance(), next, budget);
+                next = PortalTemplateService.clearBatch(level, task.instance(), next);
             }
-            // A slice may finish early; reserving its full budget still bounds this server tick.
-            budget = 0;
             synchronized (CLEANUPS) {
                 Map<Identifier, CleanupTask> live = CLEANUPS.get(server);
                 if (clearingBuildings && buildingIndex < 0L) {

@@ -1,7 +1,6 @@
 package ekuzo.crazyworldprogression.buildings;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
-import ekuzo.crazyworldprogression.cleanup.BlockCleanupBudget;
 import ekuzo.crazyworldprogression.selection.AreaSelectionService;
 import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.mobforge.script.MobScript;
@@ -87,6 +86,32 @@ public final class BuildingService {
         return BuildingData.get(server).remove(id);
     }
 
+    /**
+     * Places a saved building a slice at a time within the script time budget; returns the next block index,
+     * or -1 when the building is complete.
+     */
+    public static long spawnBatch(ServerLevel level, Identifier id, BlockPos origin, long start) {
+        BuildingInfo info = building(level.getServer(), id);
+        if (info == null) throw new IllegalArgumentException("Unknown building " + id);
+        StructureTemplate template = level.getServer().getStructureManager().get(structureId(id))
+                .orElseThrow(() -> new IllegalStateException("Missing saved blocks for building " + id));
+        var palettes = ((ekuzo.crazyworldprogression.mixin.StructureTemplateAccessor) template).cwp$palettes();
+        List<StructureTemplate.StructureBlockInfo> blocks = palettes.isEmpty() ? List.of() : palettes.getFirst().blocks();
+        int index = (int) start;
+        try (var slice = ekuzo.crazyworldprogression.cleanup.TickBudget.start(level.getServer(), ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT)) {
+            int done = 0;
+            while (index < blocks.size() && slice.more(done++)) {
+                ekuzo.crazyworldprogression.portals.InstanceBuilds.placeOne(level, origin, blocks.get(index));
+                index++;
+            }
+        }
+        if (index < blocks.size()) return index;
+        if (PortalRegistry.instanceSlots().contains(level.dimension().identifier()))
+            BuildingData.get(level.getServer()).addPlacement(level.dimension().identifier(),
+                    new BuildingData.Placement(id, origin.asLong(), info.sizeX(), info.sizeY(), info.sizeZ()));
+        return -1L;
+    }
+
     public static void spawn(ServerLevel level, Identifier id, BlockPos origin) {
         BuildingInfo info = building(level.getServer(), id);
         if (info == null) throw new IllegalArgumentException("Unknown building " + id);
@@ -105,22 +130,22 @@ public final class BuildingService {
     }
 
     /** Clear at most one server-tick slice; return the next index or -1 when finished. */
-    public static long clearBatch(ServerLevel level, Identifier id, BlockPos origin, long start, int budget) {
+    public static long clearBatch(ServerLevel level, Identifier id, BlockPos origin, long start) {
         BuildingInfo info = building(level.getServer(), id);
         if (info == null) throw new IllegalArgumentException("Unknown building " + id);
-        long next = clearRangeBatch(level, origin, info.sizeX(), info.sizeY(), info.sizeZ(), start, budget);
+        long next = clearRangeBatch(level, origin, info.sizeX(), info.sizeY(), info.sizeZ(), start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT);
         if (next < 0) BuildingData.get(level.getServer()).removePlacement(level.dimension().identifier(), origin.asLong());
         return next;
     }
 
     /** Clear an old placement at the spawn origin before replacing it; the caller resumes next tick. */
-    public static long clearPreviousBatch(ServerLevel level, BlockPos origin, long start, int budget) {
+    public static long clearPreviousBatch(ServerLevel level, BlockPos origin, long start) {
         if (!PortalRegistry.instanceSlots().contains(level.dimension().identifier())) return -1L;
         BuildingData data = BuildingData.get(level.getServer());
         for (BuildingData.Placement placement : List.copyOf(data.placements(level.dimension().identifier()))) {
             if (placement.origin() != origin.asLong()) continue;
             long next = clearRangeBatch(level, origin, placement.sizeX(), placement.sizeY(), placement.sizeZ(),
-                    start, budget);
+                    start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT);
             if (next >= 0) return next;
             data.removePlacement(level.dimension().identifier(), placement.origin());
             return data.placements(level.dimension().identifier()).stream()
@@ -130,12 +155,12 @@ public final class BuildingService {
     }
 
     /** Clear at most one slice of one recorded building in a reusable instance slot. */
-    public static long clearInstanceBatch(ServerLevel level, long start, int budget) {
+    public static long clearInstanceBatch(ServerLevel level, long start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority priority) {
         BuildingData data = BuildingData.get(level.getServer());
         for (BuildingData.Placement placement : List.copyOf(data.placements(level.dimension().identifier()))) {
             BlockPos origin = BlockPos.of(placement.origin());
             long next = clearRangeBatch(level, origin, placement.sizeX(), placement.sizeY(),
-                    placement.sizeZ(), start, budget);
+                    placement.sizeZ(), start, priority);
             if (next >= 0) return next;
             data.removePlacement(level.dimension().identifier(), placement.origin());
             return data.placements(level.dimension().identifier()).isEmpty() ? -1L : 0L;
@@ -158,12 +183,13 @@ public final class BuildingService {
     }
 
     /** Use one shared slice before portal cleanup; return whether this tick's budget was consumed. */
-    public static boolean tickScheduledClears(MinecraftServer server, int budget) {
+    public static boolean tickScheduledClears(MinecraftServer server) {
         Map<Identifier, ScheduledClear> jobs = SCHEDULED_CLEARS.get(server);
         if (jobs == null || jobs.isEmpty()) return false;
         var entry = jobs.entrySet().iterator().next();
         ScheduledClear job = entry.getValue();
-        long next = clearInstanceBatch(job.level(), job.nextIndex(), budget);
+        // Scheduled clears belong to new instances and wipe resets, so they share instance creation's priority.
+        long next = clearInstanceBatch(job.level(), job.nextIndex(), ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.CREATION);
         if (next < 0L) {
             jobs.remove(entry.getKey());
             try { job.continuation().run(); }
@@ -189,20 +215,24 @@ public final class BuildingService {
     private record ScheduledClear(ServerLevel level, long nextIndex, Runnable continuation) { }
 
     private static long clearRangeBatch(ServerLevel level, BlockPos origin, int sizeX, int sizeY,
-                                        int sizeZ, long start, int budget) {
+                                        int sizeZ, long start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority priority) {
         int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         long volume = (long) sizeX * sizeY * sizeZ;
-        long end = Math.min(volume, start + BlockCleanupBudget.reserve(level.getServer(), budget));
         long layer = (long) sizeX * sizeZ;
-        for (long index = start; index < end; index++) {
-            int y = (int) (index / layer);
-            int z = (int) ((index % layer) / sizeX);
-            int x = (int) (index % sizeX);
-            cursor.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
-            if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(), flags);
+        long index = start;
+        try (var slice = ekuzo.crazyworldprogression.cleanup.TickBudget.start(level.getServer(), priority)) {
+            int done = 0;
+            while (index < volume && slice.more(done++)) {
+                int y = (int) (index / layer);
+                int z = (int) ((index % layer) / sizeX);
+                int x = (int) (index % sizeX);
+                cursor.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+                if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(), flags);
+                index++;
+            }
         }
-        return end >= volume ? -1 : end;
+        return index >= volume ? -1 : index;
     }
 
     private static Identifier structureId(Identifier id) {

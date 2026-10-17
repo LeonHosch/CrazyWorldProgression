@@ -1,6 +1,6 @@
 package ekuzo.crazyworldprogression.portals;
 
-import ekuzo.crazyworldprogression.cleanup.BlockCleanupBudget;
+import ekuzo.crazyworldprogression.cleanup.TickBudget;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
@@ -223,21 +223,26 @@ public final class PortalTemplateService {
     }
 
     // Clear a bounded linear slice and return the next index, or minus one when the template volume is empty.
-    static long clearBatch(ServerLevel level, PortalData.StoredInstance instance, long startIndex, int budget) {
+    static long clearBatch(ServerLevel level, PortalData.StoredInstance instance, long startIndex) {
         long volume = (long) instance.sizeX() * instance.sizeY() * instance.sizeZ();
-        long end = Math.min(volume, startIndex + BlockCleanupBudget.reserve(level.getServer(), budget));
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         long layerSize = (long) instance.sizeX() * instance.sizeZ();
-        for (long index = startIndex; index < end; index++) {
-            int y = (int) (index / layerSize);
-            long withinLayer = index % layerSize;
-            int z = (int) (withinLayer / instance.sizeX());
-            int x = (int) (withinLayer % instance.sizeX());
-            cursor.set(instance.originX() + x, instance.originY() + y, instance.originZ() + z);
-            if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(),
-                    Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS);
+        long index = startIndex;
+        // Instance deletion has the lowest priority of all block work.
+        try (TickBudget.Slice slice = TickBudget.start(level.getServer(), TickBudget.Priority.CLEANUP)) {
+            int done = 0;
+            while (index < volume && slice.more(done++)) {
+                int y = (int) (index / layerSize);
+                long withinLayer = index % layerSize;
+                int z = (int) (withinLayer / instance.sizeX());
+                int x = (int) (withinLayer % instance.sizeX());
+                cursor.set(instance.originX() + x, instance.originY() + y, instance.originZ() + z);
+                if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(),
+                        Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS);
+                index++;
+            }
         }
-        return end >= volume ? -1L : end;
+        return index >= volume ? -1L : index;
     }
 
     // Resolve internal metadata or fail before any instance mutation begins.

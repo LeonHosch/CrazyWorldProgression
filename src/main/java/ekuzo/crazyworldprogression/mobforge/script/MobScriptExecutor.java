@@ -199,7 +199,7 @@ public final class MobScriptExecutor {
 	 */
 	private boolean clearScriptManaged(ActiveRun run) {
 		long next = ekuzo.crazyworldprogression.buildings.BuildingService.clearInstanceBatch(
-				run.level, run.buildingClearIndex, 8_192);
+				run.level, run.buildingClearIndex, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT);
 		if (next >= 0) {
 			run.buildingClearIndex = next;
 			run.wakeTick = clock + 1;
@@ -398,18 +398,24 @@ public final class MobScriptExecutor {
 						building.location().z());
 				if (building.action().equals("add")) {
 				long next = BuildingService.clearPreviousBatch(run.level, origin,
-						run.buildingClearIndex, 8_192);
+						run.buildingClearIndex);
 				if (next >= 0) {
 					run.buildingClearIndex = next;
 					run.wakeTick = clock + 1;
 					return false;
 				}
 				run.buildingClearIndex = 0;
-					BuildingService.spawn(run.level, building.buildId(), origin);
+					long placed = BuildingService.spawnBatch(run.level, building.buildId(), origin, run.buildingPlaceIndex);
+					if (placed >= 0) {
+						run.buildingPlaceIndex = placed;
+						run.wakeTick = clock + 1;
+						return false;
+					}
+					run.buildingPlaceIndex = 0;
 					run.step++;
 				} else {
 					long next = BuildingService.clearBatch(run.level, building.buildId(), origin,
-							run.buildingClearIndex, 8_192);
+							run.buildingClearIndex);
 					if (next >= 0) {
 						run.buildingClearIndex = next;
 						run.wakeTick = clock + 1;
@@ -677,6 +683,7 @@ public final class MobScriptExecutor {
 		private long wakeTick;
 		private long waitStartedAt = -1;
 		private long buildingClearIndex;
+		private long buildingPlaceIndex;
 		private ActiveRun(UUID id, MobScript script, ServerLevel level, Map<String, Vec3> anchors,
 		                  UUID encounterId, UUID pocketInstanceId, boolean groundSpawns) {
 			this.id = id; this.script = script; this.level = level; this.anchors = anchors; this.encounterId = encounterId;

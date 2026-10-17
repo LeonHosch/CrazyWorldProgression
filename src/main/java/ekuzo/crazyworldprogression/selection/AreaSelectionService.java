@@ -1,6 +1,6 @@
 package ekuzo.crazyworldprogression.selection;
 
-import ekuzo.crazyworldprogression.cleanup.BlockCleanupBudget;
+import ekuzo.crazyworldprogression.cleanup.TickBudget;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -24,7 +24,6 @@ import java.util.UUID;
 
 /** Shared click-driven cuboid selector with visible edges and batched area clearing. */
 public final class AreaSelectionService {
-    private static final int CLEAR_BLOCKS_PER_TICK = 4096;
     private static final int MAX_EDGE_PARTICLES = 16;
     private static final Map<UUID, Selection> SELECTIONS = new HashMap<>();
     private static final List<ClearTask> CLEAR_TASKS = new ArrayList<>();
@@ -268,22 +267,25 @@ public final class AreaSelectionService {
                 ClearTask task = CLEAR_TASKS.get(taskIndex);
                 if (task.level().getServer() != server) continue;
                 long volume = volume(task.minimum(), task.maximum());
-                int granted = BlockCleanupBudget.reserve(server, CLEAR_BLOCKS_PER_TICK);
-                if (granted == 0) break;
-                long end = Math.min(volume, task.nextIndex() + granted);
+                if (!TickBudget.available(server, TickBudget.Priority.CLEANUP)) break;
                 int sizeX = task.maximum().getX() - task.minimum().getX() + 1;
                 int sizeZ = task.maximum().getZ() - task.minimum().getZ() + 1;
                 long layer = (long) sizeX * sizeZ;
                 BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-                for (long index = task.nextIndex(); index < end; index++) {
-                    int y = (int) (index / layer);
-                    long within = index % layer;
-                    int z = (int) (within / sizeX);
-                    int x = (int) (within % sizeX);
-                    cursor.set(task.minimum().getX() + x, task.minimum().getY() + y,
-                            task.minimum().getZ() + z);
-                    if (!task.level().getBlockState(cursor).isAir()) {
-                        task.level().setBlock(cursor, Blocks.AIR.defaultBlockState(), 2);
+                long end = task.nextIndex();
+                try (TickBudget.Slice slice = TickBudget.start(server, TickBudget.Priority.CLEANUP)) {
+                    int done = 0;
+                    while (end < volume && slice.more(done++)) {
+                        int y = (int) (end / layer);
+                        long within = end % layer;
+                        int z = (int) (within / sizeX);
+                        int x = (int) (within % sizeX);
+                        cursor.set(task.minimum().getX() + x, task.minimum().getY() + y,
+                                task.minimum().getZ() + z);
+                        if (!task.level().getBlockState(cursor).isAir()) {
+                            task.level().setBlock(cursor, Blocks.AIR.defaultBlockState(), 2);
+                        }
+                        end++;
                     }
                 }
                 if (end >= volume) CLEAR_TASKS.remove(taskIndex);

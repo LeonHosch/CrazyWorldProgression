@@ -15,6 +15,7 @@
     "client.ContainerHotbarDropMixin",
     "client.EntityVisibilityMixin",
     "client.LocalPlayerDropMixin",
+    "client.PauseScreenEchelonMixin",
     "client.PlayerTabTitleMixin",
     "client.RenderPipelinesAccessor",
     "client.RenderTypeAccessor"

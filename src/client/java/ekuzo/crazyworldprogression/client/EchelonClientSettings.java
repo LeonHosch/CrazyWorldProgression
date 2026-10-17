@@ -1,12 +1,7 @@
 package ekuzo.crazyworldprogression.client;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.PauseScreen;
-import net.minecraft.network.chat.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,14 +24,20 @@ public final class EchelonClientSettings {
 
     private EchelonClientSettings() { }
 
+    /** The pause menu buttons are added by PauseScreenEchelonMixin. */
     public static void initialize() {
         load();
-        ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
-            if (!(screen instanceof PauseScreen)) return;
-            Screens.getWidgets(screen).add(Button.builder(Component.literal("ECHELON Settings"),
-                    ignored -> client.gui.setScreen(new EchelonSettingsScreen(screen)))
-                    .bounds(width - 160, 8, 150, 20).build());
-        });
+    }
+
+    public static void resetToDefaults() {
+        protectHotbar = true;
+        coordinatePortalMenu = false;
+        exitPortalMenu = true;
+        portalParticles = true;
+        editorPlacementPreviews = true;
+        showTitles = true;
+        showPlayerNames = true;
+        showPlayersInSemiPrivateInstances = false;
     }
 
     private static void load() {

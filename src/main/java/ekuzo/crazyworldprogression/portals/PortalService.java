@@ -14,7 +14,9 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Relative;
+import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
@@ -595,20 +597,49 @@ public final class PortalService {
                 || !destination.getWorldBorder().isWithinBounds(block)) {
             throw new IllegalStateException("destination coordinates are outside this world");
         }
-        player.stopRiding();
-        if (!player.teleportTo(destination, target.x(), target.y(), target.z(), Set.of(),
-                player.getYRot(), player.getXRot(), false)) {
-            throw new IllegalStateException("destination rejected teleport");
+        Entity vehicle = player.getRootVehicle();
+        List<ServerPlayer> riders = new ArrayList<>();
+        if (vehicle == player) riders.add(player);
+        else for (Entity passenger : vehicle.getIndirectPassengers())
+            if (passenger instanceof ServerPlayer rider) riders.add(rider);
+        boolean allowed = riders.stream().allMatch(rider -> rider == player || canPlayerEnter(server, rider, portal));
+        if (takesVehicle(vehicle != player, allowed)) {
+            // Same-dimension teleport of the root vehicle carries every passenger along and keeps them mounted.
+            Vec3 position = new Vec3(target.x(), target.y(), target.z());
+            if (vehicle.teleport(new TeleportTransition(destination, position, Vec3.ZERO, vehicle.getYRot(),
+                    vehicle.getXRot(), TeleportTransition.DO_NOTHING)) == null) {
+                throw new IllegalStateException("destination rejected teleport");
+            }
+            vehicle.resetFallDistance();
+        } else {
+            if (vehicle != player) player.sendOverlayMessage(Component.literal(
+                    "Someone riding with you cannot use this portal, so you travel alone."));
+            riders = List.of(player);
+            player.stopRiding();
+            if (!player.teleportTo(destination, target.x(), target.y(), target.z(), Set.of(),
+                    player.getYRot(), player.getXRot(), false)) {
+                throw new IllegalStateException("destination rejected teleport");
+            }
         }
-        player.resetFallDistance();
-        synchronized (COORDINATE_TRAVEL_TICKS) {
-            COORDINATE_TRAVEL_TICKS.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(), tick);
+        for (ServerPlayer rider : riders) {
+            rider.resetFallDistance();
+            synchronized (COORDINATE_TRAVEL_TICKS) {
+                COORDINATE_TRAVEL_TICKS.computeIfAbsent(server, ignored -> new HashMap<>()).put(rider.getUUID(), tick);
+            }
+            if (portal.entryPolicy() != PortalDefinition.EntryPolicy.REPEATABLE
+                    && (portal.entryPolicy() != PortalDefinition.EntryPolicy.ONCE_PER_ATTEMPT
+                        || !RaidService.isRaid(server, destination.dimension().identifier()))) {
+                PortalData.get(server).recordPlayerEntry(portal.id(), rider.getUUID());
+            }
         }
-        if (portal.entryPolicy() != PortalDefinition.EntryPolicy.REPEATABLE
-                && (portal.entryPolicy() != PortalDefinition.EntryPolicy.ONCE_PER_ATTEMPT
-                    || !RaidService.isRaid(server, destination.dimension().identifier()))) {
-            PortalData.get(server).recordPlayerEntry(portal.id(), player.getUUID());
-        }
+    }
+
+    /**
+     * Coordinate portals take the whole vehicle (with every passenger) along when the player is riding,
+     * unless another player on it may not use the portal. Other portal kinds always dismount.
+     */
+    static boolean takesVehicle(boolean riding, boolean allRidersAllowed) {
+        return riding && allRidersAllowed;
     }
 
     // Allocate or reuse an instance, remember the return point, and teleport one entering player.

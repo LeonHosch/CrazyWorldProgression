@@ -260,7 +260,11 @@ public final class PocketEditorService {
     static void savedAt(MinecraftServer server, Identifier id, long startTick) {
         Map<Identifier, AutoSave> pending = AUTO_SAVES.get(server);
         AutoSave state = pending == null ? null : pending.get(id);
-        if (state != null && state.lastTick() < startTick) pending.remove(id);
+        if (state == null) return;
+        if (state.lastTick() < startTick) pending.remove(id);
+        // Changes made during the save are still pending; count their waiting time from the save's start, or
+        // continuous changes (flowing water, someone building) would start the next save right away, forever.
+        else pending.put(id, new AutoSave(startTick, state.lastTick(), 0L, null));
     }
 
     public static String autoSaveStatus(MinecraftServer server, Identifier id) {

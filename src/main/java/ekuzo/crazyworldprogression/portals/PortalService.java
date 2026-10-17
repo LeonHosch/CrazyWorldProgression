@@ -396,8 +396,24 @@ public final class PortalService {
         boolean inInstance = PortalData.get(server).instances().values().stream()
                 .anyMatch(instance -> instance.slotDimension().equals(current));
         if (!inInstance) return false;
+        requireLeavable(server, PortalData.get(server).instances().get(current.toString()));
         teleportBack(server, player);
         return true;
+    }
+
+    /** /leave and /partyleave are blocked during an encounter of a raid that does not keep inventory. */
+    static boolean leaveBlocked(boolean raid, boolean encounterActive, boolean keepInventory) {
+        return raid && encounterActive && !keepInventory;
+    }
+
+    private static void requireLeavable(MinecraftServer server, PortalData.StoredInstance instance) {
+        if (instance == null) return;
+        PortalDefinition portal = portal(server, instance.portalId());
+        if (portal != null && leaveBlocked(RaidService.isRaidInstance(server, instance),
+                RaidService.inEncounterPublic(server, instance), portal.keepInventory()))
+            throw new IllegalStateException(Component.translatableWithFallback(
+                    "message.crazy-world-progression.raid.leave_blocked",
+                    "You can't leave during an encounter in this raid. Finish or wipe the encounter first.").getString());
     }
 
     // Move an administrator into this pocket's dedicated persistent build dimension.
@@ -857,6 +873,7 @@ public final class PortalService {
         PortalData.StoredInstance instance = currentInstance(leader);
         if (instance == null) throw new IllegalStateException("You are not inside an instance");
         if (!isPartyLeader(instance, leader.getUUID())) throw new IllegalStateException("Only the party leader can use /partyleave");
+        requireLeavable(server, instance);
         ServerLevel level = server.getLevel(dimensionKey(instance.slotDimension()));
         int moved = 0;
         if (level != null) for (ServerPlayer player : new ArrayList<>(level.players())) {

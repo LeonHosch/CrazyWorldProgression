@@ -52,4 +52,11 @@ class RaidCheckpointsTest {
         assertFalse(PortalService.graceOver(100L, 100L + PortalService.REJOIN_GRACE_TICKS - 1));
         assertTrue(PortalService.graceOver(100L, 100L + PortalService.REJOIN_GRACE_TICKS));
     }
+
+    @Test void leavingIsOnlyBlockedDuringAnEncounterOfARaidWithoutKeepInventory() {
+        assertTrue(PortalService.leaveBlocked(true, true, false));
+        assertFalse(PortalService.leaveBlocked(true, true, true));
+        assertFalse(PortalService.leaveBlocked(true, false, false));
+        assertFalse(PortalService.leaveBlocked(false, true, false));
+    }
 }

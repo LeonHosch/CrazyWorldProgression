@@ -56,7 +56,7 @@ The existing `config/mobforge/scripts/` runner remains the CWP script engine. It
 ```yaml
 id: guardian_wave
 steps:
-  - spawn_entity:
+  - spawn_entity:  # deprecated; use mob_spawn with tag
       id: example:guardian
       at: arena_center
       save_as: guardian
@@ -66,7 +66,7 @@ steps:
   - mob_cast:
       mob: '${guardian}'
       ability: example:pulse
-  - set_phase:
+  - mob_phase:
       mob: '${guardian}'
       phase: enraged
   - wait:
@@ -81,7 +81,7 @@ Conditions support `dead`, `health_percent` comparisons, and phase equality/ineq
 
 `wait` (formerly `wait_until`) has a 24-hour default timeout and accepts a shorter `timeout` duration. Completed, failed, or canceled runs discard their handles.
 
-The CWP admin panel has a MobForge tab for YAML mob templates and scripts. Its script editor supports Spawn, Sleep, `spawn_entity`, `wait`, `mob_cast`, `set_phase`, and `trigger`. Entity and ability pickers use identifiers sent by the server. Server validation reports save errors in the editor and keeps rejected changes unsaved. Java-registered MobDefinitions, ability factories, and behaviors appear as read-only registrations; their implementations remain owned by the registering content mod.
+The CWP admin panel has a MobForge tab for YAML mob templates and scripts. Its script editor supports Spawn, Sleep, `mob_spawn`, `wait`, `mob_cast`, `mob_phase`, and `trigger`. Entity and ability pickers use identifiers sent by the server. Server validation reports save errors in the editor and keeps rejected changes unsaved. Java-registered MobDefinitions, ability factories, and behaviors appear as read-only registrations; their implementations remain owned by the registering content mod.
 
 ## Pocket dimensions and encounters
 

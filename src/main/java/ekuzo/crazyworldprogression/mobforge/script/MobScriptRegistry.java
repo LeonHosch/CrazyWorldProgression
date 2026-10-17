@@ -61,11 +61,14 @@ public final class MobScriptRegistry {
 		java.util.Set<String> handles = new java.util.HashSet<>();
 		for (int i = 0; i < script.steps().size(); i++) {
 			MobScript.Step step = script.steps().get(i);
+			if (step instanceof MobScript.SpawnStep spawn && !spawn.tag().isEmpty()) handles.add(spawn.tag());
+			if (step instanceof MobScript.SpawnMobsStep spawn && !spawn.tag().isEmpty()) handles.add(spawn.tag());
 			if (step instanceof MobScript.SpawnEntityStep spawn) {
 				EntitySpawnService.resolve(spawn.id());
 				if (!spawn.at().matches("[a-z][a-z0-9_]{0,63}")) throw new IllegalArgumentException("steps[" + i + "].at must be an anchor name");
-				if (!spawn.saveAs().matches("[a-z][a-z0-9_]{0,63}") || !handles.add(spawn.saveAs()))
-					throw new IllegalArgumentException("steps[" + i + "].save_as must be a unique handle name");
+				if (!spawn.saveAs().matches("[a-z][a-z0-9_]{0,63}"))
+					throw new IllegalArgumentException("steps[" + i + "].save_as must be a tag name");
+				handles.add(spawn.saveAs());
 			} else if (step instanceof MobScript.WaitUntilStep wait) {
 				ScriptCondition.validate(wait.condition());
 				if (wait.timeoutTicks() < 1 || wait.timeoutTicks() > 1_728_000)
@@ -73,10 +76,10 @@ public final class MobScriptRegistry {
 				String handle = ScriptCondition.referencedHandle(wait.condition());
 				if (handle != null && !handles.contains(handle)) throw new IllegalArgumentException("steps[" + i + "] references a handle before spawn: " + wait.condition());
 			} else if (step instanceof MobScript.MobCastStep cast) {
-				if (!handles.contains(ScriptCondition.reference(cast.mob()))) throw new IllegalArgumentException("steps[" + i + "] references a handle before spawn: " + cast.mob());
+				if (!handles.contains(ScriptCondition.reference(cast.mob()))) throw new IllegalArgumentException("steps[" + i + "] uses mob tag " + cast.mob() + " before any mob_spawn gives it");
 				if (MobForge.abilities().get(cast.ability()).isEmpty()) throw new IllegalArgumentException("steps[" + i + "] references unknown ability " + cast.ability());
 			} else if (step instanceof MobScript.SetPhaseStep phase) {
-				if (!handles.contains(ScriptCondition.reference(phase.mob()))) throw new IllegalArgumentException("steps[" + i + "] references a handle before spawn: " + phase.mob());
+				if (!handles.contains(ScriptCondition.reference(phase.mob()))) throw new IllegalArgumentException("steps[" + i + "] uses mob tag " + phase.mob() + " before any mob_spawn gives it");
 				if (!phase.phase().matches("[a-z0-9_./-]{1,64}")) throw new IllegalArgumentException("steps[" + i + "] has invalid phase " + phase.phase());
 			} else if (step instanceof MobScript.RewardCurrencyStep reward) {
 				if (reward.amount() < 1) throw new IllegalArgumentException("steps[" + i + "].amount must be positive");

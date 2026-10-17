@@ -26,12 +26,12 @@ import java.util.WeakHashMap;
 /** MobForge's complete step editor as server-backed rows inside the CWP admin panel. */
 final class AdminScriptEditor {
     private static final Map<MinecraftServer, Map<UUID, Map<String, Draft>>> DRAFTS = new WeakHashMap<>();
-    private static final List<String> TYPES = List.of("Spawn mobs", "Sleep", "If", "While",
+    private static final List<String> TYPES = List.of("Mob spawn (mob ID)", "Sleep", "If", "While",
             "Event box", "Check redstone power", "Spawn portal", "Track counter", "Variable",
             "Particles", "Explosion", "Play sound", "Apply effect", "Remove effect", "Loot pool", "Unlock achievement", "Encounter start", "Encounter end", "Wipe",
             "Spawn building", "Despawn building");
-    private static final List<String> ADVANCED_TYPES = List.of("Spawn wave", "Spawn entity", "Wait",
-            "Mob cast", "Set phase", "Trigger event", "Reward currency", "Reward item", "Reward loot table",
+    private static final List<String> ADVANCED_TYPES = List.of("Mob spawn (template)", "Wait",
+            "Mob cast", "Mob phase", "Trigger event", "Reward currency", "Reward item", "Reward loot table",
             "Watch event", "Portal", "Raid complete");
     private static final List<String> AI_MODES = List.of("template_default", "vanilla", "target_position",
             "target_player", "nearest_player");
@@ -75,20 +75,22 @@ final class AdminScriptEditor {
                         List.of("If", "While").contains(step.type) ? "Remove block" : "Remove", true));
             rows.add(row(section, "Step controls", "Insert or manage this step.", List.of(), controls));
             switch (step.type) {
-                case "Spawn mobs" -> {
+                case "Mob spawn (mob ID)" -> {
                     rows.add(row(section, "Mob and count", "Use a namespaced MobForge template, API mob, or Minecraft mob ID.",
                             List.of(suggested(prefix, step, "mob_id", "Mob ID", entityIds()),
-                                    field(prefix, step, "count", "Count")), List.of()));
+                                    field(prefix, step, "count", "Count"), field(prefix, step, "tag", "Tag (optional)")),
+                            List.of()));
                     rows.add(row(section, "Location", "World coordinates; pocket scripts move with their instance.",
                             coordinates(prefix, step, "x", "y", "z"),
                             List.of(new AdminPanelRegistry.AdminAction("script.step.here|" + i, "Here", false))));
                     rows.add(row(section, "Offset", "Random spread in blocks around the location.",
                             coordinates(prefix, step, "ox", "oy", "oz"), List.of()));
                 }
-                case "Spawn wave" -> {
-                    rows.add(row(section, "Mob and count", "Spawn a loaded MobForge template.",
+                case "Mob spawn (template)" -> {
+                    rows.add(row(section, "Mob and count", "Spawn a loaded MobForge template. A tag names these mobs for kills(), mob_cast and mob_phase.",
                             List.of(suggested(prefix, step, "template", "Mob template", templateIds()),
-                                    field(prefix, step, "count", "Count")), List.of()));
+                                    field(prefix, step, "count", "Count"), field(prefix, step, "tag", "Tag (optional)")),
+                            List.of()));
                     rows.add(row(section, "Location", "Build-space coordinates; translated into each instance.",
                             coordinates(prefix, step, "x", "y", "z"),
                             List.of(new AdminPanelRegistry.AdminAction("script.step.here|" + i, "Here", false))));
@@ -118,11 +120,11 @@ final class AdminScriptEditor {
                 case "Wait" -> rows.add(row(section, "Condition", "Example: ${guardian.health_percent <= 0.5}.",
                         List.of(field(prefix, step, "condition", "Condition"),
                                 field(prefix, step, "timeout", "Timeout")), List.of()));
-                case "Mob cast" -> rows.add(row(section, "Ability", "Use a handle from an earlier spawn.",
-                        List.of(field(prefix, step, "mob", "Mob handle"),
+                case "Mob cast" -> rows.add(row(section, "Ability", "Every living mob with this tag casts the ability.",
+                        List.of(field(prefix, step, "mob", "Mob tag"),
                                 suggested(prefix, step, "ability", "Ability ID", abilityIds())), List.of()));
-                case "Set phase" -> rows.add(row(section, "Phase", "Use a handle from an earlier spawn.",
-                        List.of(field(prefix, step, "mob", "Mob handle"),
+                case "Mob phase" -> rows.add(row(section, "Phase", "Every living mob with this tag changes phase.",
+                        List.of(field(prefix, step, "mob", "Mob tag"),
                                 field(prefix, step, "phase", "Phase")), List.of()));
                 case "Trigger event" -> rows.add(row(section, "Event", "Namespaced event ID.",
                         List.of(field(prefix, step, "event", "Event ID")), List.of()));
@@ -303,7 +305,7 @@ final class AdminScriptEditor {
                     advanced ? ADVANCED_TYPES.getFirst() : TYPES.getFirst());
             if (!(advanced ? ADVANCED_TYPES : TYPES).contains(type)) throw new IllegalArgumentException("Unknown step type");
             StepForm added = StepForm.empty(type, player);
-            if (pocketId != null && type.equals("Spawn wave")
+            if (pocketId != null && type.equals("Mob spawn (template)")
                     && !player.level().dimension().identifier().equals(
                             PocketEditorService.dimension(player.level().getServer(), pocketId))) {
                 var entry = PocketEditorService.entry(player.level().getServer(), pocketId);
@@ -350,7 +352,7 @@ final class AdminScriptEditor {
                     draft.steps.add(end + 1, StepForm.empty("Sleep", player));
                 }
                 case "script.step.here" -> {
-                    if (!List.of("Spawn wave", "Spawn mobs", "Portal", "Spawn portal",
+                    if (!List.of("Mob spawn (template)", "Mob spawn (mob ID)", "Portal", "Spawn portal",
                             "Spawn building", "Despawn building", "Check redstone power", "Particles", "Explosion",
                             "Play sound", "Encounter end")
                             .contains(draft.steps.get(index).type))
@@ -558,14 +560,14 @@ final class AdminScriptEditor {
         private static StepForm empty(String type, ServerPlayer player) {
             StepForm form = new StepForm(type);
             switch (type) {
-                case "Spawn mobs" -> {
+                case "Mob spawn (mob ID)" -> {
                     form.fields.put("mob_id", "minecraft:zombie"); form.fields.put("count", "1");
                     form.fields.put("x", player == null ? "0" : Double.toString(player.getX()));
                     form.fields.put("y", player == null ? "64" : Double.toString(player.getY()));
                     form.fields.put("z", player == null ? "0" : Double.toString(player.getZ()));
                     form.fields.put("ox", "0"); form.fields.put("oy", "0"); form.fields.put("oz", "0");
                 }
-                case "Spawn wave" -> {
+                case "Mob spawn (template)" -> {
                     form.fields.put("template", ""); form.fields.put("count", "1");
                     form.fields.put("x", player == null ? "0" : Double.toString(player.getX()));
                     form.fields.put("y", player == null ? "64" : Double.toString(player.getY()));
@@ -584,10 +586,10 @@ final class AdminScriptEditor {
                     form.fields.put("condition", "${mob.dead}"); form.fields.put("timeout", "5m");
                 }
                 case "Mob cast" -> {
-                    form.fields.put("mob", "${mob}"); form.fields.put("ability", "");
+                    form.fields.put("mob", "boss"); form.fields.put("ability", "");
                 }
-                case "Set phase" -> {
-                    form.fields.put("mob", "${mob}"); form.fields.put("phase", "phase2");
+                case "Mob phase" -> {
+                    form.fields.put("mob", "boss"); form.fields.put("phase", "phase2");
                 }
                 case "Trigger event" -> form.fields.put("event", "cwp:example");
                 case "Reward currency" -> {
@@ -686,8 +688,9 @@ final class AdminScriptEditor {
         private static StepForm from(MobScript.Step step) {
             StepForm form;
             if (step instanceof MobScript.SpawnMobsStep value) {
-                form = empty("Spawn mobs", null);
+                form = empty("Mob spawn (mob ID)", null);
                 form.fields.put("mob_id", value.mobId().toString());
+                form.fields.put("tag", value.tag());
                 form.fields.put("count", Integer.toString(value.count()));
                 form.fields.put("x", Double.toString(value.location().x()));
                 form.fields.put("y", Double.toString(value.location().y()));
@@ -696,8 +699,9 @@ final class AdminScriptEditor {
                 form.fields.put("oy", Double.toString(value.offset().y()));
                 form.fields.put("oz", Double.toString(value.offset().z()));
             } else if (step instanceof MobScript.SpawnStep value) {
-                form = empty("Spawn wave", null);
+                form = empty("Mob spawn (template)", null);
                 form.fields.put("template", value.template()); form.fields.put("count", Integer.toString(value.count()));
+                form.fields.put("tag", value.tag());
                 form.fields.put("x", Double.toString(value.location().x()));
                 form.fields.put("y", Double.toString(value.location().y()));
                 form.fields.put("z", Double.toString(value.location().z()));
@@ -739,7 +743,7 @@ final class AdminScriptEditor {
                 form = new StepForm("Mob cast"); form.fields.put("mob", value.mob());
                 form.fields.put("ability", value.ability().toString());
             } else if (step instanceof MobScript.SetPhaseStep value) {
-                form = new StepForm("Set phase"); form.fields.put("mob", value.mob());
+                form = new StepForm("Mob phase"); form.fields.put("mob", value.mob());
                 form.fields.put("phase", value.phase());
             } else if (step instanceof MobScript.TriggerStep value) {
                 form = new StepForm("Trigger event"); form.fields.put("event", value.event().toString());
@@ -861,10 +865,11 @@ final class AdminScriptEditor {
 
         private MobScript.Step build() {
             return switch (type) {
-                case "Spawn mobs" -> new MobScript.SpawnMobsStep(Identifier.parse(value("mob_id")),
+                case "Mob spawn (mob ID)" -> new MobScript.SpawnMobsStep(Identifier.parse(value("mob_id")),
                         new MobScript.Position(number("x"), number("y"), number("z")),
-                        new MobScript.Offset(number("ox"), number("oy"), number("oz")), integer("count"));
-                case "Spawn wave" -> {
+                        new MobScript.Offset(number("ox"), number("oy"), number("oz")), integer("count"),
+                        fields.getOrDefault("tag", "").trim());
+                case "Mob spawn (template)" -> {
                     String mode = value("ai_mode");
                     MobTemplate.Ai ai = mode.equals("template_default") ? null : new MobTemplate.Ai(mode,
                             Boolean.parseBoolean(value("combat")),
@@ -874,7 +879,7 @@ final class AdminScriptEditor {
                     yield new MobScript.SpawnStep(value("template"),
                             new MobScript.Position(number("x"), number("y"), number("z")),
                             new MobScript.Offset(number("ox"), number("oy"), number("oz")),
-                            integer("count"), ai);
+                            integer("count"), ai, fields.getOrDefault("tag", "").trim());
                 }
                 case "Sleep" -> new MobScript.SleepStep(MobScriptYaml.parseDuration(value("sleep")));
                 case "Spawn entity" -> new MobScript.SpawnEntityStep(Identifier.parse(value("entity")),
@@ -882,7 +887,7 @@ final class AdminScriptEditor {
                 case "Wait" -> new MobScript.WaitUntilStep(value("condition"),
                         MobScriptYaml.parseDuration(value("timeout")));
                 case "Mob cast" -> new MobScript.MobCastStep(value("mob"), Identifier.parse(value("ability")));
-                case "Set phase" -> new MobScript.SetPhaseStep(value("mob"), value("phase"));
+                case "Mob phase" -> new MobScript.SetPhaseStep(value("mob"), value("phase"));
                 case "Trigger event" -> new MobScript.TriggerStep(Identifier.parse(value("event")));
                 case "Reward currency" -> new MobScript.RewardCurrencyStep(Identifier.parse(value("currency")),
                         positiveLong("amount"));

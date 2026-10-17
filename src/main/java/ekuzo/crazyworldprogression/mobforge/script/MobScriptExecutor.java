@@ -36,6 +36,7 @@ import net.minecraft.core.Direction;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.HashMap;
@@ -284,7 +285,8 @@ public final class MobScriptExecutor {
 				if (position == null) throw new IllegalArgumentException("Unknown anchor " + spawn.at() + " in script " + run.script.id());
 				if (run.groundSpawns) position = grounded(run, position.x, position.y, position.z);
 				SpawnContext spawnContext = new SpawnContext(run.level, position, 0, 0, run.encounterId, run.pocketInstanceId, run.id, Map.of());
-				run.handles.put(spawn.saveAs(), EntitySpawnService.spawn(spawn.id(), spawnContext));
+				// Deprecated spawn_entity: its save_as name works like a mob_spawn tag.
+				tagSpawned(run, EntitySpawnService.spawn(spawn.id(), spawnContext), spawn.saveAs());
 			} else if (step instanceof MobScript.WaitUntilStep wait) {
 				if (run.waitStartedAt < 0) run.waitStartedAt = clock;
 				if (!ScriptCondition.evaluate(wait.condition(), run.handles, context)) {
@@ -295,11 +297,12 @@ public final class MobScriptExecutor {
 				run.step++;
 			} else if (step instanceof MobScript.MobCastStep cast) {
 				run.step++;
-				if (!mob(run, cast.mob()).castAbility(cast.ability()))
-					throw new IllegalStateException("Ability " + cast.ability() + " was on cooldown or rejected by canCast");
+				boolean cast_ = false;
+				for (MobForgeHandle mob : tagged(run, cast.mob())) cast_ |= mob.castAbility(cast.ability());
+				if (!cast_) MobForge.LOGGER.debug("No mob tagged {} could cast {} in script {}", cast.mob(), cast.ability(), run.script.id());
 			} else if (step instanceof MobScript.SetPhaseStep phase) {
 				run.step++;
-				mob(run, phase.mob()).setPhase(phase.phase());
+				for (MobForgeHandle mob : tagged(run, phase.mob())) mob.setPhase(phase.phase());
 			} else if (step instanceof MobScript.TriggerStep trigger) {
 				run.step++;
 				ScriptSignals.trigger(run.id, trigger.event(), run.level, run.handles);
@@ -525,10 +528,23 @@ public final class MobScriptExecutor {
 	private static void give(net.minecraft.server.level.ServerPlayer player, ItemStack stack) {
 		if (!player.addItem(stack) && !stack.isEmpty()) player.drop(stack, false);
 	}
-	private MobForgeHandle mob(ActiveRun run, String expression) {
+	/** Living MobForge mobs with this tag (mob_cast and mob_phase act on all of them). */
+	private static List<MobForgeHandle> tagged(ActiveRun run, String expression) {
 		ScriptEntityHandle handle = run.handles.get(ScriptCondition.reference(expression));
-		if (!(handle instanceof MobForgeHandle mob)) throw new IllegalArgumentException("Script handle " + expression + " is not a registered MobForge mob");
-		return mob;
+		if (handle instanceof TagGroup group) return group.livingMobForge();
+		if (handle instanceof MobForgeHandle mob && mob.isAlive()) return List.of(mob);
+		return List.of();
+	}
+
+	/** Adds the script tag to a spawned mob (used by kills()) and to the tag's group (dead, health_percent, phase). */
+	private static void tagSpawned(ActiveRun run, ScriptEntityHandle handle, String tag) {
+		if (handle == null || tag == null || tag.isEmpty()) return;
+		Entity entity = run.level.getEntity(handle.uuid());
+		if (entity != null) entity.addTag(tag);
+		ScriptEntityHandle existing = run.handles.get(tag);
+		TagGroup group = existing instanceof TagGroup current ? current : new TagGroup();
+		group.add(handle);
+		run.handles.put(tag, group);
 	}
 
 	private void spawn(ActiveRun run, MobScript.SpawnStep step) {
@@ -547,6 +563,7 @@ public final class MobScriptExecutor {
 			Entity entity = run.level.getEntity(handle.uuid());
 			MobForgeEntityData.setScript(entity, run.script.id(), run.id.toString());
 			if (step.aiOverride() != null) MobForgeEntityData.setAi(entity, step.aiOverride());
+			tagSpawned(run, handle, step.tag());
 		}
 	}
 
@@ -561,6 +578,7 @@ public final class MobScriptExecutor {
 					position, 0, 0, run.encounterId, run.pocketInstanceId, run.id, Map.of()));
 			Entity entity = run.level.getEntity(handle.uuid());
 			if (entity != null) MobForgeEntityData.setScript(entity, run.script.id(), run.id.toString());
+			tagSpawned(run, handle, step.tag());
 		}
 	}
 

@@ -34,6 +34,7 @@ public final class MobScriptYaml {
 
 	private MobScript.Step step(Object value, String field) {
 		Map<String, Object> step = map(value, field);
+		if (step.containsKey("mob_spawn")) return mobSpawn(map(step.get("mob_spawn"), field + ".mob_spawn"), field + ".mob_spawn");
 		if (step.containsKey("spawn")) return spawn(map(step.get("spawn"), field + ".spawn"), field);
 		if (step.containsKey("spawn_mobs")) return spawnMobs(map(step.get("spawn_mobs"), field + ".spawn_mobs"), field);
 		if (step.containsKey("sleep")) return new MobScript.SleepStep(duration(step.get("sleep"), field + ".sleep"));
@@ -41,6 +42,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("wait")) return waitUntil(map(step.get("wait"), field + ".wait"), field);
 		if (step.containsKey("wait_until")) return waitUntil(map(step.get("wait_until"), field + ".wait_until"), field);
 		if (step.containsKey("mob_cast")) return cast(map(step.get("mob_cast"), field + ".mob_cast"), field);
+		if (step.containsKey("mob_phase")) return setPhase(map(step.get("mob_phase"), field + ".mob_phase"), field);
 		if (step.containsKey("set_phase")) return setPhase(map(step.get("set_phase"), field + ".set_phase"), field);
 		if (step.containsKey("trigger")) return trigger(map(step.get("trigger"), field + ".trigger"), field);
 		if (step.containsKey("reward_currency")) return rewardCurrency(map(step.get("reward_currency"), field + ".reward_currency"), field);
@@ -71,13 +73,14 @@ public final class MobScriptYaml {
 		if (step.containsKey("encounter_end")) return encounterEnd(step.get("encounter_end"), field + ".encounter_end");
 		String type = string(step.get("type"), field + ".type");
 		return switch (type) {
+			case "mob_spawn" -> mobSpawn(step, field);
 			case "spawn" -> spawn(step, field);
 			case "spawn_mobs" -> spawnMobs(step, field);
 			case "sleep" -> new MobScript.SleepStep(duration(step.get("duration"), field + ".duration"));
 			case "spawn_entity" -> spawnEntity(step, field);
 			case "wait", "wait_until" -> waitUntil(step, field);
 			case "mob_cast" -> cast(step, field);
-			case "set_phase" -> setPhase(step, field);
+			case "mob_phase", "set_phase" -> setPhase(step, field);
 			case "trigger" -> trigger(step, field);
 			case "reward_currency" -> rewardCurrency(step, field);
 			case "reward_item" -> rewardItem(step, field);
@@ -272,6 +275,19 @@ public final class MobScriptYaml {
 		catch (RuntimeException exception) { throw new IllegalArgumentException("Invalid " + field + ": " + text); }
 	}
 
+	/** mob_spawn takes exactly one of template= (MobForge template) or mob_id= (entity type or MobForge ID). */
+	private MobScript.Step mobSpawn(Map<String, Object> value, String field) {
+		boolean template = value.containsKey("template"), mob = value.containsKey("mob_id");
+		if (template == mob) throw new IllegalArgumentException(field + " needs exactly one of template or mob_id");
+		if (mob && value.containsKey("ai")) throw new IllegalArgumentException(field + ".ai only works with template");
+		return template ? spawn(value, field) : spawnMobs(value, field);
+	}
+	private static String tag(Map<String, Object> value, String field) {
+		String tag = String.valueOf(value.getOrDefault("tag", ""));
+		if (!tag.isEmpty() && !tag.matches("[a-z][a-z0-9_]{0,63}"))
+			throw new IllegalArgumentException(field + ".tag must use lowercase letters, digits or _");
+		return tag;
+	}
 	private MobScript.SpawnStep spawn(Map<String, Object> value, String field) {
 		String template = string(value.get("template"), field + ".template");
 		Map<String, Object> location = map(value.get("location"), field + ".location");
@@ -279,14 +295,14 @@ public final class MobScriptYaml {
 				number(location.get("y"), field + ".location.y"), number(location.get("z"), field + ".location.z"));
 		MobScript.Offset offset = offset(value.get("offset"), field + ".offset");
 		int count = integer(value.getOrDefault("count", 1), field + ".count");
-		return new MobScript.SpawnStep(template, position, offset, count, ai(value.get("ai"), field + ".ai"));
+		return new MobScript.SpawnStep(template, position, offset, count, ai(value.get("ai"), field + ".ai"), tag(value, field));
 	}
 
 	private MobScript.SpawnMobsStep spawnMobs(Map<String, Object> value, String field) {
 		return new MobScript.SpawnMobsStep(namespaced(value.get("mob_id"), field + ".mob_id"),
 				position(map(value.get("location"), field + ".location"), field + ".location"),
 				offset(value.get("offset"), field + ".offset"),
-				integer(value.getOrDefault("count", 1), field + ".count"));
+				integer(value.getOrDefault("count", 1), field + ".count"), tag(value, field));
 	}
 
 	private MobTemplate.Ai ai(Object value, String field) {
@@ -316,7 +332,8 @@ public final class MobScriptYaml {
 				if (!spawn.offset().equals(MobScript.Offset.NONE)) body.put("offset", position(spawn.offset().x(), spawn.offset().y(), spawn.offset().z()));
 				body.put("count", spawn.count());
 				if (spawn.aiOverride() != null) body.put("ai", ai(spawn.aiOverride()));
-				steps.add(Map.of("spawn", body));
+				if (!spawn.tag().isEmpty()) body.put("tag", spawn.tag());
+				steps.add(Map.of("mob_spawn", body));
 			}
 			else if (step instanceof MobScript.SpawnMobsStep spawn) {
 				Map<String, Object> body = new LinkedHashMap<>();
@@ -324,12 +341,13 @@ public final class MobScriptYaml {
 				body.put("location", position(spawn.location().x(), spawn.location().y(), spawn.location().z()));
 				body.put("offset", position(spawn.offset().x(), spawn.offset().y(), spawn.offset().z()));
 				body.put("count", spawn.count());
-				steps.add(Map.of("spawn_mobs", body));
+				if (!spawn.tag().isEmpty()) body.put("tag", spawn.tag());
+				steps.add(Map.of("mob_spawn", body));
 			}
 			else if (step instanceof MobScript.SpawnEntityStep spawn) steps.add(Map.of("spawn_entity", Map.of("id", spawn.id().toString(), "at", spawn.at(), "save_as", spawn.saveAs())));
 			else if (step instanceof MobScript.WaitUntilStep wait) steps.add(Map.of("wait", Map.of("condition", wait.condition(), "timeout", formatDuration(wait.timeoutTicks()))));
 			else if (step instanceof MobScript.MobCastStep cast) steps.add(Map.of("mob_cast", Map.of("mob", cast.mob(), "ability", cast.ability().toString())));
-			else if (step instanceof MobScript.SetPhaseStep phase) steps.add(Map.of("set_phase", Map.of("mob", phase.mob(), "phase", phase.phase())));
+			else if (step instanceof MobScript.SetPhaseStep phase) steps.add(Map.of("mob_phase", Map.of("mob", phase.mob(), "phase", phase.phase())));
 			else if (step instanceof MobScript.TriggerStep trigger) steps.add(Map.of("trigger", Map.of("event", trigger.event().toString())));
 			else if (step instanceof MobScript.RewardCurrencyStep reward) steps.add(Map.of("reward_currency", Map.of("currency", reward.currency().toString(), "amount", reward.amount())));
 			else if (step instanceof MobScript.RewardItemStep reward) steps.add(Map.of("reward_item", Map.of("item", reward.item().toString(), "count", reward.count())));

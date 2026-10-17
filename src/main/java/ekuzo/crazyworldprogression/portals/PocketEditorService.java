@@ -422,7 +422,7 @@ public final class PocketEditorService {
                     portal.portalId(), portal.action(), portal.locationId(), shifted(portal.position(), delta),
                     portal.target() == null ? null : shifted(portal.target(), delta));
             if (step instanceof MobScript.SpawnMobsStep spawn) return (MobScript.Step) new MobScript.SpawnMobsStep(
-                    spawn.mobId(), shifted(spawn.location(), delta), spawn.offset(), spawn.count());
+                    spawn.mobId(), shifted(spawn.location(), delta), spawn.offset(), spawn.count(), spawn.tag());
             if (step instanceof MobScript.BuildingStep building) return (MobScript.Step) new MobScript.BuildingStep(
                     building.buildId(), building.action(), shifted(building.location(), delta));
             if (step instanceof MobScript.ParticleStep particles) return (MobScript.Step) new MobScript.ParticleStep(
@@ -445,7 +445,7 @@ public final class PocketEditorService {
             }
             return (MobScript.Step) new MobScript.SpawnStep(spawn.template(),
                     new MobScript.Position(position.x() + delta.getX(), position.y() + delta.getY(),
-                            position.z() + delta.getZ()), spawn.offset(), spawn.count(), ai);
+                            position.z() + delta.getZ()), spawn.offset(), spawn.count(), ai, spawn.tag());
         }).toList();
         return new MobScript(script.id(), steps);
     }

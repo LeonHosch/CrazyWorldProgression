@@ -23,7 +23,7 @@ if var("charge") >= 1:
 ## Layout and execution
 
 - `script <id>` starts a file. Empty lines and `#` comments are allowed.
-- Commands use named arguments: `spawn(template="raid_zombie", count=3, location={"x":0,"y":64,"z":0})`.
+- Commands use named arguments: `mob_spawn(template="raid_zombie", count=3, location={"x":0,"y":64,"z":0})`.
 - Use four spaces per indentation level. `if <condition>:`, `else:`, and `while <condition>:` define blocks. A block needs at least one command. The text format adds the matching end steps automatically.
 - `while` accepts `max_iterations=<1..100000>` after the condition. The default is 1000. Each completed iteration yields until the next server tick, so live player, mob, portal, and redstone checks can change. An infinite true condition eventually reaches the configured cap and cancels that run.
 - Scripts execute at most 256 operations per tick and wait/sleep across ticks. A run's variables, kill counts, watches, and portal counters belong to that run in that instance.
@@ -35,15 +35,15 @@ Use conditions in `if`, `while`, `wait`, and `event`. Combine them with `and`, `
 
 | Check | Example | Meaning |
 | --- | --- | --- |
-| `kills(id)` | `kills("cwp:raid_add") >= 6` | Count mob deaths by MobForge template ID, entity type ID, definition ID, or tag. |
+| `kills(id)` | `kills("adds") >= 6` | Count mob deaths by `mob_spawn` tag, MobForge template ID, entity type ID, definition ID, or MobForge tag. |
 | `portal_used(id)` | `portal_used("cwp:gate") >= 1` | Count successful uses of a portal ID in this run. |
 | `players_in(box)` | `players_in("plate") >= 2` | Count players or matching mobs, according to the event box mode. |
 | `box_triggers(box)` | `box_triggers("plate") >= 2` | Count transitions from empty to occupied in an event box. |
 | `powered(x, y, z)` | `powered(10, 64, 5)` | Check redstone power at block coordinates. Pocket editor coordinates translate to the active instance. This is the editor's single redstone check. |
 | `var(name)` | `var("charge") >= 3` | Read a run variable; unset variables read as zero. |
-| `dead(handle)` | `dead("boss")` | Check a named spawned entity handle. |
-| `health_percent(handle)` | `health_percent("boss") <= 0.5` | Check a mob's health fraction. |
-| `phase(handle)` | `phase("boss") == "enraged"` | Check a MobForge mob phase. |
+| `dead(tag)` | `dead("boss")` | True once every mob spawned with this tag is dead. |
+| `health_percent(tag)` | `health_percent("boss") <= 0.5` | Combined health of the living mobs with this tag, as a fraction of their combined maximum. |
+| `phase(tag)` | `phase("boss") == "enraged"` | Phase of the first living MobForge mob with this tag. |
 
 The older `${kills.raid_add >= 6}` style still works in imported scripts and in the in-game condition fields. Conditions are deliberately limited: arithmetic, arbitrary function calls, and general Python expressions are not supported.
 
@@ -53,13 +53,11 @@ The in-game admin script editor exposes the same commands as steps. All IDs that
 
 | Command | Example | Effect |
 | --- | --- | --- |
-| `spawn` | `spawn(template="raid_zombie", location={"x":0,"y":64,"z":0}, offset={"x":2,"y":0,"z":2}, count=3)` | Spawn MobForge template mobs. Optional `ai={"mode":"nearest_player","combat":true,"range":32}` overrides template AI. |
-| `spawn_mobs` | `spawn_mobs(mob_id="minecraft:zombie", location={"x":0,"y":64,"z":0}, offset={"x":2,"y":0,"z":2}, count=3)` | Spawn mobs by entity or MobForge ID at a position. |
+| `mob_spawn` | `mob_spawn(template="raid_zombie", location={"x":0,"y":64,"z":0}, offset={"x":2,"y":0,"z":2}, count=3, tag="adds")` | Spawn mobs. Give exactly one of `template=` (a MobForge template) or `mob_id=` (an entity type or MobForge ID, such as `"minecraft:zombie"`). `count` defaults to 1. With `template=`, optional `ai={"mode":"nearest_player","combat":true,"range":32}` overrides the template AI. The optional `tag` names these mobs so `kills("adds")`, `dead("adds")`, `health_percent("adds")`, `phase("adds")`, `mob_cast` and `mob_phase` can refer to them. Several `mob_spawn` steps can share a tag. |
 | `sleep` | `sleep(duration="1s")` | Pause; durations accept ticks (`40t`), seconds (`5s`), milliseconds (`500ms`), or minutes (`2m`). |
-| `spawn_entity` | `spawn_entity(id="minecraft:zombie", at="origin", save_as="boss")` | Spawn an entity at an anchor and save a handle. `pocket_spawn` is available in pocket scripts. |
 | `wait` | `wait(condition="dead(\"boss\")", timeout="5m")` | Poll until true, or cancel this run on timeout. |
-| `mob_cast` | `mob_cast(mob="${boss}", ability="cwp:slam")` | Ask a MobForge handle to cast an ability. |
-| `set_phase` | `set_phase(mob="${boss}", phase="enraged")` | Change a MobForge mob's phase. |
+| `mob_cast` | `mob_cast(mob="boss", ability="cwp:slam")` | Every living MobForge mob with this tag casts the ability. |
+| `mob_phase` | `mob_phase(mob="boss", phase="enraged")` | Every living MobForge mob with this tag changes phase. |
 | `trigger` | `trigger(event="cwp:plate_ready")` | Emit a script event. |
 | `variable` | `variable(name="charge", operation="increment", value="1")` | Set or increment a run variable. |
 | `event` | `event(condition="kills(\"raid_add\")", variable="charge", operation="increment", value="1")` | Register a watch. A bare `kills` or `portal_used` condition fires for each new occurrence; other conditions fire on false-to-true changes. |
@@ -91,8 +89,8 @@ script boss_encounter
 eventbox(name="start", min={"x":0,"y":64,"z":0}, max={"x":3,"y":67,"z":3})
 wait(condition="players_in(\"start\") >= 6", timeout="30m")
 encounter_start()
-spawn(template="raid_add", location={"x":12,"y":64,"z":12}, count=6)
-while kills("raid_add") < 6, max_iterations=36000:
+mob_spawn(template="raid_add", location={"x":12,"y":64,"z":12}, count=6, tag="adds")
+while kills("adds") < 6, max_iterations=36000:
     sleep(duration="1s")
 portal(portal="cwp:boss_gate", action="add", location="after_adds", position={"x":25,"y":64,"z":12})
 encounter_end()
@@ -125,4 +123,4 @@ Existing `.yml` and `.yaml` scripts still load. Saving one from the in-game edit
 
 ## Renamed steps
 
-Older scripts still load, but the editor and saved scripts use the new names: `event_box` is now `eventbox`, `wait_until` is now `wait`, and `portal_location` is now `portal`. Both `portal` and `building` use `action="add"` or `action="delete"`. The old `spawn`/`despawn` (building) and `remove`/`clear` (portal) values are still accepted and are converted to `add`/`delete`.
+Older scripts still load, but the editor and saved scripts use the new names: `event_box` is now `eventbox`, `wait_until` is now `wait`, `portal_location` is now `portal`, `spawn` and `spawn_mobs` are now `mob_spawn`, and `set_phase` is now `mob_phase`. `spawn_entity(id=…, at=…, save_as=…)` can no longer be added, but old scripts that use it still run: its `save_as` name works like a `mob_spawn` tag. Both `portal` and `building` use `action="add"` or `action="delete"`. The old `spawn`/`despawn` (building) and `remove`/`clear` (portal) values are still accepted and are converted to `add`/`delete`.

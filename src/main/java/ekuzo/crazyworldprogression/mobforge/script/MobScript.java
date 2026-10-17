@@ -13,12 +13,21 @@ public record MobScript(String id, List<Step> steps) {
 	public record Offset(double x, double y, double z) {
 		public static final Offset NONE = new Offset(0, 0, 0);
 	}
-	public record SpawnStep(String template, Position location, Offset offset, int count, MobTemplate.Ai aiOverride) implements Step {
-		public SpawnStep { offset = offset == null ? Offset.NONE : offset; }
+	/** mob_spawn(template=...): MobForge template mobs. A non-empty tag is added to every spawned mob. */
+	public record SpawnStep(String template, Position location, Offset offset, int count, MobTemplate.Ai aiOverride,
+	                        String tag) implements Step {
+		public SpawnStep { offset = offset == null ? Offset.NONE : offset; tag = tag == null ? "" : tag; }
+		public SpawnStep(String template, Position location, Offset offset, int count, MobTemplate.Ai aiOverride) {
+			this(template, location, offset, count, aiOverride, "");
+		}
 	}
 	/** One namespaced mob ID, usable for both MobForge templates and registered API mobs. */
-	public record SpawnMobsStep(Identifier mobId, Position location, Offset offset, int count) implements Step {
-		public SpawnMobsStep { offset = offset == null ? Offset.NONE : offset; }
+	/** mob_spawn(mob_id=...): mobs by entity type or MobForge ID. A non-empty tag is added to every spawned mob. */
+	public record SpawnMobsStep(Identifier mobId, Position location, Offset offset, int count, String tag) implements Step {
+		public SpawnMobsStep { offset = offset == null ? Offset.NONE : offset; tag = tag == null ? "" : tag; }
+		public SpawnMobsStep(Identifier mobId, Position location, Offset offset, int count) {
+			this(mobId, location, offset, count, "");
+		}
 	}
 	public record SleepStep(long ticks) implements Step { }
 	public record SpawnEntityStep(Identifier id, String at, String saveAs) implements Step { }

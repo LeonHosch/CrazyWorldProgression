@@ -22,9 +22,11 @@ public final class ScriptCondition {
     private static final Pattern FUNCTION = Pattern.compile("(kills|portal_used|players_in|box_triggers|powered|var|dead|health_percent|phase)\\(\\s*['\"]([a-z0-9_:/.-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(['\"]?[a-z0-9_./-]+['\"]?))?");
     private static final Pattern POWER_POSITION = Pattern.compile("powered\\(\\s*(-?[0-9]+)\\s*,\\s*(-?[0-9]+)\\s*,\\s*(-?[0-9]+)\\s*\\)(?:\\s*(==|!=)\\s*(true|false))?");
     private ScriptCondition() { }
+    /** A mob tag (or legacy handle), written as boss or ${boss}. */
     public static String reference(String expression) {
+        if (expression != null && expression.matches("[a-z][a-z0-9_]*")) return expression;
         if (expression == null || !expression.matches("\\$\\{[a-z][a-z0-9_]*}"))
-            throw new IllegalArgumentException("Expected script handle like ${guardian}: " + expression);
+            throw new IllegalArgumentException("Expected a mob tag like boss: " + expression);
         return expression.substring(2, expression.length() - 1);
     }
     public static String referencedHandle(String expression) {
@@ -151,8 +153,10 @@ public final class ScriptCondition {
         String field = match.group(2), op = match.group(3), expected = match.group(4);
         if (field.equals("dead")) return !handle.isAlive();
         if (field.equals("phase")) {
-            if (!(handle instanceof MobForgeHandle mob)) throw new IllegalArgumentException("Handle " + match.group(1) + " is not a registered MobForge mob");
-            String actual = mob.phase().orElse("");
+            String actual;
+            if (handle instanceof TagGroup group) actual = group.phase();
+            else if (handle instanceof MobForgeHandle mob) actual = mob.phase().orElse("");
+            else throw new IllegalArgumentException("Handle " + match.group(1) + " is not a registered MobForge mob");
             return op.equals("==") ? actual.equals(expected) : !actual.equals(expected);
         }
         double threshold = Double.parseDouble(expected);

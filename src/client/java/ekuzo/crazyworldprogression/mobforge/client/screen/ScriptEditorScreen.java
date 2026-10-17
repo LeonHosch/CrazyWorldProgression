@@ -77,8 +77,8 @@ public final class ScriptEditorScreen extends Screen {
 		int small = (SIDEBAR_WIDTH - 16) / 2;
 		addRenderableWidget(Button.builder(Component.literal("+ Spawn"), b -> addSpawn()).bounds(6, footerTop - 25, small, 20).build());
 		addRenderableWidget(Button.builder(Component.literal("+ More"), b -> minecraft.setScreenAndShow(
-				new RegistryPickerScreen(minecraft, this, "Add script step", List.of("Sleep", "Spawn entity",
-						"Wait", "Mob cast", "Set phase", "Trigger event", "Reward currency", "Reward item",
+				new RegistryPickerScreen(minecraft, this, "Add script step", List.of("Sleep",
+						"Wait", "Mob cast", "Mob phase", "Trigger event", "Reward currency", "Reward item",
 						"Reward loot table"), "", this::addStep)))
 				.bounds(10 + small, footerTop - 25, small, 20).build());
 
@@ -136,7 +136,7 @@ public final class ScriptEditorScreen extends Screen {
 		}
 		if (step.type == StepType.MOB_CAST) {
 			section(blocks, "Cast registered ability");
-			row(blocks, compact, text("Mob handle", "Reference a prior spawn, for example ${guardian}.",
+			row(blocks, compact, text("Mob tag", "Tag given in mob_spawn, for example boss.",
 					() -> step.mob, value -> step.mob = value),
 					new FormItem("Ability ID", "Namespaced ability registered by a content mod.",
 							FieldType.ABILITY, List.of(), () -> step.ability, value -> step.ability = value, null));
@@ -144,7 +144,7 @@ public final class ScriptEditorScreen extends Screen {
 		}
 		if (step.type == StepType.SET_PHASE) {
 			section(blocks, "Change mob phase");
-			row(blocks, compact, text("Mob handle", "Reference a prior spawn, for example ${guardian}.",
+			row(blocks, compact, text("Mob tag", "Tag given in mob_spawn, for example boss.",
 					() -> step.mob, value -> step.mob = value),
 					text("Phase", "Examples: phase2, enraged, final.",
 							() -> step.phase, value -> step.phase = value));
@@ -180,9 +180,11 @@ public final class ScriptEditorScreen extends Screen {
 							() -> step.rewardCount, value -> step.rewardCount = value));
 			return blocks;
 		}
-		section(blocks, "Spawn wave");
+		section(blocks, "Mob spawn");
 		row(blocks, compact, new FormItem("Mob template", "Select a loaded MobForge template.", FieldType.TEMPLATE, List.of(), () -> step.template, value -> step.template = value, null),
 				text("Count", "Number of entities spawned by this step.", () -> step.count, value -> step.count = value));
+		row(blocks, compact, text("Tag", "Optional name for these mobs, used by kills(\"tag\"), mob_cast and mob_phase.",
+				() -> step.tag, value -> step.tag = value));
 		section(blocks, "Spawn location");
 		row(blocks, compact, text("X", "Base X coordinate.", () -> step.x, value -> step.x = value), text("Y", "Base Y coordinate.", () -> step.y, value -> step.y = value), text("Z", "Base Z coordinate.", () -> step.z, value -> step.z = value));
 		blocks.add(new ActionBlock("Use current player position", this::usePlayerPosition));
@@ -232,7 +234,7 @@ public final class ScriptEditorScreen extends Screen {
 			case "Spawn entity" -> StepType.SPAWN_ENTITY;
 			case "Wait" -> StepType.WAIT_UNTIL;
 			case "Mob cast" -> StepType.MOB_CAST;
-			case "Set phase" -> StepType.SET_PHASE;
+			case "Mob phase", "Set phase" -> StepType.SET_PHASE;
 			case "Trigger event" -> StepType.TRIGGER;
 			case "Reward currency" -> StepType.REWARD_CURRENCY;
 			case "Reward item" -> StepType.REWARD_ITEM;
@@ -345,7 +347,7 @@ public final class ScriptEditorScreen extends Screen {
 	private record FormItem(String label, String description, FieldType type, List<String> options, Supplier<String> get, Consumer<String> set, BoolBinding bool) { private Supplier<Boolean> boolGet() { return bool.get; } private Consumer<Boolean> boolSet() { return bool.set; } }
 
 	private static final class StepDraft {
-		private StepType type; private String template = "", count = "1", x = "0", y = "64", z = "0", ox = "0", oy = "0", oz = "0", sleep = "5s";
+		private StepType type; private String tag = ""; private String template = "", count = "1", x = "0", y = "64", z = "0", ox = "0", oy = "0", oz = "0", sleep = "5s";
 		private String aiMode = "template_default", tx = "0", ty = "64", tz = "0", arrival = "2", player = "", range = "64"; private boolean combat = true;
 		private Map<String, Object> aiSettings = Map.of();
 		private String entityId = "", anchor = "origin", saveAs = "", condition = "", timeout = "5m";
@@ -357,6 +359,7 @@ public final class ScriptEditorScreen extends Screen {
 				draft.type = StepType.SLEEP; draft.sleep = MobScriptYaml.formatDuration(value.ticks());
 			} else if (step instanceof MobScript.SpawnStep value) {
 				draft.type = StepType.SPAWN; draft.template = value.template(); draft.count = String.valueOf(value.count());
+				draft.tag = value.tag();
 				draft.x = String.valueOf(value.location().x()); draft.y = String.valueOf(value.location().y());
 				draft.z = String.valueOf(value.location().z()); draft.ox = String.valueOf(value.offset().x());
 				draft.oy = String.valueOf(value.offset().y()); draft.oz = String.valueOf(value.offset().z());
@@ -430,7 +433,7 @@ public final class ScriptEditorScreen extends Screen {
 					yield new MobScript.SpawnStep(template,
 							new MobScript.Position(Double.parseDouble(x), Double.parseDouble(y), Double.parseDouble(z)),
 							new MobScript.Offset(Double.parseDouble(ox), Double.parseDouble(oy), Double.parseDouble(oz)),
-							Integer.parseInt(count), ai);
+							Integer.parseInt(count), ai, tag.trim());
 				}
 			};
 		}

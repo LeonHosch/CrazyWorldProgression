@@ -2,6 +2,7 @@ package ekuzo.crazyworldprogression.portals;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,5 +19,13 @@ class InstanceBuildsTest {
         assertTrue(PortalService.stillAtPortal(true, true));
         assertFalse(PortalService.stillAtPortal(true, false));
         assertFalse(PortalService.stillAtPortal(false, true));
+    }
+
+    @Test void buildsGoChunkByChunkKeepingLayerOrderInsideEachChunk() {
+        // Template order is layer by layer: x = 0, 20, 0, 20 on layers 0, 0, 1, 1 (chunks 0 and 1).
+        int[] x = {0, 20, 0, 20, -5};
+        int[] order = InstanceBuilds.chunkOrder(x.length, index -> x[index] >> 4, index -> 0);
+        assertArrayEquals(new int[] {4, 0, 2, 1, 3}, order);
+        assertArrayEquals(new int[0], InstanceBuilds.chunkOrder(0, index -> 0, index -> 0));
     }
 }

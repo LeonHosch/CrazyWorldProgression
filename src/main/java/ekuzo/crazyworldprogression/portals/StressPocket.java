@@ -40,7 +40,10 @@ public final class StressPocket {
         final UUID requester;
         final FastBlockWriter writer;
         final long startedNanos = System.nanoTime();
+        /** Positions handled so far; generation goes chunk column by chunk column, bottom-up in each. */
         long next;
+        int column;
+        long inner;
         long solid;
 
         Job(Identifier id, ServerLevel level, int sizeX, int sizeY, int sizeZ, UUID requester) {
@@ -78,13 +81,18 @@ public final class StressPocket {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         try (TickBudget.Slice slice = TickBudget.start(server, TickBudget.Priority.CREATION)) {
             int done = 0;
-            long layer = (long) job.sizeX * job.sizeZ;
+            int columnsX = (job.sizeX + 15) / 16;
             while (job.next < job.volume && slice.more(done++)) {
-                int y = (int) (job.next / layer);
-                long within = job.next % layer;
-                int z = (int) (within / job.sizeX);
-                int x = (int) (within % job.sizeX);
+                int baseX = job.column % columnsX * 16, baseZ = job.column / columnsX * 16;
+                int width = Math.min(16, job.sizeX - baseX), depth = Math.min(16, job.sizeZ - baseZ);
+                int y = (int) (job.inner / (width * depth));
+                int within = (int) (job.inner % (width * depth));
+                int z = baseZ + within / width, x = baseX + within % width;
                 job.next++;
+                if (++job.inner >= (long) width * depth * job.sizeY) {
+                    job.inner = 0;
+                    job.column++;
+                }
                 BlockState state = pattern(x, y, z, job.sizeY);
                 if (state.isAir()) continue;
                 job.solid++;

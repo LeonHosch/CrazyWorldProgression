@@ -12,6 +12,7 @@ import net.minecraft.world.RandomizableContainer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.storage.TagValueInput;
 
@@ -20,6 +21,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 
 /**
  * Places pocket templates into instance slots a slice at a time, within the instance-creation share of the
@@ -39,28 +43,62 @@ public final class InstanceBuilds {
         final Runnable done;
         /** Instance builds write straight into chunk sections, like world generation. */
         final FastBlockWriter writer;
+        /** Template blocks grouped chunk by chunk (bottom-up inside a chunk), worked out off the server thread. */
+        final CompletableFuture<int[]> order;
         int next;
 
-        Job(ServerLevel level, BlockPos origin, List<StructureTemplate.StructureBlockInfo> blocks, Runnable done) {
+        Job(ServerLevel level, BlockPos origin, List<StructureTemplate.StructureBlockInfo> blocks,
+            Consumer<LevelChunk> chunkDone, Runnable done) {
             this.level = level; this.origin = origin; this.blocks = blocks; this.done = done;
-            this.writer = new FastBlockWriter(level);
+            this.writer = new FastBlockWriter(level, chunkDone);
+            this.order = CompletableFuture.supplyAsync(() -> chunkOrder(blocks.size(),
+                    index -> (origin.getX() + blocks.get(index).pos().getX()) >> 4,
+                    index -> (origin.getZ() + blocks.get(index).pos().getZ()) >> 4));
         }
 
         void placeNext() {
-            StructureTemplate.StructureBlockInfo info = blocks.get(next++);
+            StructureTemplate.StructureBlockInfo info = blocks.get(order.join()[next++]);
             writer.place(origin.getX() + info.pos().getX(), origin.getY() + info.pos().getY(),
                     origin.getZ() + info.pos().getZ(), info.state(), info.nbt());
         }
     }
 
+    /**
+     * Indices 0..count-1 grouped by chunk column, keeping their original order inside each column (a stable
+     * counting sort). Writing chunk by chunk finishes every chunk in one go instead of revisiting all of them
+     * for every layer.
+     */
+    static int[] chunkOrder(int count, IntUnaryOperator chunkX, IntUnaryOperator chunkZ) {
+        int[] order = new int[count];
+        if (count == 0) return order;
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
+        for (int index = 0; index < count; index++) {
+            int x = chunkX.applyAsInt(index), z = chunkZ.applyAsInt(index);
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (z < minZ) minZ = z;
+            if (z > maxZ) maxZ = z;
+        }
+        int width = maxX - minX + 1;
+        int[] start = new int[width * (maxZ - minZ + 1) + 1];
+        for (int index = 0; index < count; index++)
+            start[(chunkZ.applyAsInt(index) - minZ) * width + chunkX.applyAsInt(index) - minX + 1]++;
+        for (int column = 1; column < start.length; column++) start[column] += start[column - 1];
+        for (int index = 0; index < count; index++)
+            order[start[(chunkZ.applyAsInt(index) - minZ) * width + chunkX.applyAsInt(index) - minX]++] = index;
+        return order;
+    }
+
     public static void initialize() {
+        FastBlockWriter.initialize();
         ServerLifecycleEvents.SERVER_STOPPED.register(JOBS::remove);
     }
 
     /** Queues a build for a slot; a newer build for the same slot replaces an older one. */
     static void start(MinecraftServer server, String key, ServerLevel level, BlockPos origin,
-                      List<StructureTemplate.StructureBlockInfo> blocks, Runnable done) {
-        JOBS.computeIfAbsent(server, ignored -> new LinkedHashMap<>()).put(key, new Job(level, origin, blocks, done));
+                      List<StructureTemplate.StructureBlockInfo> blocks, Consumer<LevelChunk> chunkDone, Runnable done) {
+        JOBS.computeIfAbsent(server, ignored -> new LinkedHashMap<>())
+                .put(key, new Job(level, origin, blocks, chunkDone, done));
     }
 
     static void cancel(MinecraftServer server, String key) {
@@ -96,7 +134,12 @@ public final class InstanceBuilds {
                 progress = false;
                 for (Map.Entry<String, Job> entry : jobs.entrySet()) {
                     Job job = entry.getValue();
-                    if (job.next >= job.blocks.size()) continue;
+                    if (job.next >= job.blocks.size()) {
+                        finished.add(entry.getKey());
+                        continue;
+                    }
+                    // Still sorting the template off-thread; other builds go ahead meanwhile.
+                    if (!job.order.isDone()) continue;
                     int end = Math.min(job.blocks.size(), job.next + TURN);
                     try {
                         while (job.next < end && slice.more(done++)) job.placeNext();

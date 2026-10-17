@@ -11,7 +11,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
@@ -58,7 +61,9 @@ public final class PortalTemplateService {
         structure.setAuthor(author);
         // Pocket templates contain builds. Capturing loose item entities would replay dropped
         // doors and other pickups every time a new instance is reconstructed.
-        structure.fillFromWorld(source, minimum, size, false, List.of());
+        // Air is left out: instances are built into emptied slots, so it would only cost saving, loading and
+        // placing time (most of a large pocket's volume is air).
+        structure.fillFromWorld(source, minimum, size, false, List.of(Blocks.AIR, Blocks.CAVE_AIR, Blocks.VOID_AIR));
         if (!server.getStructureManager().save(id)) {
             throw new IllegalStateException("Minecraft could not save structure template " + id);
         }
@@ -121,19 +126,28 @@ public final class PortalTemplateService {
         }
         var palettes = ((ekuzo.crazyworldprogression.mixin.StructureTemplateAccessor) structure).cwp$palettes();
         List<StructureTemplate.StructureBlockInfo> blocks = palettes.isEmpty() ? List.of() : palettes.getFirst().blocks();
-        InstanceBuilds.start(server, destination.dimension().identifier().toString(), destination, origin, blocks, () -> {
-            finishReconstruct(server, destination, metadata, origin);
-            done.run();
-        });
+        // Biomes are recoloured chunk by chunk as the build completes them, instead of all at the end.
+        var plains = server.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
+        var sampler = destination.getChunkSource().randomState().sampler();
+        it.unimi.dsi.fastutil.longs.LongOpenHashSet coloured = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+        InstanceBuilds.start(server, destination.dimension().identifier().toString(), destination, origin, blocks,
+                chunk -> {
+                    if (coloured.add(chunk.getPos().pack())) chunk.fillBiomesFromNoise((x, y, z, climate) -> plains, sampler);
+                }, () -> {
+                    finishReconstruct(server, destination, metadata, origin, coloured);
+                    done.run();
+                });
     }
 
     /** Biome recolouring and pickup cleanup once the blocks of a template are in place. */
     private static void finishReconstruct(MinecraftServer server, ServerLevel destination,
-                                          PortalTemplateData.PortalTemplate metadata, BlockPos origin) {
+                                          PortalTemplateData.PortalTemplate metadata, BlockPos origin,
+                                          it.unimi.dsi.fastutil.longs.LongSet coloured) {
         var plains = server.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
         var sampler = destination.getChunkSource().randomState().sampler();
         for (int chunkX = origin.getX() >> 4; chunkX <= (origin.getX() + metadata.sizeX() - 1) >> 4; chunkX++) {
             for (int chunkZ = origin.getZ() >> 4; chunkZ <= (origin.getZ() + metadata.sizeZ() - 1) >> 4; chunkZ++) {
+                if (coloured.contains(ChunkPos.pack(chunkX, chunkZ))) continue;
                 var chunk = destination.getChunk(chunkX, chunkZ);
                 chunk.fillBiomesFromNoise((x, y, z, climate) -> plains, sampler);
                 chunk.markUnsaved();
@@ -224,29 +238,46 @@ public final class PortalTemplateService {
 
     private static final java.util.Map<String, FastBlockWriter> CLEAR_WRITERS = new java.util.HashMap<>();
 
-    // Clear a bounded linear slice and return the next index, or minus one when the template volume is empty.
+    /**
+     * Clears the next part of an instance volume and returns where to continue, or minus one when done. The
+     * volume is worked chunk by chunk, one 16-block section at a time; sections that hold only air are skipped
+     * without looking at their blocks, so mostly empty instances clear quickly.
+     */
     static long clearBatch(ServerLevel level, PortalData.StoredInstance instance, long startIndex) {
-        long volume = (long) instance.sizeX() * instance.sizeY() * instance.sizeZ();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        long layerSize = (long) instance.sizeX() * instance.sizeZ();
-        long index = startIndex;
+        if (instance.sizeX() <= 0 || instance.sizeY() <= 0 || instance.sizeZ() <= 0) return -1L;
+        int minX = instance.originX(), minY = instance.originY(), minZ = instance.originZ();
+        int maxX = minX + instance.sizeX() - 1, maxY = minY + instance.sizeY() - 1, maxZ = minZ + instance.sizeZ() - 1;
+        int firstChunkX = minX >> 4, firstChunkZ = minZ >> 4, firstSectionY = minY >> 4;
+        int columnsX = (maxX >> 4) - firstChunkX + 1, columnsZ = (maxZ >> 4) - firstChunkZ + 1;
+        int sectionsY = (maxY >> 4) - firstSectionY + 1;
+        long units = (long) columnsX * columnsZ * sectionsY;
         // Nobody is inside an instance being deleted, so it is cleared straight in the chunk sections.
         String key = instance.slotDimension() + "|" + instance.createdEpochMillis();
         FastBlockWriter writer = CLEAR_WRITERS.computeIfAbsent(key, ignored -> new FastBlockWriter(level));
         net.minecraft.world.level.block.state.BlockState air = Blocks.AIR.defaultBlockState();
+        long index = startIndex;
         // Instance deletion has the lowest priority of all block work.
         try (TickBudget.Slice slice = TickBudget.start(level.getServer(), TickBudget.Priority.CLEANUP)) {
-            int done = 0;
-            while (index < volume && slice.more(done++)) {
-                int y = (int) (index / layerSize);
-                long withinLayer = index % layerSize;
-                int z = (int) (withinLayer / instance.sizeX());
-                int x = (int) (withinLayer % instance.sizeX());
-                writer.place(instance.originX() + x, instance.originY() + y, instance.originZ() + z, air, null);
+            while (index < units && slice.hasTime()) {
+                long column = index / sectionsY;
+                int sectionY = firstSectionY + (int) (index % sectionsY);
+                int chunkX = firstChunkX + (int) (column % columnsX);
+                int chunkZ = firstChunkZ + (int) (column / columnsX);
                 index++;
+                LevelChunk chunk = writer.chunk(chunkX, chunkZ);
+                int sectionIndex = chunk.getSectionIndexFromSectionY(sectionY);
+                if (sectionIndex < 0 || sectionIndex >= chunk.getSections().length) continue;
+                LevelChunkSection section = chunk.getSection(sectionIndex);
+                if (section.hasOnlyAir()) continue;
+                int x0 = Math.max(minX, chunkX << 4), x1 = Math.min(maxX, (chunkX << 4) + 15);
+                int y0 = Math.max(minY, sectionY << 4), y1 = Math.min(maxY, (sectionY << 4) + 15);
+                int z0 = Math.max(minZ, chunkZ << 4), z1 = Math.min(maxZ, (chunkZ << 4) + 15);
+                for (int y = y0; y <= y1; y++)
+                    for (int z = z0; z <= z1; z++)
+                        for (int x = x0; x <= x1; x++) writer.place(chunk, section, x, y, z, air, null);
             }
         }
-        if (index < volume) return index;
+        if (index < units) return index;
         CLEAR_WRITERS.remove(key);
         writer.finish();
         return -1L;

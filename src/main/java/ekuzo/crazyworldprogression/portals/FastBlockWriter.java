@@ -52,6 +52,8 @@ final class FastBlockWriter {
     private int chunkX = Integer.MIN_VALUE;
     private int chunkZ = Integer.MIN_VALUE;
     private int chunkTick = Integer.MIN_VALUE;
+    /** Light checks of the current chunk, sent to the light thread together (one task per block is slow). */
+    private final it.unimi.dsi.fastutil.longs.LongArrayList pendingLight = new it.unimi.dsi.fastutil.longs.LongArrayList();
     /** Statistics for the log line written when a build or clear finishes. */
     private final long createdNanos = System.nanoTime();
     private long changed, lightChecks, workNanos;
@@ -78,6 +80,7 @@ final class FastBlockWriter {
     LevelChunk chunk(int cx, int cz) {
         int tick = level.getServer().getTickCount();
         if (chunk != null && cx == chunkX && cz == chunkZ && tick == chunkTick) return chunk;
+        flushLight();
         boolean sameChunk = chunk != null && cx == chunkX && cz == chunkZ;
         if (chunk != null && !sameChunk) complete(tick == chunkTick ? chunk : level.getChunk(chunkX, chunkZ));
         ChunkPos pos = new ChunkPos(cx, cz);
@@ -108,7 +111,7 @@ final class FastBlockWriter {
         cursor.set(x, y, z);
         if (wasEmpty != section.hasOnlyAir()) light.updateSectionStatus(SectionPos.of(cursor), section.hasOnlyAir());
         if (LightEngine.hasDifferentLightProperties(old, state)) {
-            light.checkBlock(cursor);
+            pendingLight.add(cursor.asLong());
             lightChecks++;
         }
         if (old.hasBlockEntity() && old != state) chunk.removeBlockEntity(cursor);
@@ -122,6 +125,12 @@ final class FastBlockWriter {
         }
         if (old != state && (PoiTypes.forState(old).isPresent() || PoiTypes.forState(state).isPresent()))
             level.updatePOIOnBlockStateChange(cursor.immutable(), old, state);
+    }
+
+    private void flushLight() {
+        if (pendingLight.isEmpty()) return;
+        light.checkBlock(new LightBatch(chunkX, chunkZ, pendingLight.toLongArray()));
+        pendingLight.clear();
     }
 
     /** Heightmaps, the chunk callback, and the finished chunk for anyone already in it. */
@@ -150,6 +159,7 @@ final class FastBlockWriter {
 
     /** Completes every chunk that is not completed yet. */
     void finish() {
+        flushLight();
         long[] remaining = touched.toLongArray();
         for (long key : remaining) complete(level.getChunk(ChunkPos.getX(key), ChunkPos.getZ(key)));
         touched.clear();

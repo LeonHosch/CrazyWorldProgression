@@ -3,6 +3,7 @@
   "package": "ekuzo.crazyworldprogression.mixin",
   "mixins": [
     "BlockMixin",
+    "LevelLightEngineBatchMixin",
     "LivingEntityMixin",
     "PocketBuildTrackingMixin",
     "PocketWeatherMixin",

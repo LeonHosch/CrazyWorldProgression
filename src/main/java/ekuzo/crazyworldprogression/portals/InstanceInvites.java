@@ -17,6 +17,8 @@ import java.util.WeakHashMap;
 /** Invites into a private instance (raid or not) that is already running. Accept with /party accept or via its portal. */
 public final class InstanceInvites {
     private static final long INVITE_TICKS = 5L * 60L * 20L;
+    /** How close to the entrance portal an invited player must be to accept. */
+    public static final double ACCEPT_DISTANCE = 8.0;
     private static final Map<MinecraftServer, Map<UUID, Invite>> INVITES = new WeakHashMap<>();
 
     private InstanceInvites() { }
@@ -46,7 +48,7 @@ public final class InstanceInvites {
                 server.getTickCount() + INVITE_TICKS));
         String name = inviter.getGameProfile().name();
         target.sendSystemMessage(Component.literal(name + " invited you to " + portal.effectiveDisplayName()
-                        + ". Click to join, or walk into its portal: ")
+                        + ". Go to its entrance portal and walk in, or click when you are there: ")
                 .append(Component.literal("[Join]").withStyle(style -> style.withColor(ChatFormatting.GREEN)
                         .withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/party accept " + name))
                         .withHoverEvent(new HoverEvent.ShowText(Component.literal("/party accept " + name))))));
@@ -75,8 +77,16 @@ public final class InstanceInvites {
         if (invite == null || !invite.inviter().equals(inviter.getUUID()))
             throw new IllegalStateException("No invite from " + inviter.getGameProfile().name());
         PortalData.StoredInstance instance = live(server, invite);
+        if (instance == null) {
+            consume(server, player.getUUID());
+            throw new IllegalStateException("That instance has ended");
+        }
+        PortalDefinition portal = PortalService.portal(server, invite.portalId());
+        if (portal == null || !player.level().dimension().identifier().equals(portal.dimension())
+                || !portal.isNear(player.position().add(0.0, 0.9, 0.0), ACCEPT_DISTANCE))
+            throw new IllegalStateException("Go to the entrance portal of " + (portal == null ? "that instance"
+                    : portal.effectiveDisplayName()) + " to join");
         consume(server, player.getUUID());
-        if (instance == null) throw new IllegalStateException("That instance has ended");
         PortalService.joinRunningInstance(player, instance);
     }
 

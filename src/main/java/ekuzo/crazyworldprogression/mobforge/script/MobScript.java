@@ -76,7 +76,13 @@ public record MobScript(String id, List<Step> steps) {
 	}
 	public record RaidCompleteStep() implements Step { }
 	public record EncounterStartStep() implements Step { }
-	public record EncounterEndStep() implements Step { }
+	/**
+	 * Ends a raid encounter. The optional spawn becomes the instance's rally, respawn and rejoin point, and is
+	 * where a run resumed from this checkpoint starts.
+	 */
+	public record EncounterEndStep(Position spawn) implements Step {
+		public EncounterEndStep() { this(null); }
+	}
 	/** Script step "building": action "add" pastes the saved blocks, "delete" clears them (formerly spawn/despawn). */
 	public record BuildingStep(Identifier buildId, String action, Position location) implements Step {
 		public BuildingStep {

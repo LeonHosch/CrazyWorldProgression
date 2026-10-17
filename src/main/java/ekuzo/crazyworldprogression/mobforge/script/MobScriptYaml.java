@@ -67,7 +67,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("effect")) return effect(map(step.get("effect"), field + ".effect"), field);
 		if (step.containsKey("raid_complete")) return new MobScript.RaidCompleteStep();
 		if (step.containsKey("encounter_start")) return new MobScript.EncounterStartStep();
-		if (step.containsKey("encounter_end")) return new MobScript.EncounterEndStep();
+		if (step.containsKey("encounter_end")) return encounterEnd(step.get("encounter_end"), field + ".encounter_end");
 		String type = string(step.get("type"), field + ".type");
 		return switch (type) {
 			case "spawn" -> spawn(step, field);
@@ -100,7 +100,7 @@ public final class MobScriptYaml {
 			case "effect" -> effect(step, field);
 			case "raid_complete" -> new MobScript.RaidCompleteStep();
 			case "encounter_start" -> new MobScript.EncounterStartStep();
-			case "encounter_end" -> new MobScript.EncounterEndStep();
+			case "encounter_end" -> encounterEnd(step, field);
 			default -> throw new IllegalArgumentException(field + ".type is unknown: " + type);
 		};
 	}
@@ -176,6 +176,11 @@ public final class MobScriptYaml {
 				? position(map(value.get("target"), field + ".target"), field + ".target") : null;
 		if (target != null && !action.equals("add")) throw new IllegalArgumentException("Portal target is only valid with add");
 		return new MobScript.PortalLocationStep(namespaced(value.get("portal"), field + ".portal"), action, location, position, target);
+	}
+	private MobScript.Step encounterEnd(Object value, String field) {
+		if (!(value instanceof Map<?, ?> body) || !body.containsKey("spawn")) return new MobScript.EncounterEndStep();
+		Map<String, Object> fields = map(value, field);
+		return new MobScript.EncounterEndStep(position(map(fields.get("spawn"), field + ".spawn"), field + ".spawn"));
 	}
 	private MobScript.Step building(Map<String, Object> value, String field) {
 		String action = string(value.get("action"), field + ".action");
@@ -374,7 +379,8 @@ public final class MobScriptYaml {
 							"action", effect.action(), "amplifier", effect.amplifier())));
 			else if (step instanceof MobScript.RaidCompleteStep) steps.add(Map.of("raid_complete", true));
 			else if (step instanceof MobScript.EncounterStartStep) steps.add(Map.of("encounter_start", true));
-			else if (step instanceof MobScript.EncounterEndStep) steps.add(Map.of("encounter_end", true));
+			else if (step instanceof MobScript.EncounterEndStep end) steps.add(Map.of("encounter_end", end.spawn() == null ? true
+					: Map.of("spawn", position(end.spawn().x(), end.spawn().y(), end.spawn().z()))));
 		}
 		root.put("steps", steps); return dumper.dumpToString(root);
 	}

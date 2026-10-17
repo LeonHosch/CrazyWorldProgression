@@ -113,7 +113,8 @@ public final class MobScriptCode {
                 out.append("while ").append(loop.get("condition")).append(", max_iterations=")
                         .append(loop.get("max_iterations")).append(":\n"); depth++;
             } else if (name.equals("sleep")) out.append("sleep(duration=").append(JSON.toJson(body)).append(")\n");
-            else if (name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end"))
+            else if ((name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end"))
+                    && !(body instanceof Map<?, ?>))
                 out.append(name).append("()\n");
             else if (body instanceof Map<?, ?> fields) {
                 List<String> args = new ArrayList<>();

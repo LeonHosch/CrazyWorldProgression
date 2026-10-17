@@ -70,8 +70,8 @@ The in-game admin script editor exposes the same commands as steps. All IDs that
 | `explosion` | `explosion(location={"x":0,"y":65,"z":0}, power=2)` | Create an explosion that damages entities but leaves blocks intact. |
 | `sound` | `sound(sound_id="minecraft:entity.experience_orb.pickup", location={"x":0,"y":65,"z":0})` | Play a sound effect at the location. |
 | `effect` | `effect(effect_id="minecraft:speed", player_id="entered", action="apply", amplifier=0)` | Apply an infinite effect to every player ID stored in `entered`. Omit `player_id` to target every player in the instance. Amplifier 0 is level I; the effect ID names the effect, not its level. Use `action="remove"` to remove that effect from the same targets. A literal player UUID also works. |
-| `encounter_start` | `encounter_start()` | Begin raid encounter restrictions; each player has one revive to use. |
-| `encounter_end` | `encounter_end()` | Finish the raid encounter and reset revive and once-per-attempt entry state. Outside an encounter, ordinary respawning is available. |
+| `encounter_start` | `encounter_start()` | Begin raid encounter restrictions; each player has one revive to use. First clears everything the script manages (see below). |
+| `encounter_end` | `encounter_end(spawn={"x":-15,"y":64,"z":-10})` | Finish the raid encounter, reset revive and once-per-attempt entry state, and save a checkpoint for everyone inside. First clears everything the script manages (see below). The optional `spawn` becomes the rally, respawn and rejoin point, and is where a run resumed from this checkpoint starts. Outside an encounter, ordinary respawning is available. |
 | `redstone_sensor` | `redstone_sensor(name="lever", position={"x":10,"y":64,"z":5})` | Legacy named redstone check; existing scripts still load. Use `powered(x, y, z)` for new scripts. |
 | `reward_currency` | `reward_currency(currency="cwp:coins", amount=100)` | Credit each player currently in the pocket instance; currency must be player scoped. |
 | `reward_item` | `reward_item(item="minecraft:diamond", count=1)` | Give each player currently in the pocket instance an item. |
@@ -105,6 +105,12 @@ Use **Buildings** in `/cwp admin` to name and save a selected block range. The s
 
 When you enter the pocket editor, attached scripts show the non-air blocks of every building spawn as translucent purple blocks at the scripted coordinates. This is a preview only. In a live instance, the coordinates shift with the pocket so the building keeps the same position relative to the saved arena. Building copies are cleared on a wipe or when an instance slot is released, including copies outside the arena's captured range.
 Scripted portal `add` locations are previewed there in the same purple, using each saved portal's shape, plane, width, and height. The preview does not open a portal or trigger travel.
+
+## Encounter boundaries and checkpoints
+
+`encounter_start()` and `encounter_end()` both clear everything the script manages in the instance before doing anything else: mobs the script spawned, pasted buildings, portal locations the script added, eventboxes, redstone sensors, and their counters. Re-add anything that should still exist after the boundary, such as an exit portal or bridge, with steps after it. `encounter_end()` also clears the script's variables (existing behavior); `encounter_start()` keeps them.
+
+Each `encounter_end()` gives every party member in the instance a raid checkpoint for 24 hours. A new run, or a run restarted after a wipe, starts directly after the party leader's last completed `encounter_end()`. If that step has a `spawn`, players are moved there and it stays the rally point. Loot, achievements and other rewards right after it are skipped until the next `encounter_start()`, so they are not given twice. Without a `spawn`, players stay at the pocket's normal spawn.
 
 ## Editing, migration, and errors
 

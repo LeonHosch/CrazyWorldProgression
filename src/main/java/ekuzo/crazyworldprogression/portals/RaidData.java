@@ -15,18 +15,30 @@ import java.util.Map;
 final class RaidData extends SavedData {
     private static final Codec<RaidData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.unboundedMap(Codec.STRING, Attempt.CODEC).optionalFieldOf("attempts", Map.of())
-                    .forGetter(data -> data.attempts)
+                    .forGetter(data -> data.attempts),
+            Codec.unboundedMap(Codec.STRING, Spot.CODEC).optionalFieldOf("spawns", Map.of())
+                    .forGetter(data -> data.spawns)
     ).apply(instance, RaidData::new));
     private static final SavedDataType<RaidData> TYPE = new SavedDataType<>(
             CrazyWorldProgression.id("raid_attempts"), RaidData::new, CODEC, null);
     private final Map<String, Attempt> attempts = new LinkedHashMap<>();
+    /** Spawn set by the last encounter_end(spawn=...) in each slot; replaces the template spawn there. */
+    private final Map<String, Spot> spawns = new LinkedHashMap<>();
 
     private RaidData() { }
-    private RaidData(Map<String, Attempt> attempts) { this.attempts.putAll(attempts); }
+    private RaidData(Map<String, Attempt> attempts, Map<String, Spot> spawns) {
+        this.attempts.putAll(attempts);
+        this.spawns.putAll(spawns);
+    }
+    Spot spawn(String slot) { return spawns.get(slot); }
+    void spawn(String slot, Spot spot) {
+        if (spot == null) spawns.remove(slot); else spawns.put(slot, spot);
+        setDirty();
+    }
     static RaidData get(MinecraftServer server) { return server.overworld().getDataStorage().computeIfAbsent(TYPE); }
     Attempt get(String slot) { return attempts.get(slot); }
     void put(String slot, Attempt attempt) { attempts.put(slot, attempt); setDirty(); }
-    void remove(String slot) { if (attempts.remove(slot) != null) setDirty(); }
+    void remove(String slot) { if (attempts.remove(slot) != null | spawns.remove(slot) != null) setDirty(); }
 
     record Spot(double x, double y, double z) {
         static final Codec<Spot> CODEC = RecordCodecBuilder.create(instance -> instance.group(

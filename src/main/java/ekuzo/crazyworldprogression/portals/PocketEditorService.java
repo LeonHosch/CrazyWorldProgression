@@ -432,6 +432,8 @@ public final class PocketEditorService {
                     shifted(explosion.location(), delta), explosion.power());
             if (step instanceof MobScript.SoundStep sound) return (MobScript.Step) new MobScript.SoundStep(
                     sound.soundId(), shifted(sound.location(), delta));
+            if (step instanceof MobScript.EncounterEndStep end && end.spawn() != null)
+                return (MobScript.Step) new MobScript.EncounterEndStep(shifted(end.spawn(), delta));
             if (!(step instanceof MobScript.SpawnStep spawn)) return step;
             var position = spawn.location();
             MobTemplate.Ai ai = spawn.aiOverride();

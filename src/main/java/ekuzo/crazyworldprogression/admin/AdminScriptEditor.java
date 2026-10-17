@@ -216,9 +216,20 @@ final class AdminScriptEditor {
                                         step.value("source"), List.of("mob kills", "event box triggers")),
                                 field(prefix, step, "source_id", "Mob ID or event box name"),
                                 field(prefix, step, "variable", "Variable name")), List.of()));
-                case "Encounter start", "Encounter end" -> rows.add(row(section, "Raid encounter",
-                        step.type.equals("Encounter start") ? "Begin the one-revive-per-player attempt."
-                                : "Finish the attempt and reset revive and entry locks.", List.of(), List.of()));
+                case "Encounter start" -> rows.add(row(section, "Raid encounter",
+                        "Begin the one-revive-per-player attempt. Clears script mobs, buildings, portals, eventboxes and sensors.",
+                        List.of(), List.of()));
+                case "Encounter end" -> {
+                    rows.add(row(section, "Raid encounter",
+                            "Finish the attempt and save a checkpoint. Clears script mobs, buildings, portals, eventboxes and sensors.",
+                            List.of(), List.of()));
+                    rows.add(row(section, "New spawn", "Rally, respawn and rejoin point from now on; a checkpoint run starts here.",
+                            List.of(AdminPanelRegistry.AdminField.select(prefix + "spawn_enabled", "Set spawn",
+                                            step.value("spawn_enabled"), List.of("No", "Yes")),
+                                    field(prefix, step, "x", "X"), field(prefix, step, "y", "Y"),
+                                    field(prefix, step, "z", "Z")),
+                            List.of(new AdminPanelRegistry.AdminAction("script.step.here|" + i, "Here", false))));
+                }
                 case "Spawn building", "Despawn building" -> rows.add(row(section, "Saved building",
                         step.type.equals("Spawn building") ? "Paste the saved block range here."
                                 : "Clear the entire pasted block range here.",
@@ -338,7 +349,7 @@ final class AdminScriptEditor {
                 case "script.step.here" -> {
                     if (!List.of("Spawn wave", "Spawn mobs", "Portal", "Spawn portal",
                             "Spawn building", "Despawn building", "Check redstone power", "Particles", "Explosion",
-                            "Play sound")
+                            "Play sound", "Encounter end")
                             .contains(draft.steps.get(index).type))
                         throw new IllegalArgumentException("This step has no placement position");
                     if (pocketId != null && !player.level().dimension().identifier().equals(
@@ -351,6 +362,7 @@ final class AdminScriptEditor {
                         step.fields.put("y", Integer.toString(player.blockPosition().getY()));
                         step.fields.put("z", Integer.toString(player.blockPosition().getZ()));
                     } else {
+                        if (step.type.equals("Encounter end")) step.fields.put("spawn_enabled", "Yes");
                         step.fields.put("x", Double.toString(player.getX()));
                         step.fields.put("y", Double.toString(player.getY()));
                         step.fields.put("z", Double.toString(player.getZ()));
@@ -625,7 +637,13 @@ final class AdminScriptEditor {
                     form.fields.put("source", "mob kills"); form.fields.put("source_id", "minecraft:zombie");
                     form.fields.put("variable", "kills");
                 }
-                case "Encounter start", "Encounter end" -> { }
+                case "Encounter start" -> { }
+                case "Encounter end" -> {
+                    form.fields.put("spawn_enabled", "No");
+                    form.fields.put("x", player == null ? "0" : Double.toString(player.getX()));
+                    form.fields.put("y", player == null ? "64" : Double.toString(player.getY()));
+                    form.fields.put("z", player == null ? "0" : Double.toString(player.getZ()));
+                }
                 case "Spawn building", "Despawn building" -> {
                     form.fields.put("build_id", "cwp:arena_wall");
                     form.fields.put("x", player == null ? "0" : Integer.toString(player.blockPosition().getX()));
@@ -827,6 +845,11 @@ final class AdminScriptEditor {
                 form = empty("Encounter start", null);
             } else if (step instanceof MobScript.EncounterEndStep || step instanceof MobScript.RaidCompleteStep) {
                 form = empty("Encounter end", null);
+                MobScript.Position spawn = step instanceof MobScript.EncounterEndStep end ? end.spawn() : null;
+                form.fields.put("spawn_enabled", spawn == null ? "No" : "Yes");
+                form.fields.put("x", spawn == null ? "0" : Double.toString(spawn.x()));
+                form.fields.put("y", spawn == null ? "64" : Double.toString(spawn.y()));
+                form.fields.put("z", spawn == null ? "0" : Double.toString(spawn.z()));
             } else throw new IllegalArgumentException("Unsupported script step");
             return form;
         }
@@ -891,7 +914,8 @@ final class AdminScriptEditor {
                         (value("source").equals("mob kills") ? "kills" : "box_triggers")
                                 + "('" + value("source_id") + "')", value("variable"), "increment", "1");
                 case "Encounter start" -> new MobScript.EncounterStartStep();
-                case "Encounter end" -> new MobScript.EncounterEndStep();
+                case "Encounter end" -> new MobScript.EncounterEndStep("Yes".equals(value("spawn_enabled"))
+                        ? new MobScript.Position(number("x"), number("y"), number("z")) : null);
                 case "Spawn building", "Despawn building" -> new MobScript.BuildingStep(
                         Identifier.parse(value("build_id")),
                         type.equals("Spawn building") ? "add" : "delete",

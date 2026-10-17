@@ -48,7 +48,28 @@ public final class RaidService {
         });
     }
 
+    /** Spawn moved by encounter_end(spawn=...), or null for the template's own spawn. */
+    static RaidData.Spot spawnPoint(MinecraftServer server, PortalData.StoredInstance instance) {
+        return RaidData.get(server).spawn(instance.slotDimension().toString());
+    }
+
+    /**
+     * Makes this position the instance's rally, respawn and rejoin point. With movePlayers (resuming from a
+     * checkpoint) everyone in the instance is moved there now.
+     */
+    public static void moveSpawn(ServerLevel level, double x, double y, double z, boolean movePlayers) {
+        MinecraftServer server = level.getServer();
+        if (!isRaid(server, level.dimension().identifier())) return;
+        RaidData.get(server).spawn(level.dimension().identifier().toString(), new RaidData.Spot(x, y, z));
+        if (!movePlayers) return;
+        for (ServerPlayer player : List.copyOf(level.players())) {
+            player.teleportTo(level, x, y, z, Set.of(), player.getYRot(), player.getXRot(), false);
+            player.resetFallDistance();
+        }
+    }
+
     static void prepare(MinecraftServer server, PortalData.StoredInstance instance) {
+        RaidData.get(server).spawn(instance.slotDimension().toString(), null);
         RaidData.get(server).put(instance.slotDimension().toString(), RaidData.Attempt.first()
                 .withActive(!hasScriptedStart(server, instance.templateId())));
     }
@@ -215,6 +236,8 @@ public final class RaidService {
     /** Where the revive marker goes: the death position, or the rally point when the player fell out of the world. */
     static RaidData.Spot deathSpot(ServerPlayer player, PortalData.StoredInstance instance) {
         if (player.getY() >= player.level().getMinY()) return new RaidData.Spot(player.getX(), player.getY(), player.getZ());
+        RaidData.Spot moved = spawnPoint(player.level().getServer(), instance);
+        if (moved != null) return moved;
         PortalTemplateService.TemplateInfo template = PortalTemplateService.template(player.level().getServer(),
                 instance.templateId());
         if (template == null) return new RaidData.Spot(instance.originX() + 0.5, instance.originY() + 1.0,
@@ -406,6 +429,12 @@ public final class RaidService {
 
     private static void rally(ServerPlayer player, PortalData.StoredInstance instance) {
         ServerLevel level = level(player.level().getServer(), instance.slotDimension());
+        RaidData.Spot moved = spawnPoint(player.level().getServer(), instance);
+        if (level != null && moved != null) {
+            player.teleportTo(level, moved.x(), moved.y(), moved.z(), Set.of(), player.getYRot(), player.getXRot(), false);
+            player.resetFallDistance();
+            return;
+        }
         PortalTemplateService.TemplateInfo template = PortalTemplateService.template(player.level().getServer(), instance.templateId());
         if (level == null || template == null) return;
         player.teleportTo(level, instance.originX() + template.spawnX() + 0.5,

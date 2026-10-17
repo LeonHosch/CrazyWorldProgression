@@ -72,9 +72,8 @@ public final class MobScriptExecutor {
 	}
 
 	/**
-	 * Raid checkpoints: with resumeEncounters > 0 the run fast-forwards past that many encounter_end steps,
-	 * applying only world-state steps (eventbox, redstone sensor, variable, portal, building) on the way.
-	 * Rewards right after the last skipped encounter are not given again.
+	 * Raid checkpoints: with resumeEncounters > 0 the run starts right after that many encounter_end steps and
+	 * players are moved to that encounter_end's spawn. Rewards right after it are not given again.
 	 */
 	public UUID run(MobScript script, ServerLevel level, Map<String, Vec3> anchors, UUID encounterId,
 	                UUID pocketInstanceId, boolean groundSpawns, int resumeEncounters) {
@@ -84,8 +83,14 @@ public final class MobScriptExecutor {
 		UUID id = UUID.randomUUID();
 		ActiveRun created = new ActiveRun(id, script, level, Map.copyOf(anchors), encounterId, pocketInstanceId,
 				groundSpawns);
-		created.skipEncounters = Math.max(0, Math.min(resumeEncounters, encounterCount(script)));
-		created.encountersCompleted = created.skipEncounters;
+		int resume = Math.max(0, Math.min(resumeEncounters, encounterCount(script)));
+		if (resume > 0) {
+			// Jump straight past the checkpoint's encounter_end; its spawn becomes the starting point.
+			created.step = resumeStepIndex(script, resume);
+			created.encountersCompleted = resume;
+			created.suppressRewards = true;
+			created.resumeFrom = (MobScript.EncounterEndStep) script.steps().get(created.step - 1);
+		}
 		(ticking ? pending : active).put(id, created);
 		MobForge.LOGGER.info("Started MobForge script {} (run {}).", script.id(), id);
 		return id;
@@ -169,11 +174,33 @@ public final class MobScriptExecutor {
 		return (int) script.steps().stream().filter(MobScript.EncounterEndStep.class::isInstance).count();
 	}
 
-	/** Steps that shape the world or script state, so they are replayed when resuming from a checkpoint. */
-	static boolean replayedOnResume(MobScript.Step step) {
-		return step instanceof MobScript.EventBoxStep || step instanceof MobScript.RedstoneStep
-				|| step instanceof MobScript.VariableStep || step instanceof MobScript.PortalLocationStep
-				|| step instanceof MobScript.BuildingStep;
+	/** Index of the step right after the given number of encounter_end steps. */
+	static int resumeStepIndex(MobScript script, int encounters) {
+		int seen = 0;
+		for (int index = 0; index < script.steps().size(); index++) {
+			if (script.steps().get(index) instanceof MobScript.EncounterEndStep && ++seen == encounters) return index + 1;
+		}
+		return script.steps().size();
+	}
+
+	/**
+	 * encounter_start and encounter_end clear what the script manages in its instance: script-spawned mobs,
+	 * pasted buildings, script-added portal locations, eventboxes, redstone sensors and their counters.
+	 * Variables (including player lists) are kept.
+	 */
+	private static void clearScriptManaged(ActiveRun run) {
+		if (run.pocketInstanceId != null) {
+			java.util.List<net.minecraft.world.entity.Entity> owned = new java.util.ArrayList<>();
+			for (net.minecraft.world.entity.Entity entity : run.level.getAllEntities())
+				if (ekuzo.crazyworldprogression.mobforge.entity.MobForgeEntityData.pocket(entity)
+						.filter(run.pocketInstanceId::equals).isPresent()) owned.add(entity);
+			owned.forEach(net.minecraft.world.entity.Entity::discard);
+		}
+		ekuzo.crazyworldprogression.buildings.BuildingService.clearInstance(run.level);
+		PortalService.resetRuntimeLocations(run.level.getServer(), run.level.dimension().identifier());
+		run.handles.clear();
+		run.boxes.clear(); run.boxPlayers.clear(); run.boxOccupied.clear(); run.boxTriggers.clear();
+		run.redstone.clear(); run.kills.clear(); run.portalUses.clear(); run.watches.clear();
 	}
 
 	/** Rewards that belong to an already completed encounter and are not repeated after resuming. */
@@ -223,22 +250,20 @@ public final class MobScriptExecutor {
 			if (current && !watch.previous) changeVariable(run, watch.step.variable(), watch.step.operation(), watch.step.value());
 			watch.previous = current;
 		}
+		if (run.resumeFrom != null) {
+			MobScript.EncounterEndStep checkpoint = run.resumeFrom;
+			run.resumeFrom = null;
+			if (checkpoint.spawn() != null) RaidService.moveSpawn(run.level, checkpoint.spawn().x(),
+					checkpoint.spawn().y(), checkpoint.spawn().z(), true);
+			EncounterBanner.show(run.level.players(), EncounterBanner.Kind.RESUMED,
+					Integer.toString(run.encountersCompleted + 1));
+		}
 		if (clock < run.wakeTick) return false;
 		int operations = 0;
 		while (run.step < run.script.steps().size()) {
 			if (++operations > 256) return false;
 			if (canceled.contains(run.id)) return true;
 			MobScript.Step step = run.script.steps().get(run.step);
-			if (run.skipEncounters > 0 && !replayedOnResume(step)) {
-				// Fast-forward to the checkpoint: walk the steps in order without waiting, spawning or rewarding.
-				run.step++;
-				if (step instanceof MobScript.EncounterEndStep && --run.skipEncounters == 0) {
-					run.suppressRewards = true;
-					EncounterBanner.show(run.level.players(), EncounterBanner.Kind.RESUMED,
-							Integer.toString(run.encountersCompleted + 1));
-				}
-				continue;
-			}
 			if (run.suppressRewards && rewardStep(step)) {
 				run.step++;
 				continue;
@@ -400,11 +425,15 @@ public final class MobScriptExecutor {
 			} else if (step instanceof MobScript.EncounterStartStep) {
 				run.step++;
 				run.suppressRewards = false;
+				clearScriptManaged(run);
 				RaidService.start(run.level);
-			} else if (step instanceof MobScript.EncounterEndStep) {
+			} else if (step instanceof MobScript.EncounterEndStep end) {
 				run.step++;
 				run.encountersCompleted++;
+				clearScriptManaged(run);
 				RaidService.complete(run.level);
+				if (end.spawn() != null) RaidService.moveSpawn(run.level, end.spawn().x(), end.spawn().y(),
+						end.spawn().z(), false);
 				RaidCheckpoints.encounterCompleted(run.level, run.encountersCompleted);
 			}
 		}
@@ -596,7 +625,7 @@ public final class MobScriptExecutor {
 		private final Map<Integer, Integer> loopCounts = new HashMap<>();
 		private final Map<Integer, Watch> watches = new HashMap<>();
 		private int step;
-		private int skipEncounters;
+		private MobScript.EncounterEndStep resumeFrom;
 		private int encountersCompleted;
 		private boolean suppressRewards;
 		private long wakeTick;

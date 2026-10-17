@@ -739,7 +739,9 @@ public final class PortalService {
         ServerLevel destination = server.getLevel(dimensionKey(instance.slotDimension()));
         if (destination == null) throw new IllegalStateException("Missing instance dimension " + instance.slotDimension());
         PortalTemplateService.TemplateInfo template = requireTemplate(server, instance.templateId());
-        Vec3 entry = new Vec3(instance.originX() + template.spawnX() + 0.5,
+        RaidData.Spot moved = RaidService.spawnPoint(server, instance);
+        Vec3 entry = moved != null ? new Vec3(moved.x(), moved.y(), moved.z())
+                : new Vec3(instance.originX() + template.spawnX() + 0.5,
                 instance.originY() + template.spawnY(), instance.originZ() + template.spawnZ() + 0.5);
         pushReturn(server, player, new ReturnPoint(player.level().dimension().identifier(),
                 portal.safeReturnPosition(player.position(), player.position().add(0.0, 0.9, 0.0),
@@ -1097,7 +1099,7 @@ public final class PortalService {
         PortalNetworking.broadcast(server);
     }
 
-    static void resetRuntimeLocations(MinecraftServer server, Identifier dimension) {
+    public static void resetRuntimeLocations(MinecraftServer server, Identifier dimension) {
         synchronized (RUNTIME_LOCATIONS) {
             Map<Identifier, Map<Identifier, PlacementState>> locations = RUNTIME_LOCATIONS.get(server);
             if (locations != null) locations.remove(dimension);

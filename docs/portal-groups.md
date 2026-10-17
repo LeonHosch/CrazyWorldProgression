@@ -36,13 +36,13 @@ Administrators can list the individual leases with `/cwp portals instances list`
 - `/leave` takes you out of the instance you are in, back to where you entered it.
 - `/partyleave` (party leader only) takes everyone out and ends the instance. The party leader is the group leader at the time of travel.
 - Everyone in the party that started a private instance can come back while it is running: walk into its portal again, or log back in if you logged out inside. An empty private instance waits 5 minutes for its party before it is released. A raid also stays open while any party member is dead or waiting to respawn.
-- Inside any running private instance (raid or not), `/party invite <player>` invites someone into it when a slot is free (the portal's max players). They join with the clickable **[Join]** link (`/party accept <player>`) or by walking into its portal within 5 minutes. Outside an instance, `/party invite` and `/party accept` form a group before travel, the same as `/portal group invite` and `/portal group accept`.
+- Inside any running private instance (raid or not), `/party invite <player>` invites someone into it when a slot is free (the portal's max players). The invite lasts 5 minutes. To join, the invited player must go to that instance's entrance portal: walking into it joins, and the **[Join]** link (`/party accept <player>`) only works within 8 blocks of it. Outside an instance, `/party invite` and `/party accept` form a group before travel, the same as `/portal group invite` and `/portal group accept`.
 
 ## Raid checkpoints
 
 Every completed encounter (`encounter_end()` in the raid script) gives each party member inside a checkpoint for that raid portal. A checkpoint lasts 24 hours from the last completed encounter and is saved with the world.
 
-A new instance of the raid starts at the **party leader's** checkpoint. For example, after clearing the first encounter, the next run starts at the second one, and a "Resuming at encounter 2" banner appears. To get there, the script runs quickly up to the checkpoint. It applies eventboxes, redstone sensors, variables, portals and buildings, so doors and bridges are already where they should be. It skips waits, sleeps, mob spawns and banners. Loot and achievements right after the completed encounter are not given again. A wipe restarts at the checkpoint as well.
+A new instance of the raid starts at the **party leader's** checkpoint. For example, after clearing the first encounter, the next run starts at the second one, and a "Resuming at encounter 2" banner appears. The script continues directly after the completed `encounter_end(...)`, and players are moved to that step's `spawn`. Loot and achievements right after it are not given again. A wipe restarts at the checkpoint as well.
 
 The raid's entry screen shows your checkpoint and how long it lasts. Its **Reset** button (click twice) clears it, so your next run as leader starts at the first encounter.
 

@@ -114,5 +114,6 @@
   "key.category.crazy-world-progression.party": "Parties",
   "message.crazy-world-progression.instance.preparing": "Your instance is being prepared… %s%%",
   "message.crazy-world-progression.instance.preparing_chat": "Your instance is being prepared. You will be brought in when it is ready; stay near the portal.",
-  "message.crazy-world-progression.instance.ready_elsewhere": "Your instance is ready. Walk into the portal to enter."
+  "message.crazy-world-progression.instance.ready_elsewhere": "Your instance is ready. Walk into the portal to enter.",
+  "message.crazy-world-progression.instance.waiting_for": "Waiting for your party at the portal: %s"
 }

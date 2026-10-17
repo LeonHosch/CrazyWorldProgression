@@ -114,5 +114,6 @@
   "key.category.crazy-world-progression.party": "Gruppen",
   "message.crazy-world-progression.instance.preparing": "Deine Instanz wird vorbereitet… %s%%",
   "message.crazy-world-progression.instance.preparing_chat": "Deine Instanz wird vorbereitet. Du wirst hineingebracht, sobald sie bereit ist; bleib in der Nähe des Portals.",
-  "message.crazy-world-progression.instance.ready_elsewhere": "Deine Instanz ist bereit. Geh durch das Portal, um sie zu betreten."
+  "message.crazy-world-progression.instance.ready_elsewhere": "Deine Instanz ist bereit. Geh durch das Portal, um sie zu betreten.",
+  "message.crazy-world-progression.instance.waiting_for": "Warte auf deine Gruppe am Portal: %s"
 }

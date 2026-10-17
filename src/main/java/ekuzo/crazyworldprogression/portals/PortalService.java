@@ -787,12 +787,30 @@ public final class PortalService {
         if (members.size() > portal.admission().maxPlayers()) {
             throw new IllegalStateException("your party is larger than this dungeon's " + portal.admission().maxPlayers() + " player limit");
         }
-        // Everyone in the party standing at the portal travels now; the others can follow later.
+        // Every online party member has to be at the portal before the instance is set up.
+        List<String> missing = new ArrayList<>();
+        for (UUID id : members) {
+            ServerPlayer member = server.getPlayerList().getPlayer(id);
+            if (member == null) continue;
+            boolean sameDimension = member.level().dimension().identifier().equals(portal.dimension());
+            boolean near = sameDimension && portal.isNear(member.position().add(0, 0.9, 0), GROUP_ENTRY_DISTANCE);
+            if (!near) missing.add(member.getGameProfile().name() + " (" + (sameDimension
+                    ? Math.round(Math.sqrt(member.distanceToSqr(portal.centerX(), portal.centerY(), portal.centerZ())))
+                    + " blocks away" : "in another dimension") + ")");
+        }
+        if (!missing.isEmpty()) {
+            Component waiting = Component.translatableWithFallback("message.crazy-world-progression.instance.waiting_for",
+                    "Waiting for your party at the portal: %s", String.join(", ", missing));
+            for (UUID id : members) {
+                ServerPlayer member = server.getPlayerList().getPlayer(id);
+                if (member != null) member.sendSystemMessage(waiting);
+            }
+            return;
+        }
         List<ServerPlayer> travelers = new ArrayList<>();
         for (UUID id : members) {
             ServerPlayer member = server.getPlayerList().getPlayer(id);
-            if (member == null || !member.level().dimension().identifier().equals(portal.dimension())
-                    || !portal.isNear(member.position().add(0, 0.9, 0), GROUP_ENTRY_DISTANCE)) continue;
+            if (member == null) continue;
             if (!canPlayerEnter(server, member, portal)) {
                 throw new IllegalStateException(member.getGameProfile().name()
                         + " is not eligible to enter this portal");

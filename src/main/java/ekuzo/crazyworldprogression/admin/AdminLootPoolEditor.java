@@ -6,9 +6,13 @@ import ekuzo.crazyworldprogression.loot.LootPoolData;
 import ekuzo.crazyworldprogression.loot.LootPoolService;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -16,9 +20,13 @@ import java.util.Map;
 import static ekuzo.crazyworldprogression.admin.AdminPanelRegistry.Tone.GOOD;
 import static ekuzo.crazyworldprogression.admin.AdminPanelRegistry.Tone.NORMAL;
 
-/** Compact server-backed loot pool editor with real item icons. */
+/**
+ * Loot pool editor following the Pockets/Portals pattern: a card list, a separate create page, then an editor.
+ * Top-level pools roll every entry on its own chance; nested pools pick exactly one entry by share.
+ */
 final class AdminLootPoolEditor {
     static final String ROOT = "loot_pools";
+    private static final String NEW = ROOT + "/new";
     private static final String EDIT = ROOT + "/edit/";
     private static final String ENTRY = ROOT + "/entry/";
 
@@ -28,213 +36,393 @@ final class AdminLootPoolEditor {
 
     static AdminPanelRegistry.AdminPage page(ServerPlayer player, String pageId,
                                               List<AdminPanelRegistry.AdminTab> tabs) {
-        if (pageId.equals(ROOT)) return list(player, tabs);
+        MinecraftServer server = player.level().getServer();
+        if (pageId.equals(NEW)) return create(tabs);
         if (pageId.startsWith(EDIT)) {
             Identifier id = Identifier.tryParse(pageId.substring(EDIT.length()));
-            if (id != null && LootPoolService.get(player.level().getServer(), id) != null) return edit(player, id, tabs);
+            if (id != null && LootPoolService.get(server, id) != null) return edit(server, id, tabs);
         }
         if (pageId.startsWith(ENTRY)) {
             String suffix = pageId.substring(ENTRY.length());
             int separator = suffix.lastIndexOf('/');
             Identifier id = separator < 0 ? null : Identifier.tryParse(suffix.substring(0, separator));
-            if (id != null && LootPoolService.get(player.level().getServer(), id) != null)
-                return entry(player, id, Integer.parseInt(suffix.substring(separator + 1)), tabs);
+            LootPoolData.Pool pool = id == null ? null : LootPoolService.get(server, id);
+            Integer index = separator < 0 ? null : parseIndex(suffix.substring(separator + 1));
+            if (pool != null && index != null && index < pool.entries().size()) return entry(server, pool, index, tabs);
+            if (pool != null) return edit(server, id, tabs);
         }
-        return list(player, tabs);
+        return list(server, tabs);
     }
 
-    private static AdminPanelRegistry.AdminPage list(ServerPlayer player, List<AdminPanelRegistry.AdminTab> tabs) {
+    private static AdminPanelRegistry.AdminPage list(MinecraftServer server, List<AdminPanelRegistry.AdminTab> tabs) {
+        Map<String, LootPoolData.Pool> pools = LootPoolService.all(server);
         List<AdminPanelRegistry.AdminEntry> rows = new ArrayList<>();
-        rows.add(AdminPanelRegistry.AdminEntry.editor("Create", "New loot pool",
-                "Use a namespaced ID. Create a parent pool and any nested pools separately.",
-                List.of(field("id", "Pool ID", "cwp:raid_rewards", "", List.of()),
-                        field("name", "Display name", "Raid rewards", "", List.of()),
-                        AdminPanelRegistry.AdminField.select("mode", "Roll mode", "Independent", List.of("Independent", "Pick one"))),
-                List.of(AdminPanelRegistry.AdminAction.wide("loot.create", "Create pool", false))));
-        LootPoolService.all(player.level().getServer()).values().stream()
-                .sorted(Comparator.comparing(pool -> pool.id().toString())).forEach(pool -> {
-                    var firstItem = pool.entries().stream().filter(e -> e.kind().equals("item")).findFirst();
-                    rows.add(new AdminPanelRegistry.AdminEntry(pool.name(),
-                            pool.id() + " · " + modeLabel(pool.mode()) + " · " + pool.entries().size() + " rewards",
-                            GOOD, List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", EDIT + pool.id()),
+        rows.add(new AdminPanelRegistry.AdminEntry("Create loot pool",
+                "Create a pool first, then add items and nested pools in its editor.", GOOD, List.of(),
+                List.of(AdminPanelRegistry.AdminAction.navigate("Create", NEW)), null));
+        List<LootPoolData.Pool> topLevel = pools.values().stream()
+                .filter(pool -> !LootPoolService.nested(pools, pool.id()))
+                .sorted(Comparator.comparing(pool -> pool.id().toString())).toList();
+        for (LootPoolData.Pool pool : topLevel) {
+            var firstItem = pool.entries().stream().filter(entry -> entry.kind().equals("item")).findFirst();
+            rows.add(new AdminPanelRegistry.AdminEntry(pool.name(),
+                    pool.id() + " · " + countLabel(pool.entries().size()), GOOD, List.of(),
+                    List.of(AdminPanelRegistry.AdminAction.navigate("Edit", EDIT + pool.id()),
                             new AdminPanelRegistry.AdminAction("loot.delete|" + pool.id(), "Delete", true)),
-                            firstItem.map(value -> new AdminPanelRegistry.EntryPreview("item", value.target().toString(), 0))
-                                    .orElse(null)));
-                });
+                    new AdminPanelRegistry.EntryPreview("item",
+                            firstItem.map(entry -> entry.target().toString()).orElse("minecraft:chest"), 0)));
+        }
         return new AdminPanelRegistry.AdminPage(ROOT, "Loot pools",
-                "Saved per world. Independent rewards each roll separately; a Pick one pool chooses one weighted entry.",
-                tabs, rows, AdminPanelRegistry.PageLayout.EDITOR);
+                topLevel.size() + " loot pool(s) · use loot(lootpool_id=\"…\") in a pocket script", tabs, rows,
+                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
-    private static AdminPanelRegistry.AdminPage edit(ServerPlayer player, Identifier id,
-                                                      List<AdminPanelRegistry.AdminTab> tabs) {
-        LootPoolData.Pool pool = require(player, id);
-        List<AdminPanelRegistry.AdminEntry> rows = new ArrayList<>();
-        rows.add(AdminPanelRegistry.AdminEntry.editor("Pool", pool.id().toString(),
-                "Independent rolls every reward's chance. Pick one chooses exactly one reward using weights.",
-                List.of(field("name", "Display name", "", pool.name(), List.of()),
-                        AdminPanelRegistry.AdminField.select("mode", "Roll mode", modeLabel(pool.mode()),
-                                List.of("Independent", "Pick one"))),
-                List.of(new AdminPanelRegistry.AdminAction("loot.save|" + id, "Save pool", false),
-                        AdminPanelRegistry.AdminAction.navigate("Back", ROOT))));
-        for (int i = 0; i < pool.entries().size(); i++) {
-            LootPoolData.Entry reward = pool.entries().get(i);
-            String details = reward.kind().equals("pool") ? "Nested pool " + reward.target()
-                    : reward.target() + " × " + reward.min() + (reward.max() == reward.min() ? "" : "–" + reward.max());
-            details += pool.mode().equals("all") ? " · " + chanceLabel(reward.chance()) + " chance"
-                    : " · weight " + reward.weight();
-            if (reward.kind().equals("item") && reward.showInChat()) details += " · chat announcement";
-            rows.add(new AdminPanelRegistry.AdminEntry((i + 1) + ". " + reward.kind(), details, NORMAL,
-                    List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", ENTRY + id + "/" + i),
-                    new AdminPanelRegistry.AdminAction("loot.up|" + id + "|" + i, "Up", false),
-                    new AdminPanelRegistry.AdminAction("loot.down|" + id + "|" + i, "Down", false),
-                    new AdminPanelRegistry.AdminAction("loot.remove|" + id + "|" + i, "Remove", true)),
-                    reward.kind().equals("item")
-                            ? new AdminPanelRegistry.EntryPreview("item", reward.target().toString(), 0) : null));
-        }
-        rows.add(AdminPanelRegistry.AdminEntry.editor("Rewards", "Add a reward",
-                "Items include all registered modded items. Nested pools may contain more nested pools.", List.of(),
-                List.of(new AdminPanelRegistry.AdminAction("loot.add|" + id + "|item", "Item", false),
-                        new AdminPanelRegistry.AdminAction("loot.add|" + id + "|currency", "Currency", false),
-                        new AdminPanelRegistry.AdminAction("loot.add|" + id + "|pool", "Nested pool", false))));
-        return new AdminPanelRegistry.AdminPage(EDIT + id, pool.name(),
-                pool.id() + " · " + pool.entries().size() + " rewards", tabs, rows,
+    private static AdminPanelRegistry.AdminPage create(List<AdminPanelRegistry.AdminTab> tabs) {
+        return new AdminPanelRegistry.AdminPage(NEW, "Create loot pool",
+                "Choose a permanent ID. You can add items and nested pools after creating it.", tabs,
+                List.of(AdminPanelRegistry.AdminEntry.editor("Loot pool", "Identity",
+                        "The ID is what scripts use; the name is only shown here.",
+                        List.of(field("id", "Pool ID", "cwp:raid_rewards", "", List.of()),
+                                field("name", "Display name", "Raid rewards", "", List.of())),
+                        List.of(new AdminPanelRegistry.AdminAction("loot.create", "Create", false),
+                                AdminPanelRegistry.AdminAction.navigate("Back", ROOT)))),
                 AdminPanelRegistry.PageLayout.EDITOR);
     }
 
-    private static AdminPanelRegistry.AdminPage entry(ServerPlayer player, Identifier id, int index,
+    private static AdminPanelRegistry.AdminPage edit(MinecraftServer server, Identifier id,
+                                                      List<AdminPanelRegistry.AdminTab> tabs) {
+        Map<String, LootPoolData.Pool> pools = LootPoolService.all(server);
+        LootPoolData.Pool pool = pools.get(id.toString());
+        boolean pickOne = pool.mode().equals("one");
+        int total = pool.entries().stream().mapToInt(LootPoolData.Entry::chance).sum();
+        List<AdminPanelRegistry.AdminEntry> rows = new ArrayList<>();
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Pool", "Name", pool.id().toString(),
+                List.of(field("name", "Display name", "", pool.name(), List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("loot.save|" + id, "Save", false),
+                        AdminPanelRegistry.AdminAction.navigate("Back", backPage(pools, id)))));
+        if (pickOne) rows.add(AdminPanelRegistry.AdminEntry.editor("How it rolls", "Picks exactly one entry",
+                "Each chance is that entry's share of the pick. Total: " + percent(total)
+                        + (pool.entries().isEmpty() || total == 10000 ? "" : " (odds are scaled to 100%)"),
+                List.of(), List.of()));
+        else rows.add(AdminPanelRegistry.AdminEntry.editor("How it rolls", "Every entry rolls on its own",
+                "A 25% entry drops in about 1 of 4 rolls. A nested pool rolls its chance, then picks one of its entries.",
+                List.of(), List.of()));
+        String entriesSection = "Entries (" + pool.entries().size() + ")";
+        if (pool.entries().isEmpty()) rows.add(AdminPanelRegistry.AdminEntry.editor(entriesSection, "No entries yet",
+                "Add an item or a nested pool below.", List.of(), List.of()));
+        for (int index = 0; index < pool.entries().size(); index++)
+            rows.add(entryRow(pools, pool, index, total, entriesSection));
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Item", "Start typing to search items",
+                List.of(field("add_item", "Item (type to search)", "diamond_sword", "", itemIds()),
+                        field("add_chance", pickOne ? "Share %" : "Chance %", "100", "", List.of()),
+                        field("add_amount", "Amount", "1 or 1-3", "", List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("loot.add_item|" + id, "Add item", false))));
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Nested pool",
+                "Rolls its chance, then picks one of its own entries",
+                List.of(field("nested_chance", pickOne ? "Nested pool share %" : "Nested pool chance %", "25", "",
+                        List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("loot.add_nested|" + id, "Add nested pool", false))));
+        List<String> currencies = playerCurrencies();
+        if (!currencies.isEmpty()) rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Currency",
+                "Credits a player currency",
+                List.of(field("add_currency", "Currency", currencies.getFirst(), "", currencies),
+                        field("currency_chance", pickOne ? "Share %" : "Chance %", "100", "", List.of()),
+                        field("currency_amount", "Amount", "1 or 5-10", "", List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("loot.add_currency|" + id, "Add currency", false))));
+        String subtitle = pool.id() + " · " + (pickOne ? "nested pool, picks one entry" : "every entry rolls on its own");
+        return new AdminPanelRegistry.AdminPage(EDIT + id, pool.name(), subtitle, tabs, rows,
+                AdminPanelRegistry.PageLayout.EDITOR);
+    }
+
+    private static AdminPanelRegistry.AdminEntry entryRow(Map<String, LootPoolData.Pool> pools, LootPoolData.Pool pool,
+                                                          int index, int total, String section) {
+        LootPoolData.Entry entry = pool.entries().get(index);
+        boolean pickOne = pool.mode().equals("one");
+        String odds = pickOne ? percent(entry.chance()) + " share" + (total == 10000 || total == 0 ? ""
+                : " (" + percent(scaledShare(entry.chance(), total)) + " real)") : percent(entry.chance()) + " chance";
+        String title;
+        String detail;
+        List<AdminPanelRegistry.AdminAction> actions = new ArrayList<>();
+        String base = pool.id() + "|" + index;
+        switch (entry.kind()) {
+            case "pool" -> {
+                LootPoolData.Pool nested = pools.get(entry.target().toString());
+                title = "Nested: " + (nested == null ? entry.target().toString() : nested.name());
+                detail = odds + " · picks 1 of " + (nested == null ? 0 : nested.entries().size());
+                actions.add(AdminPanelRegistry.AdminAction.navigate("Open", EDIT + entry.target()));
+            }
+            case "currency" -> {
+                title = "Currency " + entry.target();
+                detail = odds + " · " + amountLabel(entry);
+            }
+            default -> {
+                title = entry.target().toString();
+                detail = odds + " · " + amountLabel(entry) + (entry.showInChat() ? " · chat" : "");
+            }
+        }
+        actions.add(AdminPanelRegistry.AdminAction.navigate("Edit", ENTRY + pool.id() + "/" + index));
+        actions.add(new AdminPanelRegistry.AdminAction("loot.up|" + base, "↑", false));
+        actions.add(new AdminPanelRegistry.AdminAction("loot.down|" + base, "↓", false));
+        actions.add(new AdminPanelRegistry.AdminAction("loot.remove|" + base, "Remove", true));
+        return new AdminPanelRegistry.AdminEntry(title, detail, NORMAL, List.of(), actions, section,
+                entry.kind().equals("item") ? new AdminPanelRegistry.EntryPreview("item", entry.target().toString(), 0)
+                        : entry.kind().equals("pool") ? new AdminPanelRegistry.EntryPreview("item", "minecraft:chest", 0)
+                        : null);
+    }
+
+    private static AdminPanelRegistry.AdminPage entry(MinecraftServer server, LootPoolData.Pool pool, int index,
                                                        List<AdminPanelRegistry.AdminTab> tabs) {
-        LootPoolData.Pool pool = require(player, id);
         LootPoolData.Entry reward = pool.entries().get(index);
-        List<String> suggestions = switch (reward.kind()) {
-            case "item" -> BuiltInRegistries.ITEM.keySet().stream().map(Object::toString).sorted().toList();
-            case "currency" -> CurrencyRegistry.values().stream()
-                    .filter(value -> value.scope() == CurrencyDefinition.CurrencyScope.PLAYER)
-                    .map(value -> value.id().toString()).sorted().toList();
-            default -> LootPoolService.all(player.level().getServer()).keySet().stream()
-                    .filter(value -> !value.equals(id.toString())).sorted().toList();
-        };
+        boolean pickOne = pool.mode().equals("one");
         List<AdminPanelRegistry.AdminEntry> rows = new ArrayList<>();
         if (reward.kind().equals("item")) rows.add(new AdminPanelRegistry.AdminEntry("Item preview",
-                reward.target().toString(), NORMAL, List.of(), List.of(), "Reward",
+                reward.target().toString(), NORMAL, List.of(), List.of(), "Entry",
                 new AdminPanelRegistry.EntryPreview("item", reward.target().toString(), 0)));
-        rows.add(AdminPanelRegistry.AdminEntry.editor("Reward", "Reward " + (index + 1), reward.kind(),
-                List.of(field("target", reward.kind().equals("item") ? "Item ID"
-                                : reward.kind().equals("currency") ? "Currency ID" : "Nested pool ID",
-                        "namespace:id", reward.target().toString(), suggestions)), List.of()));
-        if (pool.mode().equals("all")) rows.add(AdminPanelRegistry.AdminEntry.editor("Roll", "Chance",
-                "Each reward in this pool rolls independently. 100% always gives this reward.",
-                List.of(field("chance", "Chance %", "25", chanceLabel(reward.chance()), List.of())), List.of()));
-        else rows.add(AdminPanelRegistry.AdminEntry.editor("Roll", "Weight",
-                "One reward is chosen. Equal weights mean equal odds.",
-                List.of(field("weight", "Weight", "1", Integer.toString(reward.weight()), List.of())), List.of()));
-        if (!reward.kind().equals("pool")) rows.add(AdminPanelRegistry.AdminEntry.editor("Quantity", "Amount",
-                "Roll a whole number between Min and Max, including both ends.",
+        if (reward.kind().equals("item")) rows.add(AdminPanelRegistry.AdminEntry.editor("Entry", "Item",
+                "Type to search", List.of(field("target", "Item (type to search)", "minecraft:diamond",
+                        reward.target().toString(), itemIds())), List.of()));
+        if (reward.kind().equals("currency")) rows.add(AdminPanelRegistry.AdminEntry.editor("Entry", "Currency",
+                "Player currency", List.of(field("target", "Currency", "namespace:id",
+                        reward.target().toString(), playerCurrencies())), List.of()));
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Roll", pickOne ? "Share" : "Chance",
+                pickOne ? "This entry's share when the nested pool picks one entry."
+                        : "100% always drops. Each entry rolls on its own.",
+                List.of(field("chance", pickOne ? "Share %" : "Chance %", "25", percentValue(reward.chance()),
+                        List.of())), List.of()));
+        if (!reward.kind().equals("pool")) rows.add(AdminPanelRegistry.AdminEntry.editor("Amount", "Amount",
+                "A whole number between Min and Max, both included.",
                 List.of(field("min", "Min", "1", Integer.toString(reward.min()), List.of()),
                         field("max", "Max", "1", Integer.toString(reward.max()), List.of())), List.of()));
         if (reward.kind().equals("item")) rows.add(AdminPanelRegistry.AdminEntry.editor("Announcement",
-                "Show in chat", "Announce this item to everyone when a player rolls it.",
+                "Show in chat", "Tell everyone when a player gets this item.",
                 List.of(AdminPanelRegistry.AdminField.select("show_in_chat", "Show in chat",
                         reward.showInChat() ? "Yes" : "No", List.of("No", "Yes"))), List.of()));
-        rows.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Save reward", "Changes are saved to this world.",
-                List.of(), List.of(AdminPanelRegistry.AdminAction.wide("loot.entry.save|" + id + "|" + index,
-                                "Save reward", false),
-                        AdminPanelRegistry.AdminAction.navigate("Back", EDIT + id))));
-        return new AdminPanelRegistry.AdminPage(ENTRY + id + "/" + index, "Edit " + reward.kind(),
-                pool.name() + " · reward " + (index + 1), tabs, rows, AdminPanelRegistry.PageLayout.EDITOR);
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Save entry", "Changes are saved to this world.",
+                List.of(), List.of(new AdminPanelRegistry.AdminAction("loot.entry.save|" + pool.id() + "|" + index,
+                                "Save", false),
+                        AdminPanelRegistry.AdminAction.navigate("Back", EDIT + pool.id()))));
+        String name = reward.kind().equals("pool") ? "nested pool" : reward.kind();
+        return new AdminPanelRegistry.AdminPage(ENTRY + pool.id() + "/" + index, "Edit " + name,
+                pool.name() + " · entry " + (index + 1), tabs, rows, AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     static AdminPanelRegistry.ActionResult action(ServerPlayer player, String actionId, Map<String, String> values) {
-        var server = player.level().getServer();
+        MinecraftServer server = player.level().getServer();
         if (actionId.equals("loot.create")) {
             Identifier id = parse(values.get("id"));
             if (LootPoolService.get(server, id) != null) throw new IllegalArgumentException("Loot pool already exists: " + id);
-            LootPoolService.save(server, new LootPoolData.Pool(id, values.getOrDefault("name", "").trim(),
-                    mode(values.get("mode")), List.of()));
+            String name = values.getOrDefault("name", "").trim();
+            LootPoolService.save(server, new LootPoolData.Pool(id, name.isEmpty() ? id.getPath() : name, "all", List.of()));
             return AdminPanelRegistry.ActionResult.success("Created loot pool " + id, EDIT + id);
         }
         String[] parts = actionId.split("\\|");
         if (parts.length < 2) throw new IllegalArgumentException("Unknown loot action");
         Identifier id = parse(parts[1]);
-        LootPoolData.Pool pool = require(player, id);
-        if (parts[0].equals("loot.delete")) {
-            LootPoolService.delete(server, id);
-            return AdminPanelRegistry.ActionResult.success("Deleted loot pool " + id, ROOT);
-        }
-        if (parts[0].equals("loot.save")) {
-            LootPoolService.save(server, new LootPoolData.Pool(id, values.getOrDefault("name", pool.name()).trim(),
-                    mode(values.getOrDefault("mode", modeLabel(pool.mode()))), pool.entries()));
-            return AdminPanelRegistry.ActionResult.success("Saved loot pool " + id, EDIT + id);
-        }
-        if (parts.length != 3) throw new IllegalArgumentException("Invalid reward action");
+        LootPoolData.Pool pool = require(server, id);
         List<LootPoolData.Entry> entries = new ArrayList<>(pool.entries());
-        if (parts[0].equals("loot.add")) {
-            if (entries.size() >= 128) throw new IllegalArgumentException("Pool has 128 rewards already");
-            Identifier target = switch (parts[2]) {
-                case "item" -> Identifier.parse("minecraft:stone");
-                case "currency" -> CurrencyRegistry.values().stream()
-                        .filter(value -> value.scope() == CurrencyDefinition.CurrencyScope.PLAYER)
-                        .map(CurrencyDefinition::id).findFirst().orElseThrow(() -> new IllegalArgumentException("Create a player currency first"));
-                case "pool" -> LootPoolService.all(server).values().stream()
-                        .map(LootPoolData.Pool::id).filter(value -> !value.equals(id)).findFirst()
-                        .orElseThrow(() -> new IllegalArgumentException("Create a second loot pool first"));
-                default -> throw new IllegalArgumentException("Unknown reward type");
-            };
-            entries.add(new LootPoolData.Entry(parts[2], target, 10000, 1, 1, 1));
-            LootPoolService.save(server, new LootPoolData.Pool(id, pool.name(), pool.mode(), entries));
-            return AdminPanelRegistry.ActionResult.success("Added reward", ENTRY + id + "/" + (entries.size() - 1));
+        switch (parts[0]) {
+            case "loot.delete" -> {
+                LootPoolService.delete(server, id);
+                return AdminPanelRegistry.ActionResult.success("Deleted loot pool " + id, ROOT);
+            }
+            case "loot.save" -> {
+                String name = values.getOrDefault("name", pool.name()).trim();
+                LootPoolService.save(server, new LootPoolData.Pool(id, name, pool.mode(), pool.entries()));
+                return AdminPanelRegistry.ActionResult.success("Saved " + name, EDIT + id);
+            }
+            case "loot.add_item" -> {
+                Identifier item = itemId(values.get("add_item"));
+                int[] amount = amount(values.get("add_amount"));
+                entries.add(new LootPoolData.Entry("item", item, chance(values.get("add_chance")), 1,
+                        amount[0], amount[1]));
+                saveEntries(server, pool, entries);
+                return AdminPanelRegistry.ActionResult.success("Added " + item, EDIT + id);
+            }
+            case "loot.add_currency" -> {
+                Identifier currency = parse(values.get("add_currency"));
+                int[] amount = amount(values.get("currency_amount"));
+                entries.add(new LootPoolData.Entry("currency", currency, chance(values.get("currency_chance")), 1,
+                        amount[0], amount[1]));
+                saveEntries(server, pool, entries);
+                return AdminPanelRegistry.ActionResult.success("Added currency " + currency, EDIT + id);
+            }
+            case "loot.add_nested" -> {
+                requireRoom(entries);
+                Map<String, LootPoolData.Pool> pools = LootPoolService.all(server);
+                if (depth(pools, id) >= LootPoolService.MAX_DEPTH)
+                    throw new IllegalArgumentException("Pools can nest at most " + LootPoolService.MAX_DEPTH + " levels");
+                Identifier nestedId = LootPoolService.nestedId(pools, id);
+                int chance = chance(values.get("nested_chance"));
+                LootPoolService.save(server, new LootPoolData.Pool(nestedId,
+                        "Nested pool " + nestedId.getPath().substring(nestedId.getPath().lastIndexOf('_') + 1), "one",
+                        List.of()));
+                entries.add(new LootPoolData.Entry("pool", nestedId, chance, 1, 1, 1));
+                try {
+                    saveEntries(server, pool, entries);
+                } catch (IllegalArgumentException exception) {
+                    LootPoolService.deleteIfUnused(server, nestedId);
+                    throw exception;
+                }
+                return AdminPanelRegistry.ActionResult.success("Added a nested pool. Add the entries it picks from.",
+                        EDIT + nestedId);
+            }
+            default -> { }
         }
-        int index = Integer.parseInt(parts[2]);
+        if (parts.length != 3) throw new IllegalArgumentException("Invalid entry action");
+        Integer parsedIndex = parseIndex(parts[2]);
+        if (parsedIndex == null || parsedIndex >= entries.size()) throw new IllegalArgumentException("Entry no longer exists");
+        int index = parsedIndex;
         LootPoolData.Entry old = entries.get(index);
         switch (parts[0]) {
-            case "loot.remove" -> entries.remove(index);
-            case "loot.up" -> { if (index > 0) java.util.Collections.swap(entries, index, index - 1); }
-            case "loot.down" -> { if (index < entries.size() - 1) java.util.Collections.swap(entries, index, index + 1); }
+            case "loot.remove" -> {
+                entries.remove(index);
+                saveEntries(server, pool, entries);
+                if (old.kind().equals("pool")) LootPoolService.deleteIfUnused(server, old.target());
+                return AdminPanelRegistry.ActionResult.success("Removed entry", EDIT + id);
+            }
+            case "loot.up" -> { if (index > 0) Collections.swap(entries, index, index - 1); }
+            case "loot.down" -> { if (index < entries.size() - 1) Collections.swap(entries, index, index + 1); }
             case "loot.entry.save" -> {
-                Identifier target = parse(values.getOrDefault("target", old.target().toString()));
+                Identifier target = switch (old.kind()) {
+                    case "item" -> itemId(values.getOrDefault("target", old.target().toString()));
+                    case "currency" -> parse(values.getOrDefault("target", old.target().toString()));
+                    default -> old.target();
+                };
                 int chance = values.containsKey("chance") ? chance(values.get("chance")) : old.chance();
-                int weight = values.containsKey("weight") ? Integer.parseInt(values.get("weight")) : old.weight();
-                int min = values.containsKey("min") ? Integer.parseInt(values.get("min")) : old.min();
-                int max = values.containsKey("max") ? Integer.parseInt(values.get("max")) : old.max();
+                int min = values.containsKey("min") ? number(values.get("min"), "Min") : old.min();
+                int max = values.containsKey("max") ? number(values.get("max"), "Max") : old.max();
                 boolean showInChat = values.containsKey("show_in_chat")
-                        ? switch (values.get("show_in_chat")) {
-                            case "Yes" -> true;
-                            case "No" -> false;
-                            default -> throw new IllegalArgumentException("Choose Yes or No for the chat announcement");
-                        } : old.showInChat();
-                entries.set(index, new LootPoolData.Entry(old.kind(), target, chance, weight, min, max,
+                        ? "Yes".equals(values.get("show_in_chat")) : old.showInChat();
+                entries.set(index, new LootPoolData.Entry(old.kind(), target, chance, old.weight(), min, max,
                         showInChat));
+                saveEntries(server, pool, entries);
+                return AdminPanelRegistry.ActionResult.success("Saved entry", EDIT + id);
             }
             default -> throw new IllegalArgumentException("Unknown loot action");
         }
-        LootPoolService.save(server, new LootPoolData.Pool(id, pool.name(), pool.mode(), entries));
-        return AdminPanelRegistry.ActionResult.success("Saved loot rewards", EDIT + id);
+        saveEntries(server, pool, entries);
+        return AdminPanelRegistry.ActionResult.success("Moved entry", EDIT + id);
     }
 
-    private static LootPoolData.Pool require(ServerPlayer player, Identifier id) {
-        LootPoolData.Pool pool = LootPoolService.get(player.level().getServer(), id);
+    private static void saveEntries(MinecraftServer server, LootPoolData.Pool pool, List<LootPoolData.Entry> entries) {
+        LootPoolService.save(server, new LootPoolData.Pool(pool.id(), pool.name(), pool.mode(), entries));
+    }
+
+    private static void requireRoom(List<LootPoolData.Entry> entries) {
+        if (entries.size() >= 128) throw new IllegalArgumentException("A pool can hold at most 128 entries");
+    }
+
+    private static String backPage(Map<String, LootPoolData.Pool> pools, Identifier id) {
+        return LootPoolService.parents(pools, id).stream().findFirst()
+                .map(parent -> EDIT + parent.id()).orElse(ROOT);
+    }
+
+    private static int depth(Map<String, LootPoolData.Pool> pools, Identifier id) {
+        int depth = 0;
+        Identifier current = id;
+        while (depth <= LootPoolService.MAX_DEPTH) {
+            var parent = LootPoolService.parents(pools, current).stream().findFirst();
+            if (parent.isEmpty()) break;
+            current = parent.get().id();
+            depth++;
+        }
+        return depth;
+    }
+
+    private static LootPoolData.Pool require(MinecraftServer server, Identifier id) {
+        LootPoolData.Pool pool = LootPoolService.get(server, id);
         if (pool == null) throw new IllegalArgumentException("Unknown loot pool " + id);
         return pool;
     }
+
+    private static List<String> itemIds() {
+        return BuiltInRegistries.ITEM.keySet().stream().map(Object::toString)
+                .filter(value -> !value.equals("minecraft:air")).sorted().toList();
+    }
+
+    private static List<String> playerCurrencies() {
+        return CurrencyRegistry.values().stream()
+                .filter(value -> value.scope() == CurrencyDefinition.CurrencyScope.PLAYER)
+                .map(value -> value.id().toString()).sorted().toList();
+    }
+
+    /** Accepts "diamond" as well as "minecraft:diamond". */
+    private static Identifier itemId(String value) {
+        if (value == null || value.isBlank()) throw new IllegalArgumentException("Choose an item first");
+        Identifier id = Identifier.tryParse(value.trim().toLowerCase(java.util.Locale.ROOT));
+        if (id == null || BuiltInRegistries.ITEM.getOptional(id).isEmpty() || id.toString().equals("minecraft:air"))
+            throw new IllegalArgumentException("Unknown item: " + value.trim());
+        return id;
+    }
+
     private static Identifier parse(String value) {
         if (value == null || !value.contains(":")) throw new IllegalArgumentException("Use a namespaced ID such as cwp:raid_rewards");
         Identifier id = Identifier.tryParse(value.trim());
         if (id == null) throw new IllegalArgumentException("Invalid ID: " + value);
         return id;
     }
-    private static String mode(String label) {
-        if ("Pick one".equals(label)) return "one";
-        if ("Independent".equals(label)) return "all";
-        throw new IllegalArgumentException("Choose Independent or Pick one");
+
+    private static Integer parseIndex(String value) {
+        try {
+            int index = Integer.parseInt(value);
+            return index < 0 ? null : index;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
     }
-    private static String modeLabel(String mode) { return mode.equals("one") ? "Pick one" : "Independent"; }
-    private static String chanceLabel(int chance) {
-        return java.math.BigDecimal.valueOf(chance, 2).stripTrailingZeros().toPlainString();
+
+    /** Parses "3" or "1-3" (also with an en dash); blank means 1. */
+    static int[] amount(String value) {
+        if (value == null || value.isBlank()) return new int[]{1, 1};
+        String[] range = value.trim().split("\\s*[-–]\\s*");
+        try {
+            int min = Integer.parseInt(range[0]);
+            int max = range.length > 1 ? Integer.parseInt(range[1]) : min;
+            if (range.length > 2 || min < 1 || max < min) throw new NumberFormatException();
+            return new int[]{min, max};
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Amount must be a number like 2 or a range like 1-3");
+        }
     }
-    private static int chance(String value) {
-        try { return new java.math.BigDecimal(value.trim()).movePointRight(2).intValueExact(); }
-        catch (RuntimeException exception) { throw new IllegalArgumentException("Chance must be a percentage from 0 to 100"); }
+
+    private static int number(String value, String label) {
+        try { return Integer.parseInt(value.trim()); }
+        catch (RuntimeException exception) { throw new IllegalArgumentException(label + " must be a whole number"); }
     }
+
+    /** Blank means 100%. Accepts up to two decimals and an optional % sign. */
+    static int chance(String value) {
+        if (value == null || value.isBlank()) return 10000;
+        try {
+            int chance = new BigDecimal(value.trim().replace("%", "").replace(',', '.').trim())
+                    .movePointRight(2).intValueExact();
+            if (chance < 0 || chance > 10000) throw new ArithmeticException();
+            return chance;
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("Chance must be a percentage from 0 to 100, like 25 or 2.5");
+        }
+    }
+
+    private static int scaledShare(int chance, int total) {
+        return (int) Math.round(chance * 10000.0 / total);
+    }
+
+    private static String percentValue(int chance) {
+        return BigDecimal.valueOf(chance, 2).stripTrailingZeros().toPlainString();
+    }
+
+    private static String percent(int chance) {
+        return BigDecimal.valueOf(chance, 2).setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString() + "%";
+    }
+
+    private static String amountLabel(LootPoolData.Entry entry) {
+        return "×" + entry.min() + (entry.max() == entry.min() ? "" : "–" + entry.max());
+    }
+
+    private static String countLabel(int count) {
+        return count == 1 ? "1 entry" : count + " entries";
+    }
+
     private static AdminPanelRegistry.AdminField field(String id, String label, String placeholder,
                                                        String initial, List<String> suggestions) {
         return new AdminPanelRegistry.AdminField(id, label, placeholder, initial, 128, suggestions);

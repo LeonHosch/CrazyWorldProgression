@@ -54,6 +54,12 @@ public final class AdminPanelScreen extends Screen {
     private SelectAnchor selectAnchor;
     private long autoSaveAtMillis;
     private float panelRenderScale = 1.0F;
+    private final Map<String, String> itemNameCache = new HashMap<>();
+    private String dropdownField;
+    private List<String> dropdownMatches = List.of();
+    private int dropdownIndex;
+    private static final int DROPDOWN_ROWS = 8;
+    private static final int DROPDOWN_ROW_HEIGHT = 18;
 
     // Create a panel that returns to the screen from which the command opened it.
     public AdminPanelScreen(Screen parent, AdminPanelNetworking.PanelSnapshot snapshot) {
@@ -96,6 +102,7 @@ public final class AdminPanelScreen extends Screen {
     @Override
     protected void init() {
         updatePanelScale();
+        closeDropdown();
         editBoxes.clear();
         fieldDefinitions.clear();
         selectAnchor = null;
@@ -189,7 +196,7 @@ public final class AdminPanelScreen extends Screen {
     // Add generic text inputs and retain their values while the current page rebuilds its widgets.
     private void addFields(AdminPanelRegistry.AdminEntry entry, int y, int areaX, int areaWidth, boolean compact) {
         if (entry.fields().isEmpty()) return;
-        int actionWidth = actionWidth(entry);
+        int actionWidth = actionWidth(entry) + (compact && hasItemIcon(entry) ? 22 : 0);
         int available = Math.max(100, areaWidth - actionWidth);
         int dividedWidth = (available - (entry.fields().size() - 1) * 6) / entry.fields().size();
         int fieldWidth = Math.max(72, compact ? dividedWidth : Math.min(150, dividedWidth));
@@ -223,6 +230,7 @@ public final class AdminPanelScreen extends Screen {
             box.setResponder(value -> {
                 formValues.put(field.id(), value);
                 updateSuggestion(box, field, value);
+                updateDropdown(field, value);
                 queueAutoSave(field.id(), value, false);
             });
             updateSuggestion(box, field, box.getValue());
@@ -265,6 +273,13 @@ public final class AdminPanelScreen extends Screen {
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         event = panelMouseEvent(event);
+        if (event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            int row = dropdownRowAt(event.x(), event.y());
+            if (row >= 0) {
+                acceptDropdown(row);
+                return true;
+            }
+        }
         if (selectAnchor != null && event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             int count = selectAnchor.field().suggestions().size();
             int totalHeight = count * 20;
@@ -315,7 +330,7 @@ public final class AdminPanelScreen extends Screen {
 
     // Place an entry's compact controls from right to left while preserving room for its text.
     private void addActionButtons(AdminPanelRegistry.AdminEntry entry, int y, int right, boolean compact) {
-        if (compact && entry.actions().size() == 1 && entry.actions().getFirst().wide()) {
+        if (compact && entry.fields().isEmpty() && entry.actions().size() == 1 && entry.actions().getFirst().wide()) {
             AdminPanelRegistry.AdminAction action = entry.actions().getFirst();
             String label = action.dangerous() && action.id().equals(pendingDangerousAction)
                     ? "Confirm" : action.label();
@@ -329,7 +344,7 @@ public final class AdminPanelScreen extends Screen {
             AdminPanelRegistry.AdminAction action = actions.get(index);
             boolean confirming = action.dangerous() && action.id().equals(pendingDangerousAction);
             String label = confirming ? "Confirm" : action.label();
-            int buttonWidth = Math.max(38, Math.min(70, font.width(label) + 12));
+            int buttonWidth = buttonWidth(label);
             x -= buttonWidth;
             int buttonY = compact ? y + (entry.fields().isEmpty() ? 3 : 13)
                     : y + (entry.fields().isEmpty() ? (rowHeight() - 20) / 2 : 35);
@@ -341,8 +356,11 @@ public final class AdminPanelScreen extends Screen {
 
     // Return the total horizontal space reserved by an entry's action buttons.
     private int actionWidth(AdminPanelRegistry.AdminEntry entry) {
-        return entry.actions().stream().mapToInt(action ->
-                Math.max(38, Math.min(70, font.width(action.label()) + 12)) + 4).sum();
+        return entry.actions().stream().mapToInt(action -> buttonWidth(action.label()) + 4).sum();
+    }
+
+    private int buttonWidth(String label) {
+        return Math.max(38, Math.min(96, font.width(label) + 12));
     }
 
     // Require a deliberate second click for destructive controls before sending them to the server.
@@ -411,6 +429,7 @@ public final class AdminPanelScreen extends Screen {
         super.extractRenderState(graphics, (int) (mouseX / panelRenderScale),
                 (int) (mouseY / panelRenderScale), delta);
         if (isDashboard()) renderModuleIcons(graphics);
+        renderDropdown(graphics, (int) (mouseX / panelRenderScale), (int) (mouseY / panelRenderScale));
         graphics.pose().popMatrix();
     }
 
@@ -452,8 +471,7 @@ public final class AdminPanelScreen extends Screen {
             int y = contentTop() + index * (rowHeight() + ROW_GAP);
             graphics.fill(left + 14, y, left + panelWidth - 14, y + rowHeight(), 0xFF1D222B);
             graphics.fill(left + 14, y, left + 17, y + rowHeight(), toneColor(entry.tone()));
-            int actionWidth = entry.actions().stream().mapToInt(action ->
-                    Math.max(38, Math.min(70, font.width(action.label()) + 12)) + 4).sum();
+            int actionWidth = actionWidth(entry);
             int previewWidth = entry.preview() == null ? 0 : 66;
             int textWidth = Math.max(80, panelWidth - 48 - actionWidth - previewWidth);
             int textX = left + 24 + previewWidth;
@@ -549,14 +567,20 @@ public final class AdminPanelScreen extends Screen {
                     graphics.item(icon(entry.title().equals("Item preview")
                                     ? formValues.getOrDefault("target", entry.preview().shape())
                                     : entry.preview().shape()), left + 25, placement.y() + 3);
-                graphics.text(font, Component.literal(editorRowName(entry.title())),
-                        left + (entry.preview() == null ? 25 : 46),
-                        placement.y() + 8, 0xFFF0F1F3, false);
+                int textX = left + (entry.preview() == null ? 25 : 46);
+                int textRight = left + panelWidth - 24 - actionWidth(entry) - 6;
+                String name = trim(editorRowName(entry.title()), Math.max(20, textRight - textX));
+                graphics.text(font, Component.literal(name), textX, placement.y() + 8, 0xFFF0F1F3, false);
+                int detailX = textX + font.width(name) + 10;
+                if (!entry.detail().isBlank() && detailX < textRight - 20)
+                    graphics.text(font, Component.literal(trim(entry.detail(), textRight - detailX)), detailX,
+                            placement.y() + 8, 0xFF9CA3AF, false);
                 continue;
             }
-            if (entry.preview() != null && entry.preview().kind().equals("item"))
-                graphics.item(icon(entry.preview().shape()), left + panelWidth - 44, placement.y() + 13);
-            int actionWidth = actionWidth(entry);
+            int actionWidth = actionWidth(entry) + (hasItemIcon(entry) ? 22 : 0);
+            if (hasItemIcon(entry))
+                graphics.item(icon(entry.preview().shape()), left + panelWidth - 24 - actionWidth + 2,
+                        placement.y() + 15);
             int available = Math.max(100, panelWidth - 48 - actionWidth);
             int fieldWidth = Math.max(72,
                     (available - (entry.fields().size() - 1) * 6) / entry.fields().size());
@@ -656,6 +680,27 @@ public final class AdminPanelScreen extends Screen {
     // Accept the visible autocomplete candidate with Tab while a suggested field is focused.
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (dropdownVisible()) {
+            switch (event.key()) {
+                case GLFW.GLFW_KEY_DOWN -> {
+                    dropdownIndex = (dropdownIndex + 1) % dropdownMatches.size();
+                    return true;
+                }
+                case GLFW.GLFW_KEY_UP -> {
+                    dropdownIndex = (dropdownIndex + dropdownMatches.size() - 1) % dropdownMatches.size();
+                    return true;
+                }
+                case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER, GLFW.GLFW_KEY_TAB -> {
+                    acceptDropdown(dropdownIndex);
+                    return true;
+                }
+                case GLFW.GLFW_KEY_ESCAPE -> {
+                    closeDropdown();
+                    return true;
+                }
+                default -> { }
+            }
+        }
         if (event.key() == GLFW.GLFW_KEY_TAB) {
             for (Map.Entry<String, EditBox> entry : editBoxes.entrySet()) {
                 EditBox box = entry.getValue();
@@ -808,6 +853,122 @@ public final class AdminPanelScreen extends Screen {
         String normalized = value.toLowerCase(java.util.Locale.ROOT);
         return field.suggestions().stream().filter(candidate ->
                 candidate.toLowerCase(java.util.Locale.ROOT).startsWith(normalized)).findFirst().orElse(null);
+    }
+
+    private static boolean hasItemIcon(AdminPanelRegistry.AdminEntry entry) {
+        return entry.preview() != null && entry.preview().kind().equals("item");
+    }
+
+    // Search fields with many candidates (such as every item) get a clickable dropdown of matches.
+    private void updateDropdown(AdminPanelRegistry.AdminField field, String value) {
+        if (field.type() != AdminPanelRegistry.FieldType.TEXT || field.suggestions().size() < 2
+                || value == null || value.isBlank() || field.suggestions().contains(value)) {
+            if (field.id().equals(dropdownField)) closeDropdown();
+            return;
+        }
+        String query = value.trim().toLowerCase(java.util.Locale.ROOT);
+        record Match(String candidate, int score) { }
+        List<Match> matches = new ArrayList<>();
+        for (String candidate : field.suggestions()) {
+            String id = candidate.toLowerCase(java.util.Locale.ROOT);
+            String path = id.substring(id.indexOf(':') + 1);
+            String name = displayName(candidate).toLowerCase(java.util.Locale.ROOT);
+            int score = path.startsWith(query) || name.startsWith(query) ? 0
+                    : id.startsWith(query) ? 1
+                    : path.contains(query) || name.contains(query) ? 2 : -1;
+            if (score >= 0) matches.add(new Match(candidate, score));
+        }
+        matches.sort(java.util.Comparator.comparingInt(Match::score)
+                .thenComparingInt(match -> match.candidate().length())
+                .thenComparing(Match::candidate));
+        dropdownMatches = matches.stream().limit(DROPDOWN_ROWS).map(Match::candidate).toList();
+        dropdownField = dropdownMatches.isEmpty() ? null : field.id();
+        dropdownIndex = 0;
+    }
+
+    // Item IDs show their in-game name; other candidates show the ID itself.
+    private String displayName(String candidate) {
+        return itemNameCache.computeIfAbsent(candidate, key -> {
+            Identifier id = Identifier.tryParse(key);
+            if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return key;
+            return new ItemStack(BuiltInRegistries.ITEM.getValue(id)).getHoverName().getString();
+        });
+    }
+
+    private boolean dropdownVisible() {
+        if (dropdownField == null || dropdownMatches.isEmpty()) return false;
+        EditBox box = editBoxes.get(dropdownField);
+        return box != null && box.isFocused();
+    }
+
+    private void closeDropdown() {
+        dropdownField = null;
+        dropdownMatches = List.of();
+        dropdownIndex = 0;
+    }
+
+    private int dropdownWidth(EditBox box) {
+        return Math.max(box.getWidth(), 200);
+    }
+
+    // Open below the field, or above it when the footer is too close.
+    private int dropdownTop(EditBox box) {
+        int height = dropdownMatches.size() * DROPDOWN_ROW_HEIGHT;
+        int below = box.getY() + box.getHeight() + 1;
+        return below + height > top + panelHeight - 4 ? box.getY() - height - 1 : below;
+    }
+
+    private int dropdownRowAt(double x, double y) {
+        if (!dropdownVisible()) return -1;
+        EditBox box = editBoxes.get(dropdownField);
+        int dropdownTop = dropdownTop(box);
+        if (x < box.getX() || x >= box.getX() + dropdownWidth(box) || y < dropdownTop) return -1;
+        int row = (int) (y - dropdownTop) / DROPDOWN_ROW_HEIGHT;
+        return row < dropdownMatches.size() ? row : -1;
+    }
+
+    private void acceptDropdown(int row) {
+        EditBox box = editBoxes.get(dropdownField);
+        String value = dropdownMatches.get(row);
+        closeDropdown();
+        if (box == null) return;
+        box.setValue(value);
+        box.moveCursorToEnd(false);
+        closeDropdown();
+    }
+
+    private void renderDropdown(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+        if (!dropdownVisible()) return;
+        EditBox box = editBoxes.get(dropdownField);
+        int x = box.getX();
+        int y = dropdownTop(box);
+        int width = dropdownWidth(box);
+        int height = dropdownMatches.size() * DROPDOWN_ROW_HEIGHT;
+        graphics.fill(x - 1, y - 1, x + width + 1, y + height + 1, 0xFF7C5CDA);
+        graphics.fill(x, y, x + width, y + height, 0xF0101318);
+        int hovered = dropdownRowAt(mouseX, mouseY);
+        for (int row = 0; row < dropdownMatches.size(); row++) {
+            String candidate = dropdownMatches.get(row);
+            int rowY = y + row * DROPDOWN_ROW_HEIGHT;
+            if (row == dropdownIndex || row == hovered)
+                graphics.fill(x, rowY, x + width, rowY + DROPDOWN_ROW_HEIGHT, row == dropdownIndex ? 0xFF33294D : 0xFF242A35);
+            Identifier id = Identifier.tryParse(candidate);
+            boolean item = id != null && BuiltInRegistries.ITEM.containsKey(id);
+            int textX = x + 4;
+            if (item) {
+                graphics.item(icon(candidate), x + 2, rowY + 1);
+                textX = x + 22;
+            }
+            String name = displayName(candidate);
+            String label = trim(name, width - (textX - x) - 4);
+            graphics.text(font, Component.literal(label), textX, rowY + 5, 0xFFF0F1F3, false);
+            if (!name.equals(candidate)) {
+                int idX = textX + font.width(label) + 6;
+                int room = x + width - 4 - idX;
+                if (room > 30) graphics.text(font, Component.literal(trim(candidate, room)), idX, rowY + 5,
+                        0xFF7D8590, false);
+            }
+        }
     }
 
     // Convert server-neutral severity into the module card's accent color.

@@ -12,18 +12,36 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** World-owned loot pool catalogue. */
+/**
+ * World-owned loot pool catalogue.
+ * Format 2 stores a pick-one pool's odds in each entry's chance (as relative shares); format 1 used weights.
+ */
 public final class LootPoolData extends SavedData {
+    static final int FORMAT = 2;
     static final Codec<LootPoolData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.unboundedMap(Codec.STRING, Pool.CODEC).optionalFieldOf("pools", Map.of())
-                    .forGetter(data -> data.pools)
+                    .forGetter(data -> data.pools),
+            Codec.INT.optionalFieldOf("format", 1).forGetter(data -> FORMAT)
     ).apply(instance, LootPoolData::new));
     private static final SavedDataType<LootPoolData> TYPE = new SavedDataType<>(
             CrazyWorldProgression.id("loot_pools"), LootPoolData::new, CODEC, null);
     private final Map<String, Pool> pools = new LinkedHashMap<>();
 
     LootPoolData() { }
-    private LootPoolData(Map<String, Pool> pools) { this.pools.putAll(pools); }
+    private LootPoolData(Map<String, Pool> pools, int format) {
+        pools.forEach((key, pool) -> this.pools.put(key, format < 2 ? migrateWeights(pool) : pool));
+        if (format < FORMAT && !pools.isEmpty()) setDirty();
+    }
+    /** Old pick-one pools ignored chance and used integer weights; keep their odds by turning weights into shares. */
+    static Pool migrateWeights(Pool pool) {
+        if (!pool.mode().equals("one")) return pool;
+        int total = pool.entries().stream().mapToInt(Entry::weight).sum();
+        if (total <= 0) return pool;
+        List<Entry> entries = pool.entries().stream().map(entry -> new Entry(entry.kind(), entry.target(),
+                (int) Math.max(1, Math.round(entry.weight() * 10000.0 / total)), entry.weight(), entry.min(),
+                entry.max(), entry.showInChat())).toList();
+        return new Pool(pool.id(), pool.name(), pool.mode(), entries);
+    }
     public static LootPoolData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(TYPE);
     }

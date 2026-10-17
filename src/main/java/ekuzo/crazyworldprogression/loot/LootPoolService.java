@@ -20,9 +20,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Validates and rolls editable pools. Each entry in an all-mode pool rolls independently. */
+/**
+ * Validates and rolls editable pools. Each entry in an all-mode pool rolls its chance independently.
+ * A one-mode pool (used for nested pools) picks exactly one entry, using the entries' chances as shares.
+ */
 public final class LootPoolService {
+    public static final int MAX_DEPTH = 16;
     private LootPoolService() { }
+
+    /** Random source used by rolling; a parameter so tests can roll deterministically. */
+    @FunctionalInterface
+    public interface Roller {
+        int nextInt(int bound);
+    }
 
     public static Map<String, LootPoolData.Pool> all(MinecraftServer server) {
         return LootPoolData.get(server).values();
@@ -43,26 +53,74 @@ public final class LootPoolService {
         for (LootPoolData.Pool value : pools.values()) validate(value.id(), pools, new HashSet<>(), 0);
     }
 
-    public static void delete(MinecraftServer server, Identifier id) {
-        if (get(server, id) == null) throw new IllegalArgumentException("Unknown loot pool " + id);
-        for (LootPoolData.Pool pool : all(server).values()) {
-            if (pool.entries().stream().anyMatch(entry -> entry.kind().equals("pool") && entry.target().equals(id))) {
-                throw new IllegalArgumentException("Loot pool is used by " + pool.id());
-            }
+    /** Pools that contain the given pool as a nested entry. */
+    public static List<LootPoolData.Pool> parents(Map<String, LootPoolData.Pool> pools, Identifier id) {
+        return pools.values().stream().filter(pool -> pool.entries().stream()
+                .anyMatch(entry -> entry.kind().equals("pool") && entry.target().equals(id))).toList();
+    }
+
+    /** True when a pool is nested inside another pool, so the top-level list hides it. */
+    public static boolean nested(Map<String, LootPoolData.Pool> pools, Identifier id) {
+        return !parents(pools, id).isEmpty();
+    }
+
+    /** Free ID for a new nested pool owned by the given parent. */
+    public static Identifier nestedId(Map<String, LootPoolData.Pool> pools, Identifier parent) {
+        for (int index = 1; ; index++) {
+            Identifier candidate = Identifier.fromNamespaceAndPath(parent.getNamespace(),
+                    parent.getPath() + "/nested_" + index);
+            if (!pools.containsKey(candidate.toString())) return candidate;
         }
+    }
+
+    /** Deletes a pool plus the nested pools only it uses, so no orphaned nested pools stay behind. */
+    public static void delete(MinecraftServer server, Identifier id) {
+        Map<String, LootPoolData.Pool> pools = all(server);
+        if (!pools.containsKey(id.toString())) throw new IllegalArgumentException("Unknown loot pool " + id);
+        LootPoolData.Pool parent = parents(pools, id).stream().findFirst().orElse(null);
+        if (parent != null) throw new IllegalArgumentException("Loot pool is used by " + parent.id());
+        Set<String> removed = new java.util.LinkedHashSet<>();
+        collectOwned(id, pools, removed);
+        for (String value : removed) requireUnusedByScripts(Identifier.parse(value));
+        for (String value : removed) LootPoolData.get(server).remove(Identifier.parse(value));
+    }
+
+    /** After a nested entry was removed, deletes that nested pool when nothing else uses it. */
+    public static void deleteIfUnused(MinecraftServer server, Identifier nestedId) {
+        Map<String, LootPoolData.Pool> pools = all(server);
+        if (!pools.containsKey(nestedId.toString()) || !parents(pools, nestedId).isEmpty()) return;
+        try {
+            delete(server, nestedId);
+        } catch (IllegalArgumentException ignored) {
+            // Still referenced by a script, so it stays available as a top-level pool.
+        }
+    }
+
+    static void collectOwned(Identifier id, Map<String, LootPoolData.Pool> pools, Set<String> removed) {
+        if (!removed.add(id.toString())) return;
+        LootPoolData.Pool pool = pools.get(id.toString());
+        if (pool == null) return;
+        for (LootPoolData.Entry entry : pool.entries()) {
+            if (!entry.kind().equals("pool")) continue;
+            boolean usedElsewhere = parents(pools, entry.target()).stream()
+                    .anyMatch(other -> !removed.contains(other.id().toString()));
+            if (!usedElsewhere) collectOwned(entry.target(), pools, removed);
+        }
+    }
+
+    private static void requireUnusedByScripts(Identifier id) {
         for (MobScript script : MobForge.SCRIPTS.all()) {
             if (script.steps().stream().anyMatch(step -> step instanceof MobScript.LootPoolStep loot
                     && loot.lootPoolId().equals(id)))
-                throw new IllegalArgumentException("Loot pool is used by script " + script.id());
+                throw new IllegalArgumentException("Loot pool " + id + " is used by script " + script.id());
         }
-        LootPoolData.get(server).remove(id);
     }
 
     private static void validate(Identifier id, Map<String, LootPoolData.Pool> pools,
                                  Set<String> path, int depth) {
         LootPoolData.Pool pool = pools.get(id.toString());
         if (pool == null) throw new IllegalArgumentException("Unknown nested loot pool " + id);
-        if (depth > 16) throw new IllegalArgumentException("Loot pools can nest at most 16 levels");
+        if (depth > MAX_DEPTH) throw new IllegalArgumentException("Loot pools can nest at most " + MAX_DEPTH + " levels");
         if (!path.add(id.toString())) throw new IllegalArgumentException("Circular loot pool reference: " + id);
         if (pool.name().isBlank() || pool.name().length() > 80) throw new IllegalArgumentException("Pool name must be 1–80 characters");
         if (!pool.mode().equals("all") && !pool.mode().equals("one")) throw new IllegalArgumentException("Unknown loot pool mode");
@@ -71,7 +129,7 @@ public final class LootPoolService {
             if (entry.showInChat() && !entry.kind().equals("item"))
                 throw new IllegalArgumentException("Chat announcements are available for item rewards only");
             if (entry.chance() < 0 || entry.chance() > 10000 || entry.weight() < 1 || entry.weight() > 10000)
-                throw new IllegalArgumentException("Chance must be 0–100%; weight must be 1–10000");
+                throw new IllegalArgumentException("Chance must be between 0% and 100%");
             if (entry.min() < 1 || entry.max() < entry.min() || entry.max() > 2304)
                 throw new IllegalArgumentException("Reward amount must be between 1 and 2304");
             switch (entry.kind()) {
@@ -94,8 +152,7 @@ public final class LootPoolService {
     public static void roll(MinecraftServer server, ServerPlayer player, Identifier id) {
         Map<String, LootPoolData.Pool> pools = all(server);
         validate(id, pools, new HashSet<>(), 0);
-        List<LootPoolData.Entry> rewards = new ArrayList<>();
-        choose(id, pools, player, rewards, 0);
+        List<LootPoolData.Entry> rewards = pick(id, pools, player.getRandom()::nextInt);
         int postmasterItems = 0;
         int droppedItems = 0;
         for (LootPoolData.Entry reward : rewards) {
@@ -112,27 +169,35 @@ public final class LootPoolService {
                 "Your postmaster was full. " + droppedItems + " loot item(s) dropped on the floor and anyone can pick them up."));
     }
 
-    private static void choose(Identifier id, Map<String, LootPoolData.Pool> pools, ServerPlayer player,
+    /** Rolls a validated pool and returns the item and currency rewards it produced. */
+    public static List<LootPoolData.Entry> pick(Identifier id, Map<String, LootPoolData.Pool> pools, Roller random) {
+        List<LootPoolData.Entry> rewards = new ArrayList<>();
+        choose(id, pools, random, rewards, 0);
+        return rewards;
+    }
+
+    private static void choose(Identifier id, Map<String, LootPoolData.Pool> pools, Roller random,
                                List<LootPoolData.Entry> rewards, int depth) {
         LootPoolData.Pool pool = pools.get(id.toString());
-        if (pool.entries().isEmpty()) return;
+        if (pool == null || pool.entries().isEmpty() || depth > MAX_DEPTH) return;
         if (pool.mode().equals("one")) {
-            int total = pool.entries().stream().mapToInt(LootPoolData.Entry::weight).sum();
-            int pick = player.getRandom().nextInt(total);
+            int total = pool.entries().stream().mapToInt(LootPoolData.Entry::chance).sum();
+            if (total <= 0) return;
+            int pick = random.nextInt(total);
             for (LootPoolData.Entry entry : pool.entries()) {
-                pick -= entry.weight();
-                if (pick < 0) { select(entry, pools, player, rewards, depth); break; }
+                pick -= entry.chance();
+                if (pick < 0) { select(entry, pools, random, rewards, depth); break; }
             }
         } else {
             for (LootPoolData.Entry entry : pool.entries()) {
-                if (player.getRandom().nextInt(10000) < entry.chance()) select(entry, pools, player, rewards, depth);
+                if (random.nextInt(10000) < entry.chance()) select(entry, pools, random, rewards, depth);
             }
         }
     }
 
     private static void select(LootPoolData.Entry entry, Map<String, LootPoolData.Pool> pools,
-                               ServerPlayer player, List<LootPoolData.Entry> rewards, int depth) {
-        if (entry.kind().equals("pool")) choose(entry.target(), pools, player, rewards, depth + 1);
+                               Roller random, List<LootPoolData.Entry> rewards, int depth) {
+        if (entry.kind().equals("pool")) choose(entry.target(), pools, random, rewards, depth + 1);
         else rewards.add(entry);
     }
 

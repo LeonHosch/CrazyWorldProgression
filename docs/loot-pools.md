@@ -1,10 +1,23 @@
 # Loot pools
 
-Open the CWP admin panel and choose **Loot Pools**. Create a namespaced pool ID and display name. Pools are saved in the world, so they remain available after a restart. Edit a pool to add item, player currency, or nested pool rewards. Item fields suggest every registered item ID, including items from other mods, and show the actual item icon.
+Open the CWP admin panel and choose **Loot Pools**. The tab works like Pockets, Portals and Buildings: click **Create**, enter a namespaced pool ID such as `cwp:raid_rewards` and a display name, and the pool opens in its editor. Pools are saved in the world, so they remain available after a restart.
 
-An **Independent** pool checks every reward separately. Set each reward's chance to a percentage, including decimals with up to two places. For example, a currency reward at 100%, a sword at 10%, and a nested armor pool at 25% are three independent rolls. Set Min and Max to roll a quantity for an item or currency.
+In the editor, add entries from the **Add** section at the bottom:
 
-A **Pick one** pool chooses exactly one entry using weights. Four armor pieces with weight 1 each have equal odds. A nested pool can refer to another nested pool, with up to 16 levels. Circular references and missing pool IDs are rejected when saving. In a Pick one pool, chance fields are ignored; its parent entry's chance determines whether it is reached from an Independent pool.
+- **Item**: type part of an item's name or ID (for example `sword` or `diamond`). A dropdown lists matching items, including items from other mods, with their icons. Click one, or use the arrow keys and Enter. Set a chance and an amount, either a number like `2` or a range like `1-3`.
+- **Nested pool**: set its chance and click **Add nested pool**. The editor opens the new nested pool so you can fill it. Nested pools can contain more nested pools, up to 16 levels deep.
+- **Currency**: credits a player currency. This row only appears when a player-scoped currency exists.
+
+Each entry row has **Edit** (chance, amount, chat announcement), **↑ / ↓** to reorder, and **Remove**. Nested pool rows also have **Open**. A nested pool's **Back** button returns to the pool that contains it.
+
+How a pool rolls:
+
+- **A top-level pool rolls every entry on its own.** A 100% entry always drops, and a 25% entry drops in about 1 of 4 rolls. Entries do not affect each other. For example, a currency reward at 100%, a sword at 10% and a nested armor pool at 25% are three separate rolls.
+- **A nested pool first rolls its own chance in its parent. If that roll succeeds, it picks exactly one of its entries.** Inside a nested pool, each entry's percentage is its share of the pick. For example, four armor pieces at 25% each are equally likely. If the shares do not add up to 100%, they are scaled. The editor shows the total and each entry's real odds. A nested entry that is itself a nested pool continues the same way.
+
+Chances accept up to two decimal places, such as `2.5`. Removing a nested pool entry also deletes that nested pool, unless another pool or a script still uses it. Deleting a top-level pool deletes the nested pools that only it uses. Nested pools are not listed on the main Loot Pools page; open them from their parent.
+
+Pools saved before this change keep their odds. Old **Pick one** weights are converted to shares when the world loads.
 
 Add `loot(lootpool_id="cwp:raid_rewards")` to a pocket script to roll the pool once for each player in the instance. Set `player="entered"` to use the player list collected by an event box, or set `player` to a UUID. Loot pools can be edited without changing scripts that reference their ID. The older `reward_loot` command still rolls a vanilla loot table for existing scripts.
 

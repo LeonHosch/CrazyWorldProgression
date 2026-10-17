@@ -69,4 +69,46 @@ class RaidSnapshotsTest {
         assertTrue(ItemStack.matches(items.get(3), restored.items().get(3)));
         assertEquals(41, restored.items().size());
     }
+
+    private static final String PLAYER = "00000000-0000-0000-0000-000000000042";
+    private static final String SLOT = "crazy-world-progression:portal_instance_1";
+    private static final RaidData.Spot MARKER = new RaidData.Spot(4.5, 64, 2.5);
+
+    private static RaidSnapshots.Logout logout(long instanceCreated) {
+        List<ItemStack> items = slots(41);
+        items.set(0, new ItemStack(Items.DIAMOND_SWORD));
+        return new RaidSnapshots.Logout(SLOT, instanceCreated, "Leon", items);
+    }
+
+    @Test void loggingOutThenWipingPutsTheInventoryInAnOrbAndClearsItOnLogin() {
+        RaidSnapshots data = new RaidSnapshots();
+        data.recordLogout(PLAYER, logout(10L));
+        var orb = data.wipeOffline(PLAYER, SLOT, 10L, MARKER);
+        assertTrue(orb != null && ItemStack.matches(new ItemStack(Items.DIAMOND_SWORD), orb.items().getFirst()));
+        assertEquals(RaidSnapshots.Return.CLEAR_ORB_WAITING, data.returning(PLAYER));
+        // Logging in again later changes nothing: the items now exist only in the orb.
+        assertEquals(RaidSnapshots.Return.NOTHING, data.returning(PLAYER));
+    }
+
+    @Test void comingBackBeforeAWipeDiscardsTheLogoutSnapshot() {
+        RaidSnapshots data = new RaidSnapshots();
+        data.recordLogout(PLAYER, logout(10L));
+        assertEquals(RaidSnapshots.Return.NOTHING, data.returning(PLAYER));
+        assertEquals(null, data.wipeOffline(PLAYER, SLOT, 10L, MARKER), "no orb from an outdated snapshot");
+        assertEquals(RaidSnapshots.Return.NOTHING, data.returning(PLAYER));
+    }
+
+    @Test void aSecondWipeWhileOfflineDestroysTheOrbAndTheInventoryIsStillCleared() {
+        RaidSnapshots data = new RaidSnapshots();
+        data.recordLogout(PLAYER, logout(10L));
+        data.wipeOffline(PLAYER, SLOT, 10L, MARKER);
+        assertEquals(null, data.wipeOffline(PLAYER, SLOT, 10L, MARKER));
+        assertEquals(RaidSnapshots.Return.CLEAR_ORB_LOST, data.returning(PLAYER));
+    }
+
+    @Test void aSnapshotFromAnEarlierInstanceInTheSameSlotIsIgnored() {
+        RaidSnapshots data = new RaidSnapshots();
+        data.recordLogout(PLAYER, logout(10L));
+        assertEquals(null, data.wipeOffline(PLAYER, SLOT, 99L, MARKER));
+    }
 }

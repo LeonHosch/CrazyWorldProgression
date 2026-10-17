@@ -328,7 +328,18 @@ public final class RaidService {
                     new RaidData.Spot(entry.getValue().point().x, entry.getValue().point().y, entry.getValue().point().z));
         data.put(slot.toString(), new RaidData.Attempt(before.number(), stillDown, List.of(),
                 Map.of(), before.pendingRespawn(), before.originalModes(), true));
+        PortalData.StoredInstance started = PortalData.get(server).instances().get(slot.toString());
+        List<String> present = new ArrayList<>();
+        for (ServerPlayer player : level.players()) {
+            String id = player.getUUID().toString();
+            if (started != null && started.admittedPlayers().contains(id)) present.add(id);
+        }
+        data.encounterPlayers(slot.toString(), present);
         EncounterBanner.show(level.players(), EncounterBanner.Kind.STARTED, "");
+    }
+
+    public static boolean inEncounterPublic(MinecraftServer server, PortalData.StoredInstance instance) {
+        return inEncounter(server, instance.slotDimension());
     }
 
     private static boolean inEncounter(MinecraftServer server, Identifier dimension) {
@@ -580,9 +591,18 @@ public final class RaidService {
         resetEncounter(server, instance);
         PortalDefinition portal = PortalService.portal(server, instance.portalId());
         if (portal != null && !portal.keepInventory()) {
-            for (Map.Entry<String, RaidData.Spot> down : before.deaths().entrySet()) {
-                ServerPlayer player = server.getPlayerList().getPlayer(UUID.fromString(down.getKey()));
-                if (player != null && player.level() == level) RaidSnapshots.wipe(player, level, down.getValue());
+            java.util.Set<String> wiped = new java.util.LinkedHashSet<>(RaidData.get(server)
+                    .encounterPlayers(instance.slotDimension().toString()));
+            wiped.addAll(before.deaths().keySet());
+            Vec3 rally = rallyPoint(server, instance);
+            for (String id : wiped) {
+                RaidData.Spot marker = before.deaths().getOrDefault(id, new RaidData.Spot(rally.x, rally.y, rally.z));
+                ServerPlayer player;
+                try { player = server.getPlayerList().getPlayer(UUID.fromString(id)); }
+                catch (IllegalArgumentException ignored) { continue; }
+                if (player != null && player.level() == level) RaidSnapshots.wipe(player, level, marker);
+                // Logged out during the encounter: the orb is made from their logout inventory now.
+                else if (player == null) RaidSnapshots.wipeOffline(server, id, instance, level, marker);
             }
         }
         List<String> pending = new ArrayList<>();

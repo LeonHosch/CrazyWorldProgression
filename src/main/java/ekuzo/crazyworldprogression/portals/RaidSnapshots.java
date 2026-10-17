@@ -38,21 +38,121 @@ public final class RaidSnapshots extends SavedData {
             Codec.DOUBLE.fieldOf("z").forGetter(Snapshot::z),
             ItemStack.OPTIONAL_CODEC.listOf().fieldOf("items").forGetter(Snapshot::items)
     ).apply(instance, Snapshot::new));
+    static final Codec<Logout> LOGOUT_CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            Codec.STRING.fieldOf("slot").forGetter(Logout::slot),
+            Codec.LONG.fieldOf("instance_created").forGetter(Logout::instanceCreated),
+            Codec.STRING.fieldOf("name").forGetter(Logout::name),
+            ItemStack.OPTIONAL_CODEC.listOf().fieldOf("items").forGetter(Logout::items)
+    ).apply(instance, Logout::new));
     static final Codec<RaidSnapshots> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.unboundedMap(Codec.STRING, SNAPSHOT_CODEC).optionalFieldOf("orbs", Map.of())
-                    .forGetter(data -> data.orbs)
+                    .forGetter(data -> data.orbs),
+            Codec.unboundedMap(Codec.STRING, LOGOUT_CODEC).optionalFieldOf("logouts", Map.of())
+                    .forGetter(data -> data.logouts),
+            Codec.STRING.listOf().optionalFieldOf("owed", List.of())
+                    .forGetter(data -> List.copyOf(data.owed))
     ).apply(instance, RaidSnapshots::new));
     private static final SavedDataType<RaidSnapshots> TYPE = new SavedDataType<>(
             CrazyWorldProgression.id("raid_inventory_orbs"), RaidSnapshots::new, CODEC, null);
     private final Map<String, Snapshot> orbs = new HashMap<>();
+    /** Inventory of a participant who logged out during an encounter, kept until they return or a wipe uses it. */
+    private final Map<String, Logout> logouts = new HashMap<>();
+    /** Players whose inventory went into an orb while they were offline; it is cleared when they log in. */
+    private final java.util.Set<String> owed = new java.util.LinkedHashSet<>();
 
     /** One stored inventory, slot by slot (main, armor, offhand as Inventory numbers them). */
     record Snapshot(String slot, double x, double y, double z, List<ItemStack> items) {
         Snapshot { items = items.stream().map(ItemStack::copy).toList(); }
     }
 
+    record Logout(String slot, long instanceCreated, String name, List<ItemStack> items) {
+        Logout { items = items.stream().map(ItemStack::copy).toList(); }
+    }
+
+    /** What a returning player's inventory needs. */
+    enum Return { NOTHING, CLEAR_ORB_WAITING, CLEAR_ORB_LOST }
+
     RaidSnapshots() { }
-    private RaidSnapshots(Map<String, Snapshot> orbs) { this.orbs.putAll(orbs); }
+    private RaidSnapshots(Map<String, Snapshot> orbs, Map<String, Logout> logouts, List<String> owed) {
+        this.orbs.putAll(orbs);
+        this.logouts.putAll(logouts);
+        this.owed.addAll(owed);
+    }
+
+    void recordLogout(String id, Logout logout) {
+        logouts.put(id, logout);
+        setDirty();
+    }
+
+    /**
+     * A wipe while the player is offline. Their old orb is destroyed; the inventory they logged out with becomes
+     * the new orb (returned so the caller can place it), and their live inventory is owed (cleared on login).
+     */
+    Snapshot wipeOffline(String id, String slot, long instanceCreated, RaidData.Spot marker) {
+        orbs.remove(id);
+        setDirty();
+        Logout logout = logouts.get(id);
+        if (logout == null || !logout.slot().equals(slot) || logout.instanceCreated() != instanceCreated) return null;
+        logouts.remove(id);
+        owed.add(id);
+        if (logout.items().stream().allMatch(ItemStack::isEmpty)) return null;
+        Snapshot snapshot = new Snapshot(slot, marker.x(), marker.y(), marker.z(), logout.items());
+        orbs.put(id, snapshot);
+        return snapshot;
+    }
+
+    /** On login: a logout snapshot is dropped (they came back before any wipe); an owed inventory is cleared. */
+    Return returning(String id) {
+        boolean wasLoggedOut = logouts.remove(id) != null;
+        boolean wasOwed = owed.remove(id);
+        if (wasLoggedOut || wasOwed) setDirty();
+        if (!wasOwed) return Return.NOTHING;
+        return orbs.containsKey(id) ? Return.CLEAR_ORB_WAITING : Return.CLEAR_ORB_LOST;
+    }
+
+    /** A participant logs out during an active encounter: remember their inventory for a possible wipe. */
+    public static void onDisconnect(ServerPlayer player) {
+        MinecraftServer server = player.level().getServer();
+        PortalData.StoredInstance instance = PortalService.currentInstance(player);
+        if (instance == null || !RaidService.isRaidInstance(server, instance)
+                || !RaidService.inEncounterPublic(server, instance)
+                || !RaidData.get(server).encounterPlayers(instance.slotDimension().toString())
+                        .contains(player.getUUID().toString())) return;
+        Inventory inventory = player.getInventory();
+        List<ItemStack> items = new ArrayList<>(inventory.getContainerSize());
+        for (int index = 0; index < inventory.getContainerSize(); index++) items.add(inventory.getItem(index).copy());
+        get(server).recordLogout(player.getUUID().toString(), new Logout(instance.slotDimension().toString(),
+                instance.createdEpochMillis(), player.getGameProfile().name(), items));
+    }
+
+    /** Wipe commit for an offline participant: the orb appears now, from their logout inventory. */
+    static void wipeOffline(MinecraftServer server, String id, PortalData.StoredInstance instance, ServerLevel level,
+                            RaidData.Spot marker) {
+        RaidSnapshots data = get(server);
+        String name = data.logouts.containsKey(id) ? data.logouts.get(id).name() : id;
+        UUID owner = UUID.fromString(id);
+        removeOrbEntity(server, owner);
+        if (data.wipeOffline(id, instance.slotDimension().toString(), instance.createdEpochMillis(), marker) != null)
+            spawnOrb(level, owner, name, marker);
+    }
+
+    /** On login after an offline wipe the live inventory is cleared, so the items exist only in the orb. */
+    public static void onJoin(ServerPlayer player) {
+        RaidSnapshots data = get(player.level().getServer());
+        String id = player.getUUID().toString();
+        Return result = data.returning(id);
+        if (result == Return.NOTHING) return;
+        player.getInventory().clearContent();
+        if (result == Return.CLEAR_ORB_WAITING) {
+            Snapshot orb = data.orbs.get(id);
+            player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.orb_offline",
+                    "Your raid wiped while you were offline. Your inventory is in an orb at X %s, Y %s, Z %s.",
+                    Math.round(orb.x()), Math.round(orb.y()), Math.round(orb.z())).withStyle(ChatFormatting.GOLD));
+        } else {
+            player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.orb_lost_offline",
+                    "Your raid wiped while you were offline and your inventory orb is gone.").withStyle(ChatFormatting.RED));
+        }
+    }
 
     static RaidSnapshots get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(TYPE);
@@ -84,22 +184,22 @@ public final class RaidSnapshots extends SavedData {
         inventory.clearContent();
         data.orbs.put(id, new Snapshot(level.dimension().identifier().toString(), marker.x(), marker.y(), marker.z(), items));
         data.setDirty();
-        spawnOrb(level, player, marker);
+        spawnOrb(level, player.getUUID(), player.getGameProfile().name(), marker);
         player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.orb_created",
                 "Your inventory was stored in an orb at X %s, Y %s, Z %s. Right-click it to get it back.",
                 Math.round(marker.x()), Math.round(marker.y()), Math.round(marker.z())).withStyle(ChatFormatting.GOLD));
     }
 
-    private static void spawnOrb(ServerLevel level, ServerPlayer owner, RaidData.Spot marker) {
+    private static void spawnOrb(ServerLevel level, UUID owner, String ownerName, RaidData.Spot marker) {
         ArmorStand orb = new ArmorStand(level, marker.x(), marker.y(), marker.z());
         orb.setInvisible(true);
         orb.setNoGravity(true);
         orb.setInvulnerable(true);
         orb.setGlowingTag(true);
         orb.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.ENDER_EYE));
-        orb.setCustomName(Component.literal(owner.getGameProfile().name() + "'s inventory"));
+        orb.setCustomName(Component.literal(ownerName + "'s inventory"));
         orb.setCustomNameVisible(true);
-        orb.addTag(ORB_TAG + owner.getUUID());
+        orb.addTag(ORB_TAG + owner);
         level.addFreshEntity(orb);
     }
 
@@ -192,5 +292,7 @@ public final class RaidSnapshots extends SavedData {
     static void instanceEnded(MinecraftServer server, String slot) {
         RaidSnapshots data = get(server);
         if (data.orbs.values().removeIf(snapshot -> snapshot.slot().equals(slot))) data.setDirty();
+        // Owed offline inventories stay, so the player still loses them when they log back in.
+        if (data.logouts.values().removeIf(logout -> logout.slot().equals(slot))) data.setDirty();
     }
 }

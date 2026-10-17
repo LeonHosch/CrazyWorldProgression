@@ -96,5 +96,7 @@
   "message.crazy-world-progression.raid.orb_claimed": "You got your inventory back.",
   "message.crazy-world-progression.raid.orb_partial": "Your inventory and postmaster are full. The rest stays in the orb.",
   "message.crazy-world-progression.raid.orb_postmaster": "Items that were in the way went to your postmaster (/postmaster).",
-  "message.crazy-world-progression.raid.orb_not_yours": "This inventory orb belongs to someone else."
+  "message.crazy-world-progression.raid.orb_not_yours": "This inventory orb belongs to someone else.",
+  "message.crazy-world-progression.raid.orb_lost_offline": "Your raid wiped while you were offline and your inventory orb is gone.",
+  "message.crazy-world-progression.raid.orb_offline": "Your raid wiped while you were offline. Your inventory is in an orb at X %s, Y %s, Z %s."
 }

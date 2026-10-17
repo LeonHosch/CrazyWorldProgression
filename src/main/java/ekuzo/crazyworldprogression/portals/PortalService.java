@@ -96,8 +96,10 @@ public final class PortalService {
             PortalGroups.clear(server);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(PocketEditorService::flushAutoSaves);
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> RaidSnapshots.onDisconnect(handler.getPlayer()));
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayer player = handler.getPlayer();
+            RaidSnapshots.onJoin(player);
             Identifier current = player.level().dimension().identifier();
             boolean orphanInstance = PortalRegistry.instanceSlots().contains(current)
                     && !PortalData.get(server).instances().containsKey(current.toString());

@@ -35,8 +35,7 @@ public final class PortalNetworking {
         PayloadTypeRegistry.clientboundPlay().register(PortalVisibilityPayload.TYPE, PortalVisibilityPayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(PortalEntryPromptPayload.TYPE, PortalEntryPromptPayload.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(PortalEntryResponsePayload.TYPE, PortalEntryResponsePayload.CODEC);
-        PayloadTypeRegistry.clientboundPlay().register(PortalGroupPayload.TYPE, PortalGroupPayload.CODEC);
-        PayloadTypeRegistry.serverboundPlay().register(PortalGroupActionPayload.TYPE, PortalGroupActionPayload.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(PortalContactPayload.TYPE, PortalContactPayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(RaidCheckpointPayload.TYPE, RaidCheckpointPayload.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(RaidCheckpointResetPayload.TYPE, RaidCheckpointResetPayload.CODEC);
     }
@@ -54,26 +53,9 @@ public final class PortalNetworking {
         ServerPlayNetworking.registerGlobalReceiver(PortalEntryResponsePayload.TYPE,
                 (payload, context) -> PortalService.respondToEntryPrompt(
                         context.player(), payload.portalId(), payload.accepted(), payload.riskConfirmed()));
-        ServerPlayNetworking.registerGlobalReceiver(PortalGroupActionPayload.TYPE, (payload, context) -> {
-            ServerPlayer player = context.player();
-            MinecraftServer server = player.level().getServer();
-            try {
-                switch (payload.action()) {
-                    case "open" -> { }
-                    case "leave" -> PortalGroups.leave(player);
-                    case "invite", "accept" -> {
-                        ServerPlayer target = server.getPlayerList().getPlayerByName(payload.player());
-                        if (target == null) throw new IllegalArgumentException("Player is not online: " + payload.player());
-                        if (payload.action().equals("invite")) PortalGroups.invite(player, target);
-                        else PortalGroups.accept(player, target);
-                    }
-                    default -> throw new IllegalArgumentException("Unknown group action");
-                }
-            } catch (IllegalArgumentException exception) {
-                player.sendSystemMessage(Component.literal(exception.getMessage()));
-            }
-            openGroupScreen(player);
-        });
+        ServerPlayNetworking.registerGlobalReceiver(PortalContactPayload.TYPE,
+                (payload, context) -> PortalService.requestPortalContact(context.player(), payload.portalId(),
+                        payload.centerX(), payload.centerY(), payload.centerZ()));
     }
 
     // Send the current render snapshot to one joining player.
@@ -90,6 +72,11 @@ public final class PortalNetworking {
     public static void broadcast(MinecraftServer server) {
         List<PortalSnapshot> snapshot = snapshot(server);
         List<String> hiddenDimensions = hiddenPlayerDimensions(server);
+        broadcast(server, snapshot, hiddenDimensions);
+    }
+
+    private static void broadcast(MinecraftServer server, List<PortalSnapshot> snapshot,
+                                  List<String> hiddenDimensions) {
         synchronized (LAST_BROADCAST_HASH) {
             LAST_BROADCAST_HASH.put(server, java.util.Objects.hash(snapshot, hiddenDimensions));
         }
@@ -108,11 +95,12 @@ public final class PortalNetworking {
     // Broadcast only when a real-time schedule boundary changes an open portal set.
     public static void broadcastIfChanged(MinecraftServer server) {
         List<PortalSnapshot> snapshot = snapshot(server);
-        int hash = java.util.Objects.hash(snapshot, hiddenPlayerDimensions(server));
+        List<String> hiddenDimensions = hiddenPlayerDimensions(server);
+        int hash = java.util.Objects.hash(snapshot, hiddenDimensions);
         synchronized (LAST_BROADCAST_HASH) {
             if (LAST_BROADCAST_HASH.getOrDefault(server, Integer.MIN_VALUE) == hash) return;
         }
-        broadcast(server);
+        broadcast(server, snapshot, hiddenDimensions);
     }
 
     // Forget one stopped server's cached synchronization state.
@@ -187,17 +175,7 @@ public final class PortalNetworking {
     }
 
     public static void openGroupScreen(ServerPlayer player) {
-        if (ServerPlayNetworking.canSend(player, Parties.StatePayload.TYPE)) {
-            Parties.open(player);
-            return;
-        }
-        if (!ServerPlayNetworking.canSend(player, PortalGroupPayload.TYPE)) return;
-        MinecraftServer server = player.level().getServer();
-        String members = String.join(", ", PortalGroups.names(server, player.getUUID()));
-        String online = String.join(", ", server.getPlayerList().getPlayers().stream()
-                .map(other -> other.getGameProfile().name()).toList());
-        ServerPlayNetworking.send(player, new PortalGroupPayload(members, online,
-                PortalGroups.pendingInvite(server, player.getUUID())));
+        Parties.open(player);
     }
 
     /** Client-safe geometry and appearance for one placed portal. */
@@ -260,26 +238,6 @@ public final class PortalNetworking {
         }
     }
 
-    public record PortalGroupPayload(String members, String online, String invitedBy)
-            implements CustomPacketPayload {
-        public static final Type<PortalGroupPayload> TYPE = new Type<>(CrazyWorldProgression.id("portal_group"));
-        public static final StreamCodec<RegistryFriendlyByteBuf, PortalGroupPayload> CODEC =
-                StreamCodec.composite(ByteBufCodecs.STRING_UTF8, PortalGroupPayload::members,
-                        ByteBufCodecs.STRING_UTF8, PortalGroupPayload::online,
-                        ByteBufCodecs.STRING_UTF8, PortalGroupPayload::invitedBy, PortalGroupPayload::new);
-        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
-    }
-
-    public record PortalGroupActionPayload(String action, String player) implements CustomPacketPayload {
-        public static final Type<PortalGroupActionPayload> TYPE =
-                new Type<>(CrazyWorldProgression.id("portal_group_action"));
-        public static final StreamCodec<RegistryFriendlyByteBuf, PortalGroupActionPayload> CODEC =
-                StreamCodec.composite(ByteBufCodecs.STRING_UTF8, PortalGroupActionPayload::action,
-                        ByteBufCodecs.STRING_UTF8, PortalGroupActionPayload::player,
-                        PortalGroupActionPayload::new);
-        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
-    }
-
     /** Client decision returned for a specific server-issued portal prompt. */
     public record PortalEntryResponsePayload(String portalId, boolean accepted,
                                              boolean riskConfirmed) implements CustomPacketPayload {
@@ -296,5 +254,19 @@ public final class PortalNetworking {
         public Type<? extends CustomPacketPayload> type() {
             return TYPE;
         }
+    }
+
+    /** A client-observed portal contact; the server verifies placement and player position. */
+    public record PortalContactPayload(String portalId, double centerX, double centerY, double centerZ)
+            implements CustomPacketPayload {
+        public static final Type<PortalContactPayload> TYPE =
+                new Type<>(CrazyWorldProgression.id("portal_contact"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, PortalContactPayload> CODEC =
+                StreamCodec.composite(ByteBufCodecs.STRING_UTF8, PortalContactPayload::portalId,
+                        ByteBufCodecs.DOUBLE, PortalContactPayload::centerX,
+                        ByteBufCodecs.DOUBLE, PortalContactPayload::centerY,
+                        ByteBufCodecs.DOUBLE, PortalContactPayload::centerZ,
+                        PortalContactPayload::new);
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 }

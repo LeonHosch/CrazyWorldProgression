@@ -197,7 +197,15 @@ public final class MobScriptExecutor {
 	 * pasted buildings, script-added portal locations, eventboxes, redstone sensors and their counters.
 	 * Variables (including player lists) are kept.
 	 */
-	private static void clearScriptManaged(ActiveRun run) {
+	private boolean clearScriptManaged(ActiveRun run) {
+		long next = ekuzo.crazyworldprogression.buildings.BuildingService.clearInstanceBatch(
+				run.level, run.buildingClearIndex, 8_192);
+		if (next >= 0) {
+			run.buildingClearIndex = next;
+			run.wakeTick = clock + 1;
+			return false;
+		}
+		run.buildingClearIndex = 0;
 		if (run.pocketInstanceId != null) {
 			java.util.List<net.minecraft.world.entity.Entity> owned = new java.util.ArrayList<>();
 			for (net.minecraft.world.entity.Entity entity : run.level.getAllEntities())
@@ -205,11 +213,11 @@ public final class MobScriptExecutor {
 						.filter(run.pocketInstanceId::equals).isPresent()) owned.add(entity);
 			owned.forEach(net.minecraft.world.entity.Entity::discard);
 		}
-		ekuzo.crazyworldprogression.buildings.BuildingService.clearInstance(run.level);
 		PortalService.resetRuntimeLocations(run.level.getServer(), run.level.dimension().identifier());
 		run.handles.clear();
 		run.boxes.clear(); run.boxPlayers.clear(); run.boxOccupied.clear(); run.boxTriggers.clear();
 		run.redstone.clear(); run.kills.clear(); run.portalUses.clear(); run.watches.clear();
+		return true;
 	}
 
 	/** Rewards that belong to an already completed encounter and are not repeated after resuming. */
@@ -389,6 +397,14 @@ public final class MobScriptExecutor {
 				BlockPos origin = BlockPos.containing(building.location().x(), building.location().y(),
 						building.location().z());
 				if (building.action().equals("add")) {
+				long next = BuildingService.clearPreviousBatch(run.level, origin,
+						run.buildingClearIndex, 8_192);
+				if (next >= 0) {
+					run.buildingClearIndex = next;
+					run.wakeTick = clock + 1;
+					return false;
+				}
+				run.buildingClearIndex = 0;
 					BuildingService.spawn(run.level, building.buildId(), origin);
 					run.step++;
 				} else {
@@ -434,14 +450,14 @@ public final class MobScriptExecutor {
 				run.step++;
 				RaidService.complete(run.level);
 			} else if (step instanceof MobScript.EncounterStartStep) {
+				if (!clearScriptManaged(run)) return false;
 				run.step++;
 				run.suppressRewards = false;
-				clearScriptManaged(run);
 				RaidService.start(run.level);
 			} else if (step instanceof MobScript.EncounterEndStep end) {
+				if (!clearScriptManaged(run)) return false;
 				run.step++;
 				run.encountersCompleted++;
-				clearScriptManaged(run);
 				// Store the new spawn first so a clutch clear (wipe pending) respawns everyone there.
 				if (end.spawn() != null) RaidService.moveSpawn(run.level, end.spawn().x(), end.spawn().y(),
 						end.spawn().z(), false);

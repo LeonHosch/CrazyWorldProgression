@@ -3,6 +3,7 @@ package ekuzo.crazyworldprogression.mixin.client;
 import com.llamalad7.mixinextras.sugar.Local;
 import ekuzo.crazyworldprogression.client.EchelonSettingsScreen;
 import ekuzo.crazyworldprogression.client.TitleSelectScreen;
+import ekuzo.crazyworldprogression.client.WaypointScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.layouts.GridLayout;
@@ -27,5 +28,7 @@ public abstract class PauseScreenEchelonMixin {
                 ignored -> Minecraft.getInstance().gui.setScreen(new TitleSelectScreen(screen))).width(98).build());
         helper.addChild(Button.builder(Component.translatable("menu.crazy-world-progression.party"),
                 ignored -> ekuzo.crazyworldprogression.client.PartyScreen.requestOpen()).width(204).build(), 2);
+        helper.addChild(Button.builder(Component.translatable("menu.crazy-world-progression.waypoint"),
+                ignored -> Minecraft.getInstance().gui.setScreen(new WaypointScreen(screen))).width(204).build(), 2);
     }
 }

@@ -11,7 +11,6 @@ import java.util.UUID;
 public final class PortalGroups {
     private PortalGroups() { }
 
-    public static void clear(MinecraftServer server) { }
 
     /** The party leader, or the player themself when not in a party. */
     public static UUID leader(MinecraftServer server, UUID member) {
@@ -39,7 +38,6 @@ public final class PortalGroups {
         if (Parties.book(player.level().getServer()).partyOf(player.getUUID()) != null) Parties.act(player, "leave", "", "");
     }
 
-    public static void finishTravel(MinecraftServer server, UUID leader) { }
 
     public static List<String> names(MinecraftServer server, UUID member) {
         List<String> names = new ArrayList<>();
@@ -47,8 +45,4 @@ public final class PortalGroups {
         return names;
     }
 
-    public static String pendingInvite(MinecraftServer server, UUID playerId) {
-        List<PartyBook.Party> invites = Parties.book(server).invitesFor(playerId);
-        return invites.isEmpty() ? "" : Parties.name(server, invites.getFirst().leader());
-    }
 }

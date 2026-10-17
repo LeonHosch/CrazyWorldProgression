@@ -6,6 +6,7 @@ import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.mobforge.script.MobScript;
 import ekuzo.crazyworldprogression.portals.PocketEditorService;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
@@ -26,17 +27,23 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.WeakHashMap;
 
 /** Exact non-air building blocks shown only in the pocket's editor dimension. */
 public final class BuildingPreviewNetworking {
     private static final Gson GSON = new Gson();
     private static final Type LIST_TYPE = new TypeToken<List<Preview>>() { }.getType();
     private static final Map<UUID, String> LAST_SENT = new HashMap<>();
+    private static final Map<MinecraftServer, Map<Identifier, CachedSnapshot>> CACHE = new WeakHashMap<>();
 
     private BuildingPreviewNetworking() { }
 
     public static void registerPayloadType() {
         PayloadTypeRegistry.clientboundPlay().register(Payload.TYPE, Payload.CODEC);
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            CACHE.remove(server);
+            LAST_SENT.clear();
+        });
     }
 
     public static void tick(MinecraftServer server) {
@@ -50,7 +57,7 @@ public final class BuildingPreviewNetworking {
                 LAST_SENT.remove(player.getUUID());
                 continue;
             }
-            String json = snapshots.computeIfAbsent(pocket, id -> GSON.toJson(snapshot(server, id, dimension)));
+            String json = snapshots.computeIfAbsent(pocket, id -> cachedSnapshot(server, id, dimension));
             String key = dimension + "|" + json;
             if (key.equals(LAST_SENT.get(player.getUUID()))) continue;
             if (ServerPlayNetworking.canSend(player, Payload.TYPE)) {
@@ -65,9 +72,29 @@ public final class BuildingPreviewNetworking {
         return values == null ? List.of() : List.copyOf(values);
     }
 
-    private static List<Preview> snapshot(MinecraftServer server, Identifier pocket, Identifier dimension) {
+    private static String cachedSnapshot(MinecraftServer server, Identifier pocket, Identifier dimension) {
+        List<String> scriptIds = PocketEditorService.scripts(server, pocket);
+        List<MobScript> scripts = scriptIds.stream().map(id -> MobForge.SCRIPTS.get(id).orElse(null)).toList();
+        List<BuildingService.BuildingInfo> buildings = BuildingService.buildings(server);
+        Map<Identifier, CachedSnapshot> byPocket = CACHE.computeIfAbsent(server, ignored -> new HashMap<>());
+        CachedSnapshot cached = byPocket.get(pocket);
+        if (cached != null && cached.dimension().equals(dimension)
+                && cached.scriptIds().equals(scriptIds) && cached.buildings().equals(buildings)
+                && sameScripts(cached.scripts(), scripts)) return cached.json();
+        String json = GSON.toJson(snapshot(server, scriptIds, dimension));
+        byPocket.put(pocket, new CachedSnapshot(dimension, List.copyOf(scriptIds), scripts, buildings, json));
+        return json;
+    }
+
+    private static boolean sameScripts(List<MobScript> left, List<MobScript> right) {
+        if (left.size() != right.size()) return false;
+        for (int index = 0; index < left.size(); index++) if (left.get(index) != right.get(index)) return false;
+        return true;
+    }
+
+    private static List<Preview> snapshot(MinecraftServer server, List<String> scriptIds, Identifier dimension) {
         List<Preview> result = new ArrayList<>();
-        for (String scriptId : PocketEditorService.scripts(server, pocket)) {
+        for (String scriptId : scriptIds) {
             MobScript script = MobForge.SCRIPTS.get(scriptId).orElse(null);
             if (script == null) continue;
             for (MobScript.Step step : script.steps()) {
@@ -101,6 +128,9 @@ public final class BuildingPreviewNetworking {
         }
         return result;
     }
+
+    private record CachedSnapshot(Identifier dimension, List<String> scriptIds, List<MobScript> scripts,
+                                  List<BuildingService.BuildingInfo> buildings, String json) { }
 
     public record Preview(String dimension, int x, int y, int z, int sizeX, int sizeY, int sizeZ, String blocks) { }
 

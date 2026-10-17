@@ -70,6 +70,8 @@ public class CrazyWorldProgression implements ModInitializer {
 		SkillTreeNetworking.registerPayloadTypes();
 		SkillTreeNetworking.registerServerReceivers();
 		MobForge.initialize();
+		PortalService.registerMaintenanceTick();
+		AreaSelectionService.registerMaintenanceTick();
 
 		// Load authoritative YAML only when a server starts, so remote clients never depend on local copies.
 		ServerLifecycleEvents.SERVER_STARTING.register(server -> {

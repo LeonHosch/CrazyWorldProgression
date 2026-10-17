@@ -1,5 +1,7 @@
 package ekuzo.crazyworldprogression.portals;
 
+import ekuzo.crazyworldprogression.cleanup.BlockCleanupBudget;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.Registries;
@@ -189,7 +191,7 @@ public final class PortalTemplateService {
     // Clear a bounded linear slice and return the next index, or minus one when the template volume is empty.
     static long clearBatch(ServerLevel level, PortalData.StoredInstance instance, long startIndex, int budget) {
         long volume = (long) instance.sizeX() * instance.sizeY() * instance.sizeZ();
-        long end = Math.min(volume, startIndex + budget);
+        long end = Math.min(volume, startIndex + BlockCleanupBudget.reserve(level.getServer(), budget));
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         long layerSize = (long) instance.sizeX() * instance.sizeZ();
         for (long index = startIndex; index < end; index++) {

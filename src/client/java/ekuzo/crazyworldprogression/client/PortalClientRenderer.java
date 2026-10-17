@@ -13,6 +13,7 @@ import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.mixin.client.RenderPipelinesAccessor;
 import ekuzo.crazyworldprogression.mixin.client.RenderTypeAccessor;
 import ekuzo.crazyworldprogression.portals.PortalDefinition;
+import ekuzo.crazyworldprogression.portals.PortalContactGeometry;
 import ekuzo.crazyworldprogression.portals.PortalNetworking;
 import ekuzo.crazyworldprogression.portals.PortalPreviewNetworking;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -43,6 +44,7 @@ public final class PortalClientRenderer {
     private static volatile List<PortalNetworking.PortalSnapshot> portals = List.of();
     private static volatile List<PortalNetworking.PortalSnapshot> previews = List.of();
     private static int particleTick;
+    private static String contact;
     private static final RenderPipeline PORTAL_PIPELINE = RenderPipelinesAccessor.cwp$register(
             RenderPipeline.builder()
                     .withLocation(CrazyWorldProgression.id("pipeline/translucent_portal"))
@@ -90,15 +92,51 @@ public final class PortalClientRenderer {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             replaceSnapshot(List.of());
             previews = List.of();
+            contact = null;
         });
         LevelRenderEvents.COLLECT_SUBMITS.register(PortalClientRenderer::submit);
         ClientTickEvents.END_CLIENT_TICK.register(PortalClientRenderer::spawnBorderParticles);
+        ClientTickEvents.END_CLIENT_TICK.register(PortalClientRenderer::detectContact);
     }
 
     // Atomically replace render state and discard cached meshes for removed or resized portals.
     private static void replaceSnapshot(List<PortalNetworking.PortalSnapshot> replacement) {
         portals = replacement;
+        contact = null;
         pruneCache();
+    }
+
+    // Render snapshots are enough to find contact locally; the server validates the requested entrance.
+    private static void detectContact(Minecraft minecraft) {
+        if (minecraft.level == null || minecraft.player == null) {
+            contact = null;
+            return;
+        }
+        String dimension = minecraft.level.dimension().identifier().toString();
+        Vec3 center = minecraft.player.position().add(0.0, 0.9, 0.0);
+        PortalNetworking.PortalSnapshot touching = null;
+        for (PortalNetworking.PortalSnapshot portal : portals) {
+            if (portal.open() && portal.dimension().equals(dimension) && contains(portal, center)) {
+                touching = portal;
+                break;
+            }
+        }
+        if (touching == null) {
+            contact = null;
+            return;
+        }
+        String key = placementKey(touching);
+        if (key.equals(contact)) return;
+        if (!ClientPlayNetworking.canSend(PortalNetworking.PortalContactPayload.TYPE)) return;
+        contact = key;
+        ClientPlayNetworking.send(new PortalNetworking.PortalContactPayload(touching.id(),
+                touching.centerX(), touching.centerY(), touching.centerZ()));
+    }
+
+    private static boolean contains(PortalNetworking.PortalSnapshot portal, Vec3 point) {
+        return PortalContactGeometry.contains(PortalDefinition.Shape.parse(portal.shape()),
+                PortalDefinition.Plane.parse(portal.plane()), portal.centerX(), portal.centerY(),
+                portal.centerZ(), portal.width(), portal.height(), point, 0.85);
     }
 
     private static void pruneCache() {

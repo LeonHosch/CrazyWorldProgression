@@ -105,9 +105,7 @@ public final class PortalEntryPromptClient {
                     && payload.accessMode().equals("private")) {
                 addRenderableWidget(Button.builder(Component.literal("Manage group"), ignored -> {
                     answer(false);
-                    if (ClientPlayNetworking.canSend(PortalNetworking.PortalGroupActionPayload.TYPE)) {
-                        ClientPlayNetworking.send(new PortalNetworking.PortalGroupActionPayload("open", ""));
-                    }
+                    PartyScreen.requestOpen();
                 }).bounds(panelLeft + (panelWidth - 130) / 2, buttonY - 27, 130, 20).build());
             }
             PortalNetworking.RaidCheckpointPayload checkpoint = checkpoint();

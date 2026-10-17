@@ -149,6 +149,13 @@ public final class Parties {
         return data(server).leases.getOrDefault(instanceKey(instance), "");
     }
 
+    private static void adoptSoloInstances(MinecraftServer server, UUID leader, PartyBook.Party party) {
+        String solo = "solo:" + leader;
+        for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
+            if (solo.equals(leaseOf(server, instance))) bindLease(server, instance, "party:" + party.id());
+        }
+    }
+
     /** The name of the dungeon a party is currently in, for the browser. */
     private static String activity(MinecraftServer server, PartyBook.Party party) {
         String key = "party:" + party.id();
@@ -158,6 +165,38 @@ public final class Parties {
             return portal == null ? instance.portalId().toString() : portal.effectiveDisplayName();
         }
         return "";
+    }
+
+    private record Entrance(PortalDefinition portal) { }
+
+    /** Use the placed entrance, never the projected copy inside a dungeon instance. */
+    private static Entrance entrance(MinecraftServer server, PartyBook.Party party, ServerPlayer inviter) {
+        String key = "party:" + party.id();
+        for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
+            if (!key.equals(leaseOf(server, instance))) continue;
+            return PortalService.visiblePortals(server).stream()
+                    .filter(candidate -> candidate.id().equals(instance.portalId())
+                            && !PortalRegistry.instanceSlots().contains(candidate.dimension()))
+                    .map(Entrance::new).findFirst().orElse(null);
+        }
+        return PortalService.visiblePortals(server).stream()
+                .filter(candidate -> candidate.dimension().equals(inviter.level().dimension().identifier())
+                        && !candidate.isExit() && !candidate.isCoordinates()
+                        && candidate.isNear(inviter.position(), 32.0))
+                .min(java.util.Comparator.comparingDouble(candidate -> inviter.position().distanceToSqr(
+                        candidate.centerX(), candidate.centerY(), candidate.centerZ())))
+                .map(Entrance::new).orElse(null);
+    }
+
+    private static MutableComponent activityLink(Entrance entrance) {
+        PortalDefinition portal = entrance.portal();
+        String command = "/cwpnavigate " + portal.dimension() + " " + portal.centerX() + " "
+                + portal.centerY() + " " + portal.centerZ();
+        return Component.literal(portal.effectiveDisplayName()).withStyle(style -> style
+                .withColor(ChatFormatting.AQUA).withUnderlined(true)
+                .withClickEvent(new ClickEvent.RunCommand(command))
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal("Guide me to the entrance: "
+                        + portal.centerX() + ", " + portal.centerY() + ", " + portal.centerZ()))));
     }
 
     // ---------------------------------------------------------------- actions
@@ -180,6 +219,7 @@ public final class Parties {
                 case "create" -> {
                     PartyBook.Party party = book.create(me, a.isBlank() ? player.getGameProfile().name() + "'s party" : a,
                             b.isBlank() ? PartyBook.Visibility.PRIVATE : PartyBook.Visibility.parse(b));
+                    adoptSoloInstances(server, me, party);
                     tell(player, "Party " + party.name() + " created.");
                 }
                 case "join" -> {
@@ -200,12 +240,17 @@ public final class Parties {
                     ServerPlayer target = online(server, a);
                     book.invite(me, target.getUUID());
                     PartyBook.Party party = book.partyOf(me);
+                    adoptSoloInstances(server, me, party);
+                    Entrance entrance = entrance(server, party, player);
                     tell(player, "Invited " + target.getGameProfile().name() + ".");
-                    target.sendSystemMessage(Component.literal(player.getGameProfile().name() + " invited you to the party "
-                                    + party.name() + ". ").withStyle(ChatFormatting.YELLOW)
-                            .append(button("[Accept]", ChatFormatting.GREEN, "/party accept " + player.getGameProfile().name()))
-                            .append(" ")
-                            .append(button("[Decline]", ChatFormatting.RED, "/party decline " + player.getGameProfile().name())));
+                    MutableComponent message = Component.literal(player.getGameProfile().name() + " invited you to ")
+                            .withStyle(ChatFormatting.YELLOW);
+                    message.append(entrance == null ? Component.literal(party.name()) : activityLink(entrance));
+                    message.append(Component.literal(": ").withStyle(ChatFormatting.YELLOW));
+                    message.append(button("Accept", ChatFormatting.GREEN, "/party accept " + player.getGameProfile().name()));
+                    message.append(Component.literal(" | ").withStyle(ChatFormatting.GRAY));
+                    message.append(button("Decline", ChatFormatting.RED, "/party decline " + player.getGameProfile().name()));
+                    target.sendSystemMessage(message);
                 }
                 case "accept_invite" -> {
                     PartyBook.Party party = book.acceptInvite(me, partyId(server, a));

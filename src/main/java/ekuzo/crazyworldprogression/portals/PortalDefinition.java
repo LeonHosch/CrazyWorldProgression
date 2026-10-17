@@ -107,19 +107,8 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
 
     // Test a point against the finite two-dimensional surface with a small perpendicular trigger thickness.
     public boolean contains(Vec3 point, double thickness) {
-        Coordinates coordinates = coordinates(point);
-        if (Math.abs(coordinates.perpendicular()) > thickness) return false;
-        double halfWidth = width / 2.0;
-        double halfHeight = height / 2.0;
-        double u = coordinates.u();
-        double v = coordinates.v();
-        return switch (shape) {
-            case RECTANGLE -> Math.abs(u) <= halfWidth && Math.abs(v) <= halfHeight;
-            case ELLIPSE -> square(u / halfWidth) + square(v / halfHeight) <= 1.0;
-            case DIAMOND -> Math.abs(u) / halfWidth + Math.abs(v) / halfHeight <= 1.0;
-            case TRIANGLE -> v >= -halfHeight && v <= halfHeight
-                    && Math.abs(u) <= halfWidth * (1.0 - (v + halfHeight) / height);
-        };
+        return PortalContactGeometry.contains(shape, plane, centerX, centerY, centerZ,
+                width, height, point, thickness);
     }
 
     // Return a tight broad-phase box around the portal trigger surface.

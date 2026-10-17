@@ -4,6 +4,8 @@ Crazy World Progression (CWP) is a Fabric framework for server-authoritative cur
 
 CWP intentionally ships without currencies, skill trees, earning rules, roles, or world mechanics. [EchelonCore](https://github.com/LeonHosch/EchelonCore) is the reference implementation.
 
+See [performance design and profiling](docs/performance.md) for tick budgets, cache rules, server validation, and known costs to measure before release.
+
 ## Requirements
 
 | Component | Version |

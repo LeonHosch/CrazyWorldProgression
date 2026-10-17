@@ -1,5 +1,7 @@
 package ekuzo.crazyworldprogression.selection;
 
+import ekuzo.crazyworldprogression.cleanup.BlockCleanupBudget;
+
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -42,6 +44,10 @@ public final class AreaSelectionService {
                 CLEAR_TASKS.clear();
             }
         });
+    }
+
+    /** Run area clearing after scripts and portal maintenance have used their budget. */
+    public static void registerMaintenanceTick() {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             processClears(server);
             if (server.getTickCount() % 5L == 0L) renderSelections(server);
@@ -262,7 +268,9 @@ public final class AreaSelectionService {
                 ClearTask task = CLEAR_TASKS.get(taskIndex);
                 if (task.level().getServer() != server) continue;
                 long volume = volume(task.minimum(), task.maximum());
-                long end = Math.min(volume, task.nextIndex() + CLEAR_BLOCKS_PER_TICK);
+                int granted = BlockCleanupBudget.reserve(server, CLEAR_BLOCKS_PER_TICK);
+                if (granted == 0) break;
+                long end = Math.min(volume, task.nextIndex() + granted);
                 int sizeX = task.maximum().getX() - task.minimum().getX() + 1;
                 int sizeZ = task.maximum().getZ() - task.minimum().getZ() + 1;
                 long layer = (long) sizeX * sizeZ;

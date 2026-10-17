@@ -1,6 +1,7 @@
 package ekuzo.crazyworldprogression.buildings;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
+import ekuzo.crazyworldprogression.cleanup.BlockCleanupBudget;
 import ekuzo.crazyworldprogression.selection.AreaSelectionService;
 import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.mobforge.script.MobScript;
@@ -20,13 +21,17 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 import ekuzo.crazyworldprogression.portals.PortalRegistry;
 
 /** Capture once, then place or clear copies in a world or pocket instance. */
 public final class BuildingService {
     public static final long MAX_VOLUME = 131_072L;
     public static final Identifier SELECTION_OWNER = CrazyWorldProgression.id("building_capture");
+    private static final Map<MinecraftServer, Map<Identifier, ScheduledClear>> SCHEDULED_CLEARS = new WeakHashMap<>();
     private BuildingService() { }
 
     public record BuildingInfo(Identifier id, int sizeX, int sizeY, int sizeZ, String author) { }
@@ -90,18 +95,6 @@ public final class BuildingService {
         if (template.getSize().getX() != info.sizeX() || template.getSize().getY() != info.sizeY()
                 || template.getSize().getZ() != info.sizeZ())
             throw new IllegalStateException("Building size does not match saved blocks for " + id);
-        if (PortalRegistry.instanceSlots().contains(level.dimension().identifier())) {
-            BuildingData data = BuildingData.get(level.getServer());
-            for (BuildingData.Placement previous : List.copyOf(data.placements(level.dimension().identifier()))) {
-                if (previous.origin() != origin.asLong()) continue;
-                long index = 0;
-                do {
-                    index = clearRangeBatch(level, origin, previous.sizeX(), previous.sizeY(),
-                            previous.sizeZ(), index, 8_192);
-                } while (index >= 0);
-                data.removePlacement(level.dimension().identifier(), previous.origin());
-            }
-        }
         int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
         if (!template.placeInWorld(level, origin, origin, new StructurePlaceSettings()
                 .setKnownShape(true).setIgnoreEntities(true), level.getRandom(), flags))
@@ -120,26 +113,87 @@ public final class BuildingService {
         return next;
     }
 
-    /** Clear every recorded copy in this reusable instance slot, including copies outside the pocket bounds. */
-    public static void clearInstance(ServerLevel level) {
+    /** Clear an old placement at the spawn origin before replacing it; the caller resumes next tick. */
+    public static long clearPreviousBatch(ServerLevel level, BlockPos origin, long start, int budget) {
+        if (!PortalRegistry.instanceSlots().contains(level.dimension().identifier())) return -1L;
+        BuildingData data = BuildingData.get(level.getServer());
+        for (BuildingData.Placement placement : List.copyOf(data.placements(level.dimension().identifier()))) {
+            if (placement.origin() != origin.asLong()) continue;
+            long next = clearRangeBatch(level, origin, placement.sizeX(), placement.sizeY(), placement.sizeZ(),
+                    start, budget);
+            if (next >= 0) return next;
+            data.removePlacement(level.dimension().identifier(), placement.origin());
+            return data.placements(level.dimension().identifier()).stream()
+                    .anyMatch(other -> other.origin() == origin.asLong()) ? 0L : -1L;
+        }
+        return -1L;
+    }
+
+    /** Clear at most one slice of one recorded building in a reusable instance slot. */
+    public static long clearInstanceBatch(ServerLevel level, long start, int budget) {
         BuildingData data = BuildingData.get(level.getServer());
         for (BuildingData.Placement placement : List.copyOf(data.placements(level.dimension().identifier()))) {
             BlockPos origin = BlockPos.of(placement.origin());
-            long index = 0;
-            do {
-                index = clearRangeBatch(level, origin, placement.sizeX(), placement.sizeY(),
-                        placement.sizeZ(), index, 8_192);
-            } while (index >= 0);
+            long next = clearRangeBatch(level, origin, placement.sizeX(), placement.sizeY(),
+                    placement.sizeZ(), start, budget);
+            if (next >= 0) return next;
             data.removePlacement(level.dimension().identifier(), placement.origin());
+            return data.placements(level.dimension().identifier()).isEmpty() ? -1L : 0L;
         }
+        return -1L;
     }
+
+    /** Queue cleanup and run the continuation only after every recorded building is gone. */
+    public static void clearInstanceThen(ServerLevel level, Runnable continuation) {
+        MinecraftServer server = level.getServer();
+        Identifier dimension = level.dimension().identifier();
+        if (BuildingData.get(server).placements(dimension).isEmpty()) {
+            continuation.run();
+            return;
+        }
+        Map<Identifier, ScheduledClear> jobs = SCHEDULED_CLEARS.computeIfAbsent(server, ignored -> new HashMap<>());
+        ScheduledClear existing = jobs.get(dimension);
+        if (existing != null) throw new IllegalStateException("Building cleanup already pending in " + dimension);
+        jobs.put(dimension, new ScheduledClear(level, 0L, continuation));
+    }
+
+    /** Use one shared slice before portal cleanup; return whether this tick's budget was consumed. */
+    public static boolean tickScheduledClears(MinecraftServer server, int budget) {
+        Map<Identifier, ScheduledClear> jobs = SCHEDULED_CLEARS.get(server);
+        if (jobs == null || jobs.isEmpty()) return false;
+        var entry = jobs.entrySet().iterator().next();
+        ScheduledClear job = entry.getValue();
+        long next = clearInstanceBatch(job.level(), job.nextIndex(), budget);
+        if (next < 0L) {
+            jobs.remove(entry.getKey());
+            try { job.continuation().run(); }
+            catch (RuntimeException exception) {
+                CrazyWorldProgression.LOGGER.error("Could not complete building cleanup in {}",
+                        entry.getKey(), exception);
+            }
+        } else jobs.put(entry.getKey(), new ScheduledClear(job.level(), next, job.continuation()));
+        return true;
+    }
+
+    public static boolean cleanupPending(ServerLevel level) {
+        Map<Identifier, ScheduledClear> jobs = SCHEDULED_CLEARS.get(level.getServer());
+        return jobs != null && jobs.containsKey(level.dimension().identifier());
+    }
+
+    public static boolean hasInstanceBuildings(ServerLevel level) {
+        return !BuildingData.get(level.getServer()).placements(level.dimension().identifier()).isEmpty();
+    }
+
+    public static void clearScheduledState(MinecraftServer server) { SCHEDULED_CLEARS.remove(server); }
+
+    private record ScheduledClear(ServerLevel level, long nextIndex, Runnable continuation) { }
 
     private static long clearRangeBatch(ServerLevel level, BlockPos origin, int sizeX, int sizeY,
                                         int sizeZ, long start, int budget) {
         int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         long volume = (long) sizeX * sizeY * sizeZ;
-        long end = Math.min(volume, start + budget);
+        long end = Math.min(volume, start + BlockCleanupBudget.reserve(level.getServer(), budget));
         long layer = (long) sizeX * sizeZ;
         for (long index = start; index < end; index++) {
             int y = (int) (index / layer);

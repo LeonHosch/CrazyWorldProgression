@@ -15,10 +15,10 @@ public class CrazyWorldProgressionClient implements ClientModInitializer {
 		AreaSelectionClient.initialize();
 		SkillTreeClient.initialize();
 		PortalClientRenderer.initialize();
+		WaypointClient.initialize();
 		PortalPlayerVisibility.initialize();
 		BuildingPreviewRenderer.initialize();
 		PortalEntryPromptClient.initialize();
-		PortalGroupClient.initialize();
 		PartyScreen.initialize();
 		MobForgeClient.initialize();
 	}

@@ -615,7 +615,12 @@ public final class RaidService {
         clearDowns(server, instance.slotDimension());
         clearEffects(level);
         clearMarkers(level);
-        resetEncounter(server, instance);
+        resetEncounter(server, instance, () -> finishWipe(server, instance, before, level));
+    }
+
+    private static void finishWipe(MinecraftServer server, PortalData.StoredInstance instance,
+                                   RaidData.Attempt before, ServerLevel level) {
+        clearDowns(server, instance.slotDimension());
         PortalDefinition portal = PortalService.portal(server, instance.portalId());
         if (portal != null && !portal.keepInventory()) {
             java.util.Set<String> wiped = new java.util.LinkedHashSet<>(RaidData.get(server)
@@ -690,20 +695,25 @@ public final class RaidService {
                 clutch ? EncounterBanner.Kind.CLUTCH : EncounterBanner.Kind.COMPLETE, "");
     }
 
-    private static void resetEncounter(MinecraftServer server, PortalData.StoredInstance instance) {
+    private static void resetEncounter(MinecraftServer server, PortalData.StoredInstance instance,
+                                       Runnable afterReset) {
         UUID instanceId = PortalService.instanceId(instance);
         MobForgeApi.cancelPocketRuns(instanceId);
         ServerLevel level = level(server, instance.slotDimension());
         if (level == null) return;
-        BuildingService.clearInstance(level);
-        // Boats, minecarts and MobForge mobs go; dropped items stay so players keep their death drops.
-        PortalTemplateService.discardEntitiesExceptDrops(level);
-        PortalTemplateService.reconstruct(server, level, instance.templateId(),
-                new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()));
-        PortalService.resetRuntimeLocations(server, instance.slotDimension());
-        PocketEditorService.startScripts(server, instance.templateId(), level,
-                new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), instanceId,
-                RaidCheckpoints.resumeFor(server, instance));
+        BuildingService.clearInstanceThen(level, () -> {
+            if (PortalService.cleanupPending(server, instance.slotDimension())
+                    || !PortalData.get(server).instances().containsKey(instance.slotDimension().toString())) return;
+            // Boats, minecarts and MobForge mobs go; dropped items stay so players keep their death drops.
+            PortalTemplateService.discardEntitiesExceptDrops(level);
+            PortalTemplateService.reconstruct(server, level, instance.templateId(),
+                    new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()));
+            PortalService.resetRuntimeLocations(server, instance.slotDimension());
+            PocketEditorService.startScripts(server, instance.templateId(), level,
+                    new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), instanceId,
+                    RaidCheckpoints.resumeFor(server, instance));
+            afterReset.run();
+        });
     }
 
     private static void clearEffects(ServerLevel level) {

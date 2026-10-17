@@ -141,12 +141,14 @@ public final class InstanceBuilds {
                     // Still sorting the template off-thread; other builds go ahead meanwhile.
                     if (!job.order.isDone()) continue;
                     int end = Math.min(job.blocks.size(), job.next + TURN);
+                    long turnStart = System.nanoTime();
                     try {
                         while (job.next < end && slice.more(done++)) job.placeNext();
                     } catch (RuntimeException exception) {
                         CrazyWorldProgression.LOGGER.error("Building instance {} failed", entry.getKey(), exception);
                         job.next = job.blocks.size();
                     }
+                    job.writer.worked(System.nanoTime() - turnStart);
                     if (job.next >= job.blocks.size()) finished.add(entry.getKey());
                     else progress = true;
                     if (!slice.hasTime()) break;
@@ -158,6 +160,7 @@ public final class InstanceBuilds {
             if (job == null) continue;
             try {
                 job.writer.finish();
+                CrazyWorldProgression.LOGGER.info("Built instance {}: {}", key, job.writer.stats());
                 job.done.run();
             } catch (RuntimeException exception) {
                 CrazyWorldProgression.LOGGER.error("Finishing instance {} failed", key, exception);

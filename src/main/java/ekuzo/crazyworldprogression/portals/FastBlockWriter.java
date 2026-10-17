@@ -52,6 +52,10 @@ final class FastBlockWriter {
     private int chunkX = Integer.MIN_VALUE;
     private int chunkZ = Integer.MIN_VALUE;
     private int chunkTick = Integer.MIN_VALUE;
+    /** Statistics for the log line written when a build or clear finishes. */
+    private final long createdNanos = System.nanoTime();
+    private long changed, lightChecks, workNanos;
+    private final it.unimi.dsi.fastutil.ints.IntOpenHashSet workTicks = new it.unimi.dsi.fastutil.ints.IntOpenHashSet();
 
     FastBlockWriter(ServerLevel level) {
         this(level, null);
@@ -100,9 +104,13 @@ final class FastBlockWriter {
         boolean wasEmpty = section.hasOnlyAir();
         BlockState old = section.setBlockState(x & 15, y & 15, z & 15, state, false);
         if (old == state && nbt == null) return;
+        changed++;
         cursor.set(x, y, z);
         if (wasEmpty != section.hasOnlyAir()) light.updateSectionStatus(SectionPos.of(cursor), section.hasOnlyAir());
-        if (LightEngine.hasDifferentLightProperties(old, state)) light.checkBlock(cursor);
+        if (LightEngine.hasDifferentLightProperties(old, state)) {
+            light.checkBlock(cursor);
+            lightChecks++;
+        }
         if (old.hasBlockEntity() && old != state) chunk.removeBlockEntity(cursor);
         if (state.hasBlockEntity()) {
             BlockEntity blockEntity = chunk.getBlockEntity(cursor.immutable(), LevelChunk.EntityCreationType.IMMEDIATE);
@@ -126,6 +134,18 @@ final class FastBlockWriter {
         if (players.isEmpty()) return;
         ClientboundLevelChunkWithLightPacket packet = new ClientboundLevelChunkWithLightPacket(finished, light, null, null);
         for (ServerPlayer player : players) player.connection.send(packet);
+    }
+
+    /** Adds the time of one slice of work to the statistics. */
+    void worked(long nanos) {
+        workNanos += nanos;
+        workTicks.add(level.getServer().getTickCount());
+    }
+
+    /** For example "120,000 blocks changed (80,000 light checks), 900 ms of work in 45 ticks, 2.3 s in all". */
+    String stats() {
+        return String.format("%,d blocks changed (%,d light checks), %,d ms of work in %d ticks, %.1f s in all",
+                changed, lightChecks, workNanos / 1_000_000L, workTicks.size(), (System.nanoTime() - createdNanos) / 1e9);
     }
 
     /** Completes every chunk that is not completed yet. */

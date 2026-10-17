@@ -257,6 +257,7 @@ public final class PortalTemplateService {
         net.minecraft.world.level.block.state.BlockState air = Blocks.AIR.defaultBlockState();
         long index = startIndex;
         // Instance deletion has the lowest priority of all block work.
+        long sliceStart = System.nanoTime();
         try (TickBudget.Slice slice = TickBudget.start(level.getServer(), TickBudget.Priority.CLEANUP)) {
             while (index < units && slice.hasTime()) {
                 long column = index / sectionsY;
@@ -274,12 +275,20 @@ public final class PortalTemplateService {
                 int z0 = Math.max(minZ, chunkZ << 4), z1 = Math.min(maxZ, (chunkZ << 4) + 15);
                 for (int y = y0; y <= y1; y++)
                     for (int z = z0; z <= z1; z++)
-                        for (int x = x0; x <= x1; x++) writer.place(chunk, section, x, y, z, air, null);
+                        for (int x = x0; x <= x1; x++) {
+                            // Reading is much cheaper than writing, and most of a volume is usually air already.
+                            if (section.getBlockState(x & 15, y & 15, z & 15).isAir()) continue;
+                            writer.place(chunk, section, x, y, z, air, null);
+                            if (section.hasOnlyAir()) break;
+                        }
             }
         }
+        writer.worked(System.nanoTime() - sliceStart);
         if (index < units) return index;
         CLEAR_WRITERS.remove(key);
         writer.finish();
+        ekuzo.crazyworldprogression.CrazyWorldProgression.LOGGER.info("Cleared instance {}: {}",
+                instance.slotDimension(), writer.stats());
         return -1L;
     }
 

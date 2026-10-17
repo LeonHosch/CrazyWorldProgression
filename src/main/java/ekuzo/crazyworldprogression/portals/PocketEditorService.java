@@ -206,16 +206,34 @@ public final class PocketEditorService {
                         : new AutoSave(state.firstTick(), now, now, null));
     }
 
-    /** Capture edited pockets after a quiet period, or periodically during continuous building. */
+    /** Workshops that had someone in them at the last check. */
+    private static final Map<MinecraftServer, java.util.Set<Identifier>> OCCUPIED = new java.util.WeakHashMap<>();
+
+    /**
+     * Saves edited pockets only while someone is in their workshop: after a quiet period, or periodically during
+     * continuous building. When the last person leaves (any way: walking out, teleporting, disconnecting,
+     * dying) the latest state is saved once. Workshops nobody is in are not saved at all.
+     */
     public static void tickAutoSave(MinecraftServer server) {
+        long now = server.getTickCount();
+        java.util.Set<Identifier> occupied = OCCUPIED.computeIfAbsent(server, ignored -> new java.util.HashSet<>());
+        if (now % 20L == 0L) {
+            for (Identifier id : pockets(server)) {
+                Identifier editor = dimension(server, id);
+                ServerLevel level = editor == null ? null : server.getLevel(ResourceKey.create(Registries.DIMENSION, editor));
+                boolean inside = level != null && !level.players().isEmpty();
+                if (inside) occupied.add(id);
+                else if (occupied.remove(id)) saveNow(server, id);
+            }
+        }
         Map<Identifier, AutoSave> pending = AUTO_SAVES.get(server);
         if (pending == null || pending.isEmpty()) return;
-        long now = server.getTickCount();
         for (var entry : List.copyOf(pending.entrySet())) {
+            Identifier id = entry.getKey();
+            if (!occupied.contains(id)) continue;
             AutoSave state = entry.getValue();
             if (now < state.nextAttemptTick() || now - state.lastTick() < SAVE_DELAY_TICKS
                     && now - state.firstTick() < MAX_SAVE_DELAY_TICKS) continue;
-            Identifier id = entry.getKey();
             saveNow(server, id);
             break;
         }

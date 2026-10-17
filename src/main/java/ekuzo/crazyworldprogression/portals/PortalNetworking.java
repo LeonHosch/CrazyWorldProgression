@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 
 /** Synchronizes lightweight portal render data without exposing or moving authoritative entry logic. */
 public final class PortalNetworking {
@@ -36,10 +37,20 @@ public final class PortalNetworking {
         PayloadTypeRegistry.serverboundPlay().register(PortalEntryResponsePayload.TYPE, PortalEntryResponsePayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(PortalGroupPayload.TYPE, PortalGroupPayload.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(PortalGroupActionPayload.TYPE, PortalGroupActionPayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(RaidCheckpointPayload.TYPE, RaidCheckpointPayload.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(RaidCheckpointResetPayload.TYPE, RaidCheckpointResetPayload.CODEC);
     }
 
     // Register the response receiver that hands confirmation back to server-authoritative portal logic.
     public static void registerServerReceiver() {
+        ServerPlayNetworking.registerGlobalReceiver(RaidCheckpointResetPayload.TYPE, (payload, context) -> {
+            ServerPlayer player = context.player();
+            Identifier portalId = Identifier.tryParse(payload.portalId());
+            if (portalId == null) return;
+            if (RaidCheckpoints.reset(player.level().getServer(), player.getUUID(), portalId))
+                player.sendSystemMessage(Component.literal("Raid checkpoint reset. Your next run starts at the first encounter."));
+            sendCheckpoint(player, portalId);
+        });
         ServerPlayNetworking.registerGlobalReceiver(PortalEntryResponsePayload.TYPE,
                 (payload, context) -> PortalService.respondToEntryPrompt(
                         context.player(), payload.portalId(), payload.accepted(), payload.riskConfirmed()));
@@ -139,6 +150,7 @@ public final class PortalNetworking {
     // Ask one client to confirm travel and describe the lifetime it is accepting.
     public static void prompt(ServerPlayer player, PortalDefinition portal, long secondsRemaining,
                               boolean existingInstance) {
+        if (portal.raidMode()) sendCheckpoint(player, portal.id());
         if (ServerPlayNetworking.canSend(player, PortalEntryPromptPayload.TYPE)) {
             ServerPlayNetworking.send(player, new PortalEntryPromptPayload(portal.id().toString(),
                     portal.effectiveDisplayName(), portal.description(), secondsRemaining, existingInstance,
@@ -146,6 +158,32 @@ public final class PortalNetworking {
                     portal.admission().mode().serializedName(), portal.admission().maxPlayers(),
                     portal.keepInventory(), portal.isExit() ? "exit" : portal.isCoordinates() ? "coordinates" : "pocket"));
         }
+    }
+
+    /** Tell the client the player's checkpoint for this raid so the entry screen can show and reset it. */
+    static void sendCheckpoint(ServerPlayer player, Identifier portalId) {
+        if (!ServerPlayNetworking.canSend(player, RaidCheckpointPayload.TYPE)) return;
+        RaidCheckpoints.Checkpoint checkpoint = RaidCheckpoints.checkpoint(player.level().getServer(), player.getUUID(), portalId);
+        long secondsLeft = checkpoint == null ? 0L
+                : Math.max(0L, (checkpoint.expiresEpochMillis() - java.time.Instant.now().toEpochMilli()) / 1000L);
+        ServerPlayNetworking.send(player, new RaidCheckpointPayload(portalId.toString(),
+                checkpoint == null ? 0 : checkpoint.encounters(), secondsLeft));
+    }
+
+    public record RaidCheckpointPayload(String portalId, int encounters, long secondsLeft) implements CustomPacketPayload {
+        public static final Type<RaidCheckpointPayload> TYPE = new Type<>(CrazyWorldProgression.id("raid_checkpoint"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, RaidCheckpointPayload> CODEC = StreamCodec.composite(
+                ByteBufCodecs.STRING_UTF8, RaidCheckpointPayload::portalId, ByteBufCodecs.VAR_INT,
+                RaidCheckpointPayload::encounters, ByteBufCodecs.VAR_LONG, RaidCheckpointPayload::secondsLeft,
+                RaidCheckpointPayload::new);
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record RaidCheckpointResetPayload(String portalId) implements CustomPacketPayload {
+        public static final Type<RaidCheckpointResetPayload> TYPE = new Type<>(CrazyWorldProgression.id("raid_checkpoint_reset"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, RaidCheckpointResetPayload> CODEC = StreamCodec.composite(
+                ByteBufCodecs.STRING_UTF8, RaidCheckpointResetPayload::portalId, RaidCheckpointResetPayload::new);
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
     public static void openGroupScreen(ServerPlayer player) {

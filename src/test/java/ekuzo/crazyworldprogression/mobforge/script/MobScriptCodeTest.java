@@ -37,16 +37,18 @@ class MobScriptCodeTest {
         if (!Files.exists(source)) return;
         MobScript script = code.decode(Files.readString(source));
         assertEquals("raidscript", script.id());
-        assertInstanceOf(MobScript.EventBoxStep.class, script.steps().get(0));
-        assertInstanceOf(MobScript.EncounterStartStep.class, script.steps().get(2));
-        assertInstanceOf(MobScript.PortalLocationStep.class, script.steps().get(4));
-        assertInstanceOf(MobScript.EncounterEndStep.class, script.steps().get(6));
+        // Check the order of the key steps rather than exact positions, so editing the dev script stays easy.
+        var steps = script.steps();
+        assertInstanceOf(MobScript.EventBoxStep.class, steps.getFirst());
+        int start = indexOf(steps, MobScript.EncounterStartStep.class);
+        int end = indexOf(steps, MobScript.EncounterEndStep.class);
+        assertTrue(start >= 0 && end > start, "encounter_start must come before encounter_end");
         assertEquals(new MobScript.LootPoolStep(net.minecraft.resources.Identifier.parse("cwp:testpool"), ""),
-                script.steps().get(7));
+                steps.get(end + 1));
         assertEquals(new MobScript.AchievementStep(
-                net.minecraft.resources.Identifier.parse("echelon-core:mysteries/raidmaster"), ""), script.steps().get(8));
-        assertInstanceOf(MobScript.BuildingStep.class, script.steps().get(9));
-        assertInstanceOf(MobScript.PortalLocationStep.class, script.steps().getLast());
+                net.minecraft.resources.Identifier.parse("echelon-core:mysteries/raidmaster"), ""), steps.get(end + 2));
+        assertTrue(indexOf(steps, MobScript.BuildingStep.class) > end);
+        assertInstanceOf(MobScript.PortalLocationStep.class, steps.getLast());
         assertEquals(script, code.decode(code.encode(script)));
     }
 
@@ -196,5 +198,10 @@ class MobScriptCodeTest {
         assertFalse(written.contains("event_box") || written.contains("wait_until") || written.contains("portal_location")
                 || written.contains("spawn") || written.contains("remove") || written.contains("clear"), written);
         assertEquals(current, code.decode(written));
+    }
+
+    private static int indexOf(java.util.List<MobScript.Step> steps, Class<?> type) {
+        for (int index = 0; index < steps.size(); index++) if (type.isInstance(steps.get(index))) return index;
+        return -1;
     }
 }

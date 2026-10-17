@@ -11,7 +11,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Opens a framed Minecraft-style destination screen before a server-authorized portal journey. */
 public final class PortalEntryPromptClient {
@@ -19,8 +21,15 @@ public final class PortalEntryPromptClient {
     private PortalEntryPromptClient() {
     }
 
+    private static final Map<String, PortalNetworking.RaidCheckpointPayload> CHECKPOINTS = new HashMap<>();
+
     // Register the clientbound travel prompt receiver.
     public static void initialize() {
+        ClientPlayNetworking.registerGlobalReceiver(PortalNetworking.RaidCheckpointPayload.TYPE, (payload, context) -> {
+            CHECKPOINTS.put(payload.portalId(), payload);
+            if (context.client().gui.screen() instanceof PortalConfirmationScreen screen
+                    && screen.payload.portalId().equals(payload.portalId())) screen.refreshCheckpoint();
+        });
         ClientPlayNetworking.registerGlobalReceiver(PortalNetworking.PortalEntryPromptPayload.TYPE,
                 (payload, context) -> open(context.client(), payload));
     }
@@ -63,6 +72,8 @@ public final class PortalEntryPromptClient {
         private boolean answered;
         private boolean finalRiskStep;
         private Button travelButton;
+        private Button resetButton;
+        private boolean confirmReset;
 
         // Store the server-issued destination data until the player makes one decision.
         private PortalConfirmationScreen(Screen parent, PortalNetworking.PortalEntryPromptPayload payload) {
@@ -80,6 +91,7 @@ public final class PortalEntryPromptClient {
             panelHeight = Math.max(payload.keepInventory() ? 0 : payload.accessMode().equals("private") ? 300 : 270,
                     Math.max(payload.accessMode().equals("private") ? 216 : 180,
                     142 + descriptionLines.size() * 10 + (payload.accessMode().equals("private") ? 36 : 0)));
+            if (checkpoint() != null) panelHeight += CHECKPOINT_ROW;
             panelLeft = (width - panelWidth) / 2;
             panelTop = (height - panelHeight) / 2;
             int buttonY = panelTop + panelHeight - 34;
@@ -98,6 +110,48 @@ public final class PortalEntryPromptClient {
                     }
                 }).bounds(panelLeft + (panelWidth - 130) / 2, buttonY - 27, 130, 20).build());
             }
+            PortalNetworking.RaidCheckpointPayload checkpoint = checkpoint();
+            if (checkpoint != null) {
+                boolean groupButton = payload.destinationKind().equals("pocket") && payload.secondsRemaining() != 0L
+                        && payload.accessMode().equals("private");
+                int resetWidth = Math.min(panelWidth - 44, 300);
+                resetButton = addRenderableWidget(Button.builder(resetLabel(checkpoint), ignored -> resetCheckpoint())
+                        .bounds(panelLeft + (panelWidth - resetWidth) / 2, buttonY - (groupButton ? 54 : 27),
+                                resetWidth, 20)
+                        .tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                                "Your party starts at the leader's checkpoint. Resetting starts your next run at the first encounter.")))
+                        .build());
+            }
+        }
+
+        private static final int CHECKPOINT_ROW = 28;
+
+        private PortalNetworking.RaidCheckpointPayload checkpoint() {
+            PortalNetworking.RaidCheckpointPayload checkpoint = CHECKPOINTS.get(payload.portalId());
+            return checkpoint == null || checkpoint.encounters() <= 0 || checkpoint.secondsLeft() <= 0 ? null : checkpoint;
+        }
+
+        private Component resetLabel(PortalNetworking.RaidCheckpointPayload checkpoint) {
+            return Component.literal(confirmReset ? "Click again to reset the checkpoint"
+                    : "Checkpoint: encounter " + (checkpoint.encounters() + 1) + " · " + formatDuration(checkpoint.secondsLeft())
+                    + " left · Reset");
+        }
+
+        private void resetCheckpoint() {
+            if (!confirmReset) {
+                confirmReset = true;
+                PortalNetworking.RaidCheckpointPayload checkpoint = checkpoint();
+                if (checkpoint != null) resetButton.setMessage(resetLabel(checkpoint));
+                return;
+            }
+            if (ClientPlayNetworking.canSend(PortalNetworking.RaidCheckpointResetPayload.TYPE))
+                ClientPlayNetworking.send(new PortalNetworking.RaidCheckpointResetPayload(payload.portalId()));
+            resetButton.active = false;
+        }
+
+        private void refreshCheckpoint() {
+            confirmReset = false;
+            rebuildWidgets();
         }
 
         // Draw a dark world overlay, shadowed panel, colored border, and requested information hierarchy.
@@ -146,7 +200,8 @@ public final class PortalEntryPromptClient {
                         0xFFD6D9DF, false);
             }
             if (!payload.keepInventory()) {
-                int warningY = panelTop + panelHeight - (payload.accessMode().equals("private") ? 127 : 102);
+                int warningY = panelTop + panelHeight - (payload.accessMode().equals("private") ? 127 : 102)
+                        - (checkpoint() != null ? CHECKPOINT_ROW : 0);
                 graphics.fill(textX - 5, warningY - 7, panelLeft + panelWidth - PANEL_PADDING + 5,
                         warningY + 62, 0xFF570B0B);
                 graphics.fill(textX - 3, warningY - 5, panelLeft + panelWidth - PANEL_PADDING + 3,

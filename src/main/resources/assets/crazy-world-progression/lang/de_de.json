@@ -74,5 +74,7 @@
   "banner.crazy-world-progression.encounter.complete": "Kampf gewonnen",
   "banner.crazy-world-progression.encounter.complete.subtitle": "Wiederbelebungen und Eintrittssperren zurückgesetzt",
   "banner.crazy-world-progression.encounter.wiped": "Raid gescheitert",
-  "banner.crazy-world-progression.encounter.wiped.subtitle": "Versuch %s ist bereit"
+  "banner.crazy-world-progression.encounter.wiped.subtitle": "Versuch %s ist bereit",
+  "banner.crazy-world-progression.encounter.resumed": "Checkpoint",
+  "banner.crazy-world-progression.encounter.resumed.subtitle": "Weiter ab Kampf %s"
 }

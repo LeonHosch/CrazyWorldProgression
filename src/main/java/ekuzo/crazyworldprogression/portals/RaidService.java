@@ -93,6 +93,10 @@ public final class RaidService {
         RaidData.get(server).remove(slot.toString());
     }
 
+    public static boolean isRaidInstance(MinecraftServer server, PortalData.StoredInstance instance) {
+        return isRaid(server, instance.slotDimension());
+    }
+
     static boolean isRaid(MinecraftServer server, Identifier dimension) {
         PortalData.StoredInstance instance = PortalData.get(server).instances().get(dimension.toString());
         PortalDefinition portal = instance == null ? null : PortalService.portal(server, instance.portalId());
@@ -131,7 +135,7 @@ public final class RaidService {
      * empty while its only player is on the death screen. Keep it while any admitted, online player is dead
      * or is recorded as down / waiting to respawn here, whether or not the encounter is active.
      */
-    static boolean retainEmpty(MinecraftServer server, PortalData.StoredInstance instance) {
+    public static boolean retainEmpty(MinecraftServer server, PortalData.StoredInstance instance) {
         if (!isRaid(server, instance.slotDimension())) return false;
         RaidData.Attempt attempt = RaidData.get(server).get(instance.slotDimension().toString());
         java.util.Set<String> dead = new java.util.HashSet<>();
@@ -364,7 +368,8 @@ public final class RaidService {
                 new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()));
         PortalService.resetRuntimeLocations(server, instance.slotDimension());
         PocketEditorService.startScripts(server, instance.templateId(), level,
-                new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), instanceId);
+                new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), instanceId,
+                RaidCheckpoints.resumeFor(server, instance));
     }
 
     private static void clearEffects(ServerLevel level) {

@@ -85,6 +85,7 @@ public class CrazyWorldProgression implements ModInitializer {
 			SkillTreeCommands.register(dispatcher);
 			CwpAdminCommands.register(dispatcher);
 			PortalCommands.registerPlayer(dispatcher);
+			ekuzo.crazyworldprogression.command.PartyCommands.register(dispatcher);
 			PostmasterCommands.register(dispatcher);
 			TitleCommands.register(dispatcher);
 		});

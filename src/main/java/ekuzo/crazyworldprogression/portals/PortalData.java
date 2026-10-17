@@ -194,6 +194,14 @@ final class PortalData extends SavedData {
                     originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, List.of());
         }
 
+        StoredInstance withAdmitted(java.util.UUID playerId) {
+            if (admittedPlayers.contains(playerId.toString())) return this;
+            var updated = new java.util.ArrayList<>(admittedPlayers);
+            updated.add(playerId.toString());
+            return new StoredInstance(portalId, templateId, slotDimension, createdEpochMillis,
+                    expiresEpochMillis, originX, originY, originZ, sizeX, sizeY, sizeZ, updated, visitors);
+        }
+
         StoredInstance withVisitor(java.util.UUID playerId) {
             if (visitors.contains(playerId.toString())) return this;
             var updated = new java.util.ArrayList<>(visitors);

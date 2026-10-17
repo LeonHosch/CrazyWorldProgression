@@ -367,6 +367,12 @@ public final class PocketEditorService {
 
     public static void startScripts(MinecraftServer server, Identifier id, ServerLevel instance,
                                     BlockPos instanceOrigin, java.util.UUID instanceId) {
+        startScripts(server, id, instance, instanceOrigin, instanceId, 0);
+    }
+
+    /** resumeEncounters fast-forwards each script past that many completed encounters (raid checkpoints). */
+    public static void startScripts(MinecraftServer server, Identifier id, ServerLevel instance,
+                                    BlockPos instanceOrigin, java.util.UUID instanceId, int resumeEncounters) {
         PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
         BlockPos sourceOrigin = PocketEditorData.get(server).captureOrigin(id);
         if (sourceOrigin == null && template != null) {
@@ -390,7 +396,7 @@ public final class PocketEditorService {
                 var anchors = java.util.Map.of("origin", Vec3.atBottomCenterOf(instanceOrigin),
                         "pocket_spawn", Vec3.atBottomCenterOf(spawn),
                         "arena_center", Vec3.atBottomCenterOf(center));
-                MobForge.SCRIPT_EXECUTOR.run(translated, instance, anchors, instanceId, instanceId, true);
+                MobForge.SCRIPT_EXECUTOR.run(translated, instance, anchors, instanceId, instanceId, true, resumeEncounters);
             } catch (RuntimeException exception) {
                 CrazyWorldProgression.LOGGER.error("Could not start MobForge script {} for pocket {}", scriptId, id, exception);
             }

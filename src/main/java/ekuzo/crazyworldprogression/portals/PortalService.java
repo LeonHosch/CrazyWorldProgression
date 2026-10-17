@@ -49,6 +49,9 @@ public final class PortalService {
     private static final Map<MinecraftServer, Map<UUID, Long>> COORDINATE_TRAVEL_TICKS = new WeakHashMap<>();
     private static final Map<MinecraftServer, Map<UUID, java.util.ArrayDeque<ReturnPoint>>> RETURN_POINTS = new WeakHashMap<>();
     private static final Map<MinecraftServer, Map<Identifier, CleanupTask>> CLEANUPS = new WeakHashMap<>();
+    /** How long an empty private instance waits for its party to come back (disconnects, /leave). */
+    public static final long REJOIN_GRACE_TICKS = 5L * 60L * 20L;
+    private static final Map<MinecraftServer, Map<Identifier, Long>> EMPTY_SINCE = new WeakHashMap<>();
 
     // Prevent instantiation of the server portal service.
     private PortalService() {
@@ -102,8 +105,10 @@ public final class PortalService {
             boolean unauthorizedInstance = currentInstance != null
                     && !currentInstance.admittedPlayers().isEmpty()
                     && !currentInstance.admittedPlayers().contains(player.getUUID().toString());
+            boolean partyMember = currentInstance != null && !currentInstance.admittedPlayers().isEmpty()
+                    && !unauthorizedInstance;
             if ((PortalRegistry.instanceSlots().contains(current)
-                    && (!RaidService.isRaid(server, current) || unauthorizedInstance))
+                    && ((!RaidService.isRaid(server, current) && !partyMember) || unauthorizedInstance))
                     || current.equals(CrazyWorldProgression.id("portal_workshop"))
                     || (PocketEditorService.isEditorDimension(current)
                     && !PocketEditorService.isAssignedDimension(server, current))) {
@@ -690,6 +695,12 @@ public final class PortalService {
             teleportInto(server, player, portal, existing);
             return;
         }
+        PortalData.StoredInstance invited = InstanceInvites.invitedInstance(server, player.getUUID(), portal.id());
+        if (invited != null) {
+            InstanceInvites.consume(server, player.getUUID());
+            joinRunningInstance(player, invited);
+            return;
+        }
         UUID leader = PortalGroups.leader(server, player.getUUID());
         if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your group leader can start private travel");
         List<UUID> members = PortalGroups.members(server, leader);
@@ -782,7 +793,8 @@ public final class PortalService {
         rebuildIndex(server);
         PortalNetworking.broadcast(server);
         PortalRegistry.created(server, view(instance));
-        PocketEditorService.startScripts(server, template.id(), destination, origin, view(instance).instanceId());
+        PocketEditorService.startScripts(server, template.id(), destination, origin, view(instance).instanceId(),
+                RaidCheckpoints.resumeFor(server, instance));
         CrazyWorldProgression.LOGGER.info("Reconstructed portal template {} in slot {} for portal {}",
                 template.id(), slot, portal.id());
         return instance;
@@ -797,12 +809,68 @@ public final class PortalService {
     }
 
     private static void expireEmptyPrivateInstances(MinecraftServer server) {
+        Map<Identifier, Long> emptySince = EMPTY_SINCE.computeIfAbsent(server, ignored -> new HashMap<>());
+        emptySince.keySet().retainAll(PortalData.get(server).instances().values().stream()
+                .map(PortalData.StoredInstance::slotDimension).collect(java.util.stream.Collectors.toSet()));
         for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
             if (instance.admittedPlayers().isEmpty()) continue;
             ServerLevel level = server.getLevel(dimensionKey(instance.slotDimension()));
-            if (level != null && level.players().isEmpty() && !RaidService.retainEmpty(server, instance))
-                expireInstance(server, instance.slotDimension());
+            if (level == null) continue;
+            if (!level.players().isEmpty() || RaidService.retainEmpty(server, instance)) {
+                emptySince.remove(instance.slotDimension());
+                continue;
+            }
+            long since = emptySince.computeIfAbsent(instance.slotDimension(), ignored -> (long) server.getTickCount());
+            if (graceOver(since, server.getTickCount())) expireInstance(server, instance.slotDimension());
         }
+    }
+
+    /** An empty private instance is released once its rejoin grace period has passed. */
+    static boolean graceOver(long emptySinceTick, long nowTick) {
+        return nowTick - emptySinceTick >= REJOIN_GRACE_TICKS;
+    }
+
+    /** The party leader of a private instance is the first admitted player (the group leader at travel). */
+    public static boolean isPartyLeader(PortalData.StoredInstance instance, UUID playerId) {
+        return !instance.admittedPlayers().isEmpty() && instance.admittedPlayers().getFirst().equals(playerId.toString());
+    }
+
+    /** Live instance the player is standing in, or null. */
+    public static PortalData.StoredInstance currentInstance(ServerPlayer player) {
+        return PortalData.get(player.level().getServer()).instances()
+                .get(player.level().dimension().identifier().toString());
+    }
+
+    /** Take every player out of the leader's instance and end it. */
+    public static int partyLeave(ServerPlayer leader) {
+        MinecraftServer server = leader.level().getServer();
+        PortalData.StoredInstance instance = currentInstance(leader);
+        if (instance == null) throw new IllegalStateException("You are not inside an instance");
+        if (!isPartyLeader(instance, leader.getUUID())) throw new IllegalStateException("Only the party leader can use /partyleave");
+        ServerLevel level = server.getLevel(dimensionKey(instance.slotDimension()));
+        int moved = 0;
+        if (level != null) for (ServerPlayer player : new ArrayList<>(level.players())) {
+            teleportBack(server, player);
+            player.sendSystemMessage(Component.literal(leader.getGameProfile().name() + " ended the activity for the party."));
+            moved++;
+        }
+        expireInstance(server, instance.slotDimension());
+        return moved;
+    }
+
+    /** Add an invited player to a running private instance and bring them in. */
+    public static void joinRunningInstance(ServerPlayer player, PortalData.StoredInstance instance) {
+        MinecraftServer server = player.level().getServer();
+        PortalData.StoredInstance live = PortalData.get(server).instances().get(instance.slotDimension().toString());
+        if (live == null || live.createdEpochMillis() != instance.createdEpochMillis())
+            throw new IllegalStateException("That instance has ended");
+        PortalDefinition portal = portal(server, live.portalId());
+        if (portal == null) throw new IllegalStateException("That instance's portal no longer exists");
+        if (!InstanceInvites.hasRoom(live.admittedPlayers(), player.getUUID().toString(), portal.admission().maxPlayers()))
+            throw new IllegalStateException("The instance is full");
+        live = live.withAdmitted(player.getUUID());
+        PortalData.get(server).putInstance(live);
+        teleportInto(server, player, portal, live);
     }
 
     // Spread destructive block removal across ticks so large expired templates cannot freeze the server.

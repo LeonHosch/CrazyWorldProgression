@@ -74,5 +74,7 @@
   "banner.crazy-world-progression.encounter.complete": "Encounter complete",
   "banner.crazy-world-progression.encounter.complete.subtitle": "Revives and entry locks reset",
   "banner.crazy-world-progression.encounter.wiped": "Raid wiped",
-  "banner.crazy-world-progression.encounter.wiped.subtitle": "Attempt %s is ready"
+  "banner.crazy-world-progression.encounter.wiped.subtitle": "Attempt %s is ready",
+  "banner.crazy-world-progression.encounter.resumed": "Checkpoint",
+  "banner.crazy-world-progression.encounter.resumed.subtitle": "Resuming at encounter %s"
 }

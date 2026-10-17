@@ -27,7 +27,8 @@ public final class EncounterBanner {
     public enum Kind {
         STARTED(0x55FF55, "Encounter started", "Each player has one revive"),
         COMPLETE(0xFFD700, "Encounter complete", "Revives and entry locks reset"),
-        WIPED(0xFF5555, "Raid wiped", "Attempt %s is ready");
+        WIPED(0xFF5555, "Raid wiped", "Attempt %s is ready"),
+        RESUMED(0x55FFFF, "Checkpoint", "Resuming at encounter %s");
 
         final int color;
         final String title;

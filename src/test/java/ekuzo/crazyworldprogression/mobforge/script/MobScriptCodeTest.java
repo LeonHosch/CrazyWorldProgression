@@ -43,7 +43,9 @@ class MobScriptCodeTest {
         assertInstanceOf(MobScript.EncounterEndStep.class, script.steps().get(6));
         assertEquals(new MobScript.LootPoolStep(net.minecraft.resources.Identifier.parse("cwp:testpool"), ""),
                 script.steps().get(7));
-        assertInstanceOf(MobScript.BuildingStep.class, script.steps().get(8));
+        assertEquals(new MobScript.AchievementStep(
+                net.minecraft.resources.Identifier.parse("echelon-core:mysteries/raidmaster"), ""), script.steps().get(8));
+        assertInstanceOf(MobScript.BuildingStep.class, script.steps().get(9));
         assertInstanceOf(MobScript.PortalLocationStep.class, script.steps().getLast());
         assertEquals(script, code.decode(code.encode(script)));
     }

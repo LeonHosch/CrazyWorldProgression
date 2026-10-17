@@ -101,5 +101,8 @@
   "message.crazy-world-progression.raid.orb_offline": "Your raid wiped while you were offline. Your inventory is in an orb at X %s, Y %s, Z %s.",
   "message.crazy-world-progression.raid.leave_blocked": "You can't leave during an encounter in this raid. Finish or wipe the encounter first.",
   "banner.crazy-world-progression.encounter.started_unlimited": "Encounter started",
-  "banner.crazy-world-progression.encounter.started_unlimited.subtitle": "Revives are unlimited"
+  "banner.crazy-world-progression.encounter.started_unlimited.subtitle": "Revives are unlimited",
+  "menu.crazy-world-progression.party": "Party",
+  "key.crazy-world-progression.open_party": "Open party screen",
+  "key.category.crazy-world-progression.party": "Parties"
 }

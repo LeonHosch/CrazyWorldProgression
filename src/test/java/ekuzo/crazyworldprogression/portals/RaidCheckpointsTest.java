@@ -43,9 +43,9 @@ class RaidCheckpointsTest {
     }
 
     @Test void inviteNeedsAFreeSlotUnlessThePlayerAlreadyBelongs() {
-        assertTrue(InstanceInvites.hasRoom(List.of("a"), "b", 2));
-        assertFalse(InstanceInvites.hasRoom(List.of("a", "b"), "c", 2));
-        assertTrue(InstanceInvites.hasRoom(List.of("a", "b"), "b", 2));
+        assertTrue(PortalService.hasRoom(List.of("a"), "b", 2));
+        assertFalse(PortalService.hasRoom(List.of("a", "b"), "c", 2));
+        assertTrue(PortalService.hasRoom(List.of("a", "b"), "b", 2));
     }
 
     @Test void emptyPrivateInstancesWaitFiveMinutesForTheirParty() {

@@ -1,21 +1,28 @@
-# Public and private portals
+# Public portals, dungeons and parties
 
-Portal access is configured per placed portal in the CWP admin portal editor or with `/cwp portals access <portal_id> public` and `/cwp portals access <portal_id> private <max_players>`. Existing portals load as public. The private limit is 1–100 players.
+Portal access is configured per placed portal in the CWP admin portal editor or with `/cwp portals access <portal_id> public` and `/cwp portals access <portal_id> dungeon <max_players>` (`private` still works as the old name). Existing portals load as public. The dungeon party limit is 1–100 players.
 
-Public portals share one active pocket instance per portal regardless of group membership, and the private group limit is ignored. They stay active when empty. A public lifetime of zero means the instance never expires automatically; an administrator can still expire it. Private portals require a positive lifetime and create a new instance for each accepted group, including a solo player. A previous visitor who returns while their lease is active re-enters that same instance without creating another. A private instance begins cleanup when its last player leaves. Multiple private instances can run concurrently while registered pocket slots are free. The default CWP slot pool is finite; when all slots are occupied, entry fails with an availability message until cleanup frees one.
+Public portals share one active pocket instance per portal for everyone, and the party limit is ignored. They stay active when empty. A public lifetime of zero means the instance never expires automatically; an administrator can still expire it. **Dungeons** need a positive lifetime and give each party (or a solo player) its own instance. Multiple dungeon instances can run at once while registered pocket slots are free. When all slots are occupied, entry fails with an availability message until cleanup frees one.
 
-## Forming a private group
+## Parties
 
-Use `/portal group` for the in-game group screen. It shows members and online players, accepts a player name for invitations, and lets an invited player accept. The same actions are available by command:
+Open the party screen with **O** (rebindable under Controls → Parties), the **Party** button in the Esc menu, or `/party`. The left side shows your party; the right side is the **party browser**.
 
-- `/portal group invite <player>`
-- `/portal group accept <leader>`
-- `/portal group leave`
-- `/portal group list`
+- **Creating:** give the party a name, pick its visibility and click **Create party**. A party has up to 5 members by default; the leader can set 1–10.
+- **Visibility:**
+  - **Public** parties appear in the browser and anyone can **Join** until the party is full.
+  - **Semi-private** parties appear in the browser, but **Request** sends a join request that the leader accepts or denies (on the party screen, or with the clickable chat message).
+  - **Private** parties never appear in the browser. The leader invites players by name (with name completion) and they accept on the party screen or with the clickable chat message.
+- **Leader tools:** rename, change visibility and size, accept or deny requests, invite, make someone else leader, kick, and disband.
+- **Leaving:** **Leave party** (or `/party leave`). If the leader leaves, the next member becomes leader; the last member leaving ends the party.
+- Parties are saved with the world, including offline members.
+- Commands: `/party create [name]`, `/party invite <player>`, `/party accept <leader>`, `/party decline <leader>`, `/party join <leader>` (joins or requests), `/party requests accept|deny <player>`, `/party kick <player>`, `/party promote <player>`, `/party leave`, `/party disband`. `/portal group …` still works and uses the same parties.
 
-Invitations expire after one minute. Only the leader can invite or confirm private travel. All accepted members must be online, eligible under the portal's entry policy, in the portal's world, and within 20 blocks of the portal surface when the leader confirms. Travel does not begin if any member is too far away. The group size must fit the configured limit. The whole group enters together. The saved instance records its fixed admitted roster; unused capacity never opens to other players. A subsequent group receives a different instance. Groups and invitations are temporary server-session state; admitted instance rosters persist with pocket leases.
+## Entering a dungeon
 
-`once_per_instance` allows a player to enter a later private instance. `once_ever` remains a portal-wide persistent restriction, while re-entry into a still-active lease remains allowed. Players reconnecting inside a pocket are returned to a safe world spawn, as in the existing pocket lifecycle; admitted players can re-enter while their instance still exists, but its fixed roster does not admit new arrivals after creation.
+Every party has a hidden ID. A dungeon instance belongs to the party that opened it, so entering the same portal again always leads to your party's own instance. Only the party leader can open a new instance. Party members standing within 20 blocks of the portal travel with the leader; members who were elsewhere can follow later by walking into the portal, as long as the dungeon still has room. A player who leaves the party loses access to its instance (and is taken out of it, unless leaving is blocked during a strict encounter). If they then enter the same portal, solo or with another party, a new instance is created for them. Without a party, a player has a personal instance in the same way.
+
+`once_per_instance` allows a player to enter a later instance. `once_ever` remains a portal-wide persistent restriction, while re-entry into your party's still-active instance remains allowed.
 
 ## Raid attempts
 
@@ -34,10 +41,10 @@ Administrators can list the individual leases with `/cwp portals instances list`
 ## Leaving, rejoining and inviting
 
 - `/leave` takes you out of the instance you are in, back to where you entered it.
-- `/partyleave` (party leader only) takes everyone out and ends the instance. The party leader is the group leader at the time of travel.
+- `/partyleave` (party leader only) takes everyone out and ends the instance. 
 - During an encounter of a raid whose portal does not keep inventory, `/leave` and `/partyleave` are unavailable until the encounter ends or wipes.
-- Everyone in the party that started a private instance can come back while it is running: walk into its portal again, or log back in if you logged out inside. An empty dungeon waits 5 minutes for its party before it is released, unless its scripts have completely finished: then it closes as soon as the last player leaves. A raid also stays open while any party member is dead or waiting to respawn.
-- Inside any running private instance (raid or not), `/party invite <player>` invites someone into it when a slot is free (the portal's max players). The invite lasts 5 minutes. To join, the invited player must go to that instance's entrance portal: walking into it joins, and the **[Join]** link (`/party accept <player>`) only works within 8 blocks of it. Outside an instance, `/party invite` and `/party accept` form a group before travel, the same as `/portal group invite` and `/portal group accept`.
+- Party members can come back to their dungeon while it is running: walk into its portal again, or log back in if you logged out inside. An empty dungeon waits 5 minutes for its party before it is released, unless its scripts have completely finished: then it closes as soon as the last player leaves. A raid also stays open while any party member is dead or waiting to respawn.
+- To bring someone new into a running dungeon, add them to your party. They join by walking into the dungeon's entrance portal while a slot is free.
 
 ## Raid checkpoints
 

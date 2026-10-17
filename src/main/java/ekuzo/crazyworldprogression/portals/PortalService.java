@@ -61,6 +61,7 @@ public final class PortalService {
     public static void initialize() {
         RaidService.initialize();
         InstanceEntityLeases.initialize();
+        Parties.initialize();
         EncounterBanner.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             rebuildIndex(server);
@@ -121,10 +122,8 @@ public final class PortalService {
             RaidService.onJoin(player);
             PortalNetworking.send(player);
         });
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-            clearEntryState(server, handler.getPlayer().getUUID());
-            PortalGroups.leave(handler.getPlayer());
-        });
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+                clearEntryState(server, handler.getPlayer().getUUID()));
         ServerTickEvents.END_SERVER_TICK.register(PortalService::tick);
     }
 
@@ -350,7 +349,11 @@ public final class PortalService {
             approvals.put(player.getUUID(), tick);
             approvals.entrySet().removeIf(entry -> tick - entry.getValue() > PROMPT_LIFETIME_TICKS);
         }
-        List<UUID> members = PortalGroups.members(server, leaderId);
+        List<UUID> members = PortalGroups.members(server, leaderId).stream().filter(id -> {
+            ServerPlayer member = server.getPlayerList().getPlayer(id);
+            return member != null && member.level() == player.level()
+                    && portal.isNear(member.position().add(0, 0.9, 0), GROUP_ENTRY_DISTANCE);
+        }).toList();
         for (UUID memberId : members) {
             if (approvals.containsKey(memberId)) continue;
             ServerPlayer member = server.getPlayerList().getPlayer(memberId);
@@ -697,43 +700,49 @@ public final class PortalService {
                 .findFirst().orElse(null);
     }
 
+    /**
+     * The running dungeon of this portal that belongs to the player's party (or to them alone). Leaving a party
+     * changes the key, so the next entry creates a new instance.
+     */
     private static PortalData.StoredInstance playerInstance(MinecraftServer server, Identifier portalId, UUID playerId) {
         long now = Instant.now().toEpochMilli();
+        String key = Parties.leaseKey(server, playerId);
         return PortalData.get(server).instances().values().stream()
-                .filter(instance -> instance.portalId().equals(portalId)
-                        && instance.expiresEpochMillis() > now
-                        && (instance.admittedPlayers().contains(playerId.toString())
-                            || instance.visitors().contains(playerId.toString())))
+                .filter(instance -> instance.portalId().equals(portalId) && instance.expiresEpochMillis() > now
+                        && belongsTo(Parties.leaseOf(server, instance), key, instance, playerId))
                 .findFirst().orElse(null);
+    }
+
+    /** Instances made before parties existed (no lease) still admit their original players. */
+    static boolean belongsTo(String instanceLease, String playerKey, PortalData.StoredInstance instance, UUID playerId) {
+        if (!instanceLease.isEmpty()) return instanceLease.equals(playerKey);
+        return instance.admittedPlayers().contains(playerId.toString());
+    }
+
+    static boolean hasRoom(List<String> admitted, String playerId, int maxPlayers) {
+        return admitted.contains(playerId) || admitted.size() < maxPlayers;
     }
 
     private static void enterPrivate(MinecraftServer server, ServerPlayer player, PortalDefinition portal) {
         PortalData.StoredInstance existing = playerInstance(server, portal.id(), player.getUUID());
         if (existing != null) {
-            teleportInto(server, player, portal, existing);
-            return;
-        }
-        PortalData.StoredInstance invited = InstanceInvites.invitedInstance(server, player.getUUID(), portal.id());
-        if (invited != null) {
-            InstanceInvites.consume(server, player.getUUID());
-            joinRunningInstance(player, invited);
+            // Party members who were not there at the start join through the portal while a slot is free.
+            if (existing.admittedPlayers().contains(player.getUUID().toString())) teleportInto(server, player, portal, existing);
+            else joinRunningInstance(player, existing);
             return;
         }
         UUID leader = PortalGroups.leader(server, player.getUUID());
         if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your party leader can start this dungeon");
         List<UUID> members = PortalGroups.members(server, leader);
         if (members.size() > portal.admission().maxPlayers()) {
-            throw new IllegalStateException("group exceeds this portal's " + portal.admission().maxPlayers() + " player limit");
+            throw new IllegalStateException("your party is larger than this dungeon's " + portal.admission().maxPlayers() + " player limit");
         }
+        // Everyone in the party standing at the portal travels now; the others can follow later.
         List<ServerPlayer> travelers = new ArrayList<>();
         for (UUID id : members) {
             ServerPlayer member = server.getPlayerList().getPlayer(id);
-            if (member == null) throw new IllegalStateException("all group members must be online");
-            if (!member.level().dimension().identifier().equals(portal.dimension())
-                    || !portal.isNear(member.position().add(0, 0.9, 0), GROUP_ENTRY_DISTANCE)) {
-                throw new IllegalStateException(member.getGameProfile().name()
-                        + " must be within 20 blocks of the portal");
-            }
+            if (member == null || !member.level().dimension().identifier().equals(portal.dimension())
+                    || !portal.isNear(member.position().add(0, 0.9, 0), GROUP_ENTRY_DISTANCE)) continue;
             if (!canPlayerEnter(server, member, portal)) {
                 throw new IllegalStateException(member.getGameProfile().name()
                         + " is not eligible to enter this portal");
@@ -741,7 +750,8 @@ public final class PortalService {
             travelers.add(member);
         }
         PortalData.StoredInstance instance = createInstance(server, portal,
-                members.stream().map(UUID::toString).toList());
+                travelers.stream().map(traveler -> traveler.getUUID().toString()).toList());
+        Parties.bindLease(server, instance, Parties.leaseKey(server, leader));
         try {
             for (ServerPlayer traveler : travelers) teleportInto(server, traveler, portal, instance);
         } catch (RuntimeException exception) {
@@ -900,7 +910,7 @@ public final class PortalService {
             throw new IllegalStateException("That instance has ended");
         PortalDefinition portal = portal(server, live.portalId());
         if (portal == null) throw new IllegalStateException("That instance's portal no longer exists");
-        if (!InstanceInvites.hasRoom(live.admittedPlayers(), player.getUUID().toString(), portal.admission().maxPlayers()))
+        if (!hasRoom(live.admittedPlayers(), player.getUUID().toString(), portal.admission().maxPlayers()))
             throw new IllegalStateException("The instance is full");
         live = live.withAdmitted(player.getUUID());
         PortalData.get(server).putInstance(live);

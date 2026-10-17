@@ -3,8 +3,8 @@ package ekuzo.crazyworldprogression.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
-import ekuzo.crazyworldprogression.portals.InstanceInvites;
-import ekuzo.crazyworldprogression.portals.PortalGroups;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
+import ekuzo.crazyworldprogression.portals.Parties;
 import ekuzo.crazyworldprogression.portals.PortalService;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -13,27 +13,49 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
- * Player party commands: /leave, /partyleave, and /party invite|accept|leave. Inside a running private
- * instance, /party invite lets another player join while a slot is free; outside, it forms a group before
- * travel (same as /portal group).
+ * /party opens the party screen; the subcommands do the same things from chat (the clickable chat buttons use
+ * them). /leave and /partyleave leave the current dungeon.
  */
 public final class PartyCommands {
     private PartyCommands() { }
 
+    private static final SuggestionProvider<CommandSourceStack> PLAYERS = (context, builder) ->
+            SharedSuggestionProvider.suggest(context.getSource().getOnlinePlayerNames(), builder);
+
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("leave").executes(PartyCommands::leave));
-        dispatcher.register(Commands.literal("partyleave").executes(PartyCommands::partyLeave));
+        dispatcher.register(Commands.literal("partyleave").executes(context -> run(context, () ->
+                PortalService.partyLeave(context.getSource().getPlayerOrException()))));
         dispatcher.register(Commands.literal("party")
-                .then(Commands.literal("invite").then(Commands.argument("player", StringArgumentType.word())
-                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
-                                context.getSource().getOnlinePlayerNames(), builder))
-                        .executes(PartyCommands::invite)))
-                .then(Commands.literal("accept").then(Commands.argument("player", StringArgumentType.word())
-                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
-                                context.getSource().getOnlinePlayerNames(), builder))
-                        .executes(PartyCommands::accept)))
-                .then(Commands.literal("leave").executes(context -> run(context, () ->
-                        PortalGroups.leave(context.getSource().getPlayerOrException())))));
+                .executes(context -> run(context, () -> Parties.open(context.getSource().getPlayerOrException())))
+                .then(Commands.literal("create")
+                        .executes(context -> act(context, "create", "", ""))
+                        .then(Commands.argument("name", StringArgumentType.greedyString())
+                                .executes(context -> act(context, "create", StringArgumentType.getString(context, "name"), ""))))
+                .then(player("invite", "invite"))
+                .then(player("accept", "accept_invite"))
+                .then(player("decline", "decline_invite"))
+                .then(player("join", "join_leader"))
+                .then(player("kick", "kick"))
+                .then(player("promote", "promote"))
+                .then(Commands.literal("requests")
+                        .then(player("accept", "accept_request"))
+                        .then(player("deny", "deny_request")))
+                .then(Commands.literal("leave").executes(context -> act(context, "leave", "", "")))
+                .then(Commands.literal("disband").executes(context -> act(context, "disband", "", ""))));
+    }
+
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> player(String literal, String action) {
+        return Commands.literal(literal).then(Commands.argument("player", StringArgumentType.word()).suggests(PLAYERS)
+                .executes(context -> act(context, action, StringArgumentType.getString(context, "player"), "")));
+    }
+
+    private static int act(CommandContext<CommandSourceStack> context, String action, String a, String b) {
+        return run(context, () -> {
+            ServerPlayer player = context.getSource().getPlayerOrException();
+            if (action.equals("join_leader")) Parties.joinLeader(player, a);
+            else Parties.act(player, action, a, b);
+        });
     }
 
     private static int leave(CommandContext<CommandSourceStack> context) {
@@ -43,37 +65,6 @@ public final class PartyCommands {
             player.sendSystemMessage(Component.literal(
                     "You left the activity. You can return through its portal while your party is still inside."));
         });
-    }
-
-    private static int partyLeave(CommandContext<CommandSourceStack> context) {
-        return run(context, () -> PortalService.partyLeave(context.getSource().getPlayerOrException()));
-    }
-
-    private static int invite(CommandContext<CommandSourceStack> context) {
-        return run(context, () -> {
-            ServerPlayer inviter = context.getSource().getPlayerOrException();
-            ServerPlayer target = target(context);
-            if (PortalService.inPrivateInstance(inviter))
-                InstanceInvites.invite(inviter, target);
-            else PortalGroups.invite(inviter, target);
-        });
-    }
-
-    private static int accept(CommandContext<CommandSourceStack> context) {
-        return run(context, () -> {
-            ServerPlayer player = context.getSource().getPlayerOrException();
-            ServerPlayer inviter = target(context);
-            if (InstanceInvites.hasInviteFrom(player.level().getServer(), player.getUUID(), inviter.getUUID()))
-                InstanceInvites.accept(player, inviter);
-            else PortalGroups.accept(player, inviter);
-        });
-    }
-
-    private static ServerPlayer target(CommandContext<CommandSourceStack> context) {
-        String name = StringArgumentType.getString(context, "player");
-        ServerPlayer target = context.getSource().getServer().getPlayerList().getPlayerByName(name);
-        if (target == null) throw new IllegalArgumentException("Player is not online: " + name);
-        return target;
     }
 
     private interface Action { void run() throws Exception; }

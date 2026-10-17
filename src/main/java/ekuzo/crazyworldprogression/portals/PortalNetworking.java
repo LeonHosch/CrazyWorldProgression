@@ -187,6 +187,10 @@ public final class PortalNetworking {
     }
 
     public static void openGroupScreen(ServerPlayer player) {
+        if (ServerPlayNetworking.canSend(player, Parties.StatePayload.TYPE)) {
+            Parties.open(player);
+            return;
+        }
         if (!ServerPlayNetworking.canSend(player, PortalGroupPayload.TYPE)) return;
         MinecraftServer server = player.level().getServer();
         String members = String.join(", ", PortalGroups.names(server, player.getUUID()));

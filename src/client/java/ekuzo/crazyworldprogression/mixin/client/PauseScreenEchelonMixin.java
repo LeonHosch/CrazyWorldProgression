@@ -25,5 +25,7 @@ public abstract class PauseScreenEchelonMixin {
                 ignored -> Minecraft.getInstance().gui.setScreen(new EchelonSettingsScreen(screen))).width(98).build());
         helper.addChild(Button.builder(Component.translatable("menu.crazy-world-progression.titles"),
                 ignored -> Minecraft.getInstance().gui.setScreen(new TitleSelectScreen(screen))).width(98).build());
+        helper.addChild(Button.builder(Component.translatable("menu.crazy-world-progression.party"),
+                ignored -> ekuzo.crazyworldprogression.client.PartyScreen.requestOpen()).width(204).build(), 2);
     }
 }

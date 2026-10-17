@@ -169,9 +169,10 @@ public final class RaidService {
             scheduleWipe(server, instance);
         } else {
             spawnMarker(player, spot);
-            player.sendSystemMessage(Component.translatableWithFallback(encounter
+            boolean teammatesOnly = encounter && strictEncounters(server, slot);
+            player.sendSystemMessage(Component.translatableWithFallback(teammatesOnly
                     ? "message.crazy-world-progression.raid.down_encounter" : "message.crazy-world-progression.raid.down",
-                    encounter ? "You are down. A teammate can revive you at your marker."
+                    teammatesOnly ? "You are down. A teammate can revive you at your marker."
                             : "You are down. Fly into your revive point after 5 seconds to get back up."));
         }
         return true;
@@ -185,7 +186,9 @@ public final class RaidService {
         if (before != null) {
             Map<String, String> modes = new HashMap<>(before.originalModes());
             mode = modes.remove(player.getUUID().toString());
-            data.put(down.slot(), new RaidData.Attempt(before.number(), before.deaths(), before.spentRevives(),
+            Map<String, RaidData.Spot> deaths = new HashMap<>(before.deaths());
+            deaths.remove(player.getUUID().toString());
+            data.put(down.slot(), new RaidData.Attempt(before.number(), deaths, before.spentRevives(),
                     before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive()));
         }
         finishRevive(player, down.point(), mode);
@@ -232,7 +235,8 @@ public final class RaidService {
                 Vec3 clamped = RaidDowns.leash(down.point(), player.position(), RaidDowns.LEASH_RADIUS);
                 if (clamped != player.position())
                     player.teleportTo(level, clamped.x, clamped.y, clamped.z, Set.of(), player.getYRot(), player.getXRot(), false);
-                if (encounter) continue;
+                boolean strict = strictEncounters(server, instance.slotDimension());
+                if (encounter && strict) continue;
                 long ticksDown = now - down.downedTick();
                 double distance = player.position().distanceTo(down.point());
                 if (RaidDowns.canSelfRevive(false, ticksDown, distance)) {
@@ -335,7 +339,8 @@ public final class RaidService {
             if (started != null && started.admittedPlayers().contains(id)) present.add(id);
         }
         data.encounterPlayers(slot.toString(), present);
-        EncounterBanner.show(level.players(), EncounterBanner.Kind.STARTED, "");
+        EncounterBanner.show(level.players(), strictEncounters(server, slot) ? EncounterBanner.Kind.STARTED
+                : EncounterBanner.Kind.STARTED_UNLIMITED, "");
     }
 
     public static boolean inEncounterPublic(MinecraftServer server, PortalData.StoredInstance instance) {
@@ -368,10 +373,31 @@ public final class RaidService {
         return isRaid(server, instance.slotDimension());
     }
 
+    /** Raids and dungeons share encounters, downs, wipes and checkpoints. */
     static boolean isRaid(MinecraftServer server, Identifier dimension) {
+        return isRaidPortal(portalOf(server, dimension));
+    }
+
+    public static boolean isRaidPortal(PortalDefinition portal) {
+        return portal != null && (portal.raidMode() || portal.admission().mode() == PortalDefinition.Mode.PRIVATE);
+    }
+
+    private static PortalDefinition portalOf(MinecraftServer server, Identifier dimension) {
         PortalData.StoredInstance instance = PortalData.get(server).instances().get(dimension.toString());
-        PortalDefinition portal = instance == null ? null : PortalService.portal(server, instance.portalId());
-        return portal != null && portal.raidMode();
+        return instance == null ? null : PortalService.portal(server, instance.portalId());
+    }
+
+    /**
+     * Strict encounters (raids, and dungeons without keep-inventory): one teammate revive each and no
+     * self-revive. Dungeons that keep inventory have unlimited revives during encounters.
+     */
+    static boolean strictEncounters(MinecraftServer server, Identifier dimension) {
+        PortalDefinition portal = portalOf(server, dimension);
+        return strictEncounters(portal != null && portal.raidMode(), portal == null || portal.keepInventory());
+    }
+
+    static boolean strictEncounters(boolean raidMode, boolean keepInventory) {
+        return raidMode || !keepInventory;
     }
 
     static boolean canUse(ServerPlayer player, PortalDefinition portal) {
@@ -558,7 +584,8 @@ public final class RaidService {
         String reviverId = reviver.getUUID().toString(), targetKey = targetId.toString();
         if (before == null || before.deaths().containsKey(reviverId) || reviver.isSpectator())
             throw new IllegalStateException("Only a living teammate can revive");
-        if (before.spentRevives().contains(reviverId)) throw new IllegalStateException("Your revive is already spent this attempt");
+        boolean strict = strictEncounters(server, slot);
+        if (strict && before.spentRevives().contains(reviverId)) throw new IllegalStateException("Your revive is already spent this attempt");
         RaidData.Spot spot = before.deaths().get(targetKey);
         if (spot == null) throw new IllegalStateException("That teammate is no longer down");
         ServerPlayer target = server.getPlayerList().getPlayer(targetId);
@@ -567,7 +594,7 @@ public final class RaidService {
             throw new IllegalStateException("Wait for that teammate to respawn at the rally point");
         }
         if (reviver.distanceToSqr(marker) > 25.0) throw new IllegalStateException("Move closer to the revive marker");
-        List<String> spent = new ArrayList<>(before.spentRevives()); spent.add(reviverId);
+        List<String> spent = new ArrayList<>(before.spentRevives()); if (strict) spent.add(reviverId);
         Map<String, RaidData.Spot> deaths = new HashMap<>(before.deaths()); deaths.remove(targetKey);
         Map<String, String> modes = new HashMap<>(before.originalModes()); String mode = modes.remove(targetKey);
         if (!target.teleportTo((ServerLevel) reviver.level(), spot.x(), spot.y(), spot.z(), Set.of(),

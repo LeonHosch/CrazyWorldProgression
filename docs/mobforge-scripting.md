@@ -111,14 +111,15 @@ Scripted portal `add` locations are previewed there in the same purple, using ea
 
 Each `encounter_end()` gives every party member in the instance a raid checkpoint for 24 hours. A new run, or a run restarted after a wipe, starts directly after the party leader's last completed `encounter_end()`. If that step has a `spawn`, players are moved there and it stays the rally point. Loot, achievements and other rewards right after it are skipped until the next `encounter_start()`, so they are not given twice. Without a `spawn`, players stay at the pocket's normal spawn.
 
-## Deaths in a raid
+## Deaths in raids and dungeons
 
-Players never really die inside a raid instance. Instead they go down: no death screen, they become spectators at their **revive point**, and a "Revive <name>" marker appears there. Going down and being revived never touch the inventory. A downed spectator cannot fly more than 10 blocks from the revive point.
+Raids and dungeons (portals set to **Dungeon** access) use the same rules. Players never really die inside one. Instead they go down: no death screen, they become spectators at their **revive point**, and a "Revive <name>" marker appears there. Going down and being revived never touch the inventory. A downed spectator cannot fly more than 10 blocks from the revive point.
 
 - The revive point is where they went down. If they fell out of the world, it is the last spot where they stood on solid ground, and they are moved there.
 - If they go down again within 5 seconds of getting back up, or within 20 seconds when falling out of the world or drowning, the revive point is the checkpoint spawn instead (the last `encounter_end` spawn, or the pocket's spawn).
 - Outside an encounter, after 5 seconds they can fly into their revive point to get back up there. The action bar counts down and then says so.
-- During an encounter there is no self-revive: a teammate revives them at the marker (one revive each), or the encounter wipes when everyone is down. Players who are down when an encounter starts stay down and can be revived by teammates.
+- In a dungeon that keeps inventory, encounters do not limit revives: self-revive after 5 seconds keeps working and teammates can revive as often as they like. Raids, and dungeons that do not keep inventory, use strict encounters:
+- During a strict encounter there is no self-revive: a teammate revives them at the marker (one revive each), or the encounter wipes when everyone is down. Players who are down when an encounter starts stay down and can be revived by teammates.
 
 ## Inventory orbs
 

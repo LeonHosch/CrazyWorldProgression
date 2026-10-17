@@ -83,7 +83,7 @@ public final class RaidCheckpoints extends SavedData {
     /** A new or reset instance of a raid starts at its party leader's checkpoint (the first admitted player). */
     public static int resumeFor(MinecraftServer server, PortalData.StoredInstance instance) {
         PortalDefinition portal = PortalService.portal(server, instance.portalId());
-        if (portal == null || !portal.raidMode() || instance.admittedPlayers().isEmpty()) return 0;
+        if (!RaidService.isRaidPortal(portal) || instance.admittedPlayers().isEmpty()) return 0;
         Checkpoint checkpoint = get(server).current(instance.admittedPlayers().getFirst(),
                 instance.portalId().toString(), Instant.now().toEpochMilli());
         return checkpoint == null ? 0 : checkpoint.encounters();

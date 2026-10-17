@@ -807,7 +807,7 @@ public final class PortalService {
                 origin.getX(), origin.getY(), origin.getZ(), template.sizeX(), template.sizeY(), template.sizeZ(),
                 admittedPlayers);
         PortalData.get(server).putInstance(instance);
-        if (portal.raidMode()) RaidService.prepare(server, instance);
+        if (RaidService.isRaidPortal(portal)) RaidService.prepare(server, instance);
         PortalEnvironmentService.applyTime(server, view(instance), portal.environment());
         PortalEnvironmentService.applyWeather(server, view(instance), portal.environment());
         rebuildIndex(server);

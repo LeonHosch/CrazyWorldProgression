@@ -32,4 +32,11 @@ class RaidDownsTest {
         assertEquals(10.0, clamped.distanceTo(point), 1e-9);
         assertEquals(new Vec3(0, 64, 10), clamped);
     }
+
+    @Test void onlyRaidsAndDungeonsWithoutKeepInventoryHaveStrictEncounters() {
+        assertTrue(RaidService.strictEncounters(true, true), "raid");
+        assertTrue(RaidService.strictEncounters(true, false), "raid without keep-inventory");
+        assertTrue(RaidService.strictEncounters(false, false), "dungeon without keep-inventory");
+        assertFalse(RaidService.strictEncounters(false, true), "dungeon with keep-inventory: unlimited revives");
+    }
 }

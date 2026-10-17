@@ -150,7 +150,7 @@ public final class PortalNetworking {
     // Ask one client to confirm travel and describe the lifetime it is accepting.
     public static void prompt(ServerPlayer player, PortalDefinition portal, long secondsRemaining,
                               boolean existingInstance) {
-        if (portal.raidMode()) sendCheckpoint(player, portal.id());
+        if (RaidService.isRaidPortal(portal)) sendCheckpoint(player, portal.id());
         if (ServerPlayNetworking.canSend(player, PortalEntryPromptPayload.TYPE)) {
             ServerPlayNetworking.send(player, new PortalEntryPromptPayload(portal.id().toString(),
                     portal.effectiveDisplayName(), portal.description(), secondsRemaining, existingInstance,

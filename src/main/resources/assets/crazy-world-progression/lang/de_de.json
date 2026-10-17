@@ -99,5 +99,7 @@
   "message.crazy-world-progression.raid.orb_not_yours": "Diese Inventarkugel gehört jemand anderem.",
   "message.crazy-world-progression.raid.orb_lost_offline": "Dein Raid ist gescheitert, während du offline warst, und deine Inventarkugel ist weg.",
   "message.crazy-world-progression.raid.orb_offline": "Dein Raid ist gescheitert, während du offline warst. Dein Inventar liegt in einer Kugel bei X %s, Y %s, Z %s.",
-  "message.crazy-world-progression.raid.leave_blocked": "Du kannst diesen Raid während eines Kampfes nicht verlassen. Beende den Kampf oder scheitere zuerst."
+  "message.crazy-world-progression.raid.leave_blocked": "Du kannst diesen Raid während eines Kampfes nicht verlassen. Beende den Kampf oder scheitere zuerst.",
+  "banner.crazy-world-progression.encounter.started_unlimited": "Kampf begonnen",
+  "banner.crazy-world-progression.encounter.started_unlimited.subtitle": "Unbegrenzte Wiederbelebungen"
 }

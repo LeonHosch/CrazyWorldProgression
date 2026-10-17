@@ -95,7 +95,7 @@ public final class PortalCommands {
                         .then(Commands.argument("allowed", BoolArgumentType.bool())
                                 .executes(PortalCommands::building))))
                 .then(Commands.literal("exits").then(Commands.literal("create")
-                        .then(Commands.argument("portal_id", StringArgumentType.word())
+                        .then(Commands.argument("portal_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                                 .executes(PortalCommands::createExit))))
                 .then(Commands.literal("difficulty").then(portalIdArgument()
                         .then(Commands.argument("skulls", IntegerArgumentType.integer(1, 5))
@@ -120,7 +120,7 @@ public final class PortalCommands {
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(PLANES, builder)).then(width);
         var shape = Commands.argument("shape", StringArgumentType.word())
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(SHAPES, builder)).then(plane);
-        return Commands.literal("create").then(Commands.argument("portal_id", StringArgumentType.word())
+        return Commands.literal("create").then(Commands.argument("portal_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                 .then(templateIdArgument().then(shape)));
     }
 
@@ -148,7 +148,7 @@ public final class PortalCommands {
         return Commands.literal("templates")
                 .executes(PortalCommands::templateList)
                 .then(Commands.literal("list").executes(PortalCommands::templateList))
-                .then(Commands.literal("capture").then(Commands.argument("template_id", StringArgumentType.word())
+                .then(Commands.literal("capture").then(Commands.argument("template_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                         .executes(PortalCommands::capture)));
     }
 
@@ -343,7 +343,7 @@ public final class PortalCommands {
         Identifier pocket = PocketEditorService.pocketForDimension(context.getSource().getServer(),
                 player.level().dimension().identifier());
         if (pocket == null) return failure(context, new IllegalArgumentException("Enter a pocket editor first"));
-        Identifier id = Identifier.parse(StringArgumentType.getString(context, "portal_id"));
+        Identifier id = identifierArgument(context, "portal_id");
         PortalDefinition exit = new PortalDefinition(id, player.level().dimension().identifier(),
                 PortalDefinition.Shape.RECTANGLE, PortalDefinition.Plane.XY,
                 player.getX(), player.getY() + 0.9, player.getZ(), 4, 6,
@@ -617,30 +617,31 @@ public final class PortalCommands {
     }
 
     // Create a portal-ID argument with live persistent suggestions.
-    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> portalIdArgument() {
-        return Commands.argument("portal_id", StringArgumentType.word())
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, Identifier> portalIdArgument() {
+        return Commands.argument("portal_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                         PortalService.portals(context.getSource().getServer()).stream()
                                 .map(portal -> portal.id().toString()).toList(), builder));
     }
 
     // Create a template-ID argument with live CWP-hosted suggestions.
-    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> templateIdArgument() {
-        return Commands.argument("template_id", StringArgumentType.word())
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, Identifier> templateIdArgument() {
+        return Commands.argument("template_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                         PortalTemplateService.templates(context.getSource().getServer()).stream()
                                 .map(template -> template.id().toString()).toList(), builder));
     }
 
     private static Identifier linkArgument(CommandContext<CommandSourceStack> context) {
-        String value = StringArgumentType.getString(context, "template_id");
-        return value.equalsIgnoreCase("Exit") ? PortalDefinition.EXIT_TEMPLATE : Identifier.parse(value);
+        Identifier value = net.minecraft.commands.arguments.IdentifierArgument.getId(context, "template_id");
+        return value.getPath().equalsIgnoreCase("exit") && value.getNamespace().equals("minecraft")
+                ? PortalDefinition.EXIT_TEMPLATE : value;
     }
 
-    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> linkTargetArgument() {
-        return Commands.argument("template_id", StringArgumentType.word())
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, Identifier> linkTargetArgument() {
+        return Commands.argument("template_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
-                        java.util.stream.Stream.concat(java.util.stream.Stream.of("Exit"),
+                        java.util.stream.Stream.concat(java.util.stream.Stream.of("exit"),
                                 PortalTemplateService.templates(context.getSource().getServer()).stream()
                                         .map(template -> template.id().toString())).toList(), builder));
     }
@@ -665,8 +666,15 @@ public final class PortalCommands {
     }
 
     // Parse a synchronized string argument as an ID, defaulting convenient bare names to CWP's namespace.
+    /** Accepts namespace:id; a bare name (parsed as minecraft:name) means this mod's namespace. */
     private static Identifier identifierArgument(CommandContext<CommandSourceStack> context, String name) {
-        String value = StringArgumentType.getString(context, name);
+        Object raw = context.getArgument(name, Object.class);
+        if (raw instanceof Identifier id) {
+            String typed = context.getInput();
+            boolean explicit = typed.contains(id.getNamespace() + ":" + id.getPath());
+            return explicit ? id : CrazyWorldProgression.id(id.getPath());
+        }
+        String value = raw.toString();
         return value.contains(":") ? Identifier.parse(value) : CrazyWorldProgression.id(value);
     }
 

@@ -45,6 +45,8 @@ public final class InstanceBuilds {
         final FastBlockWriter writer;
         /** Template blocks grouped chunk by chunk (bottom-up inside a chunk), worked out off the server thread. */
         final CompletableFuture<int[]> order;
+        /** Waiting for its template to be read from disk; replaced by the real job once it is. */
+        boolean held;
         int next;
 
         Job(ServerLevel level, BlockPos origin, List<StructureTemplate.StructureBlockInfo> blocks,
@@ -101,6 +103,13 @@ public final class InstanceBuilds {
                 .put(key, new Job(level, origin, blocks, chunkDone, done));
     }
 
+    /** Marks a slot's build as waiting (counts as building, does nothing) until start replaces it. */
+    static void hold(MinecraftServer server, String key) {
+        Map<String, Job> jobs = JOBS.get(server);
+        Job job = jobs == null ? null : jobs.get(key);
+        if (job != null) job.held = true;
+    }
+
     static void cancel(MinecraftServer server, String key) {
         Map<String, Job> jobs = JOBS.get(server);
         if (jobs != null) jobs.remove(key);
@@ -115,7 +124,8 @@ public final class InstanceBuilds {
     public static int percent(MinecraftServer server, String key) {
         Map<String, Job> jobs = JOBS.get(server);
         Job job = jobs == null ? null : jobs.get(key);
-        return job == null ? 100 : percent(job.next, job.blocks.size());
+        if (job == null) return 100;
+        return job.held ? 0 : percent(job.next, job.blocks.size());
     }
 
     static int percent(int placed, int total) {
@@ -134,6 +144,7 @@ public final class InstanceBuilds {
                 progress = false;
                 for (Map.Entry<String, Job> entry : jobs.entrySet()) {
                     Job job = entry.getValue();
+                    if (job.held) continue;
                     if (job.next >= job.blocks.size()) {
                         finished.add(entry.getKey());
                         continue;

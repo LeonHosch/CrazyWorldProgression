@@ -33,7 +33,7 @@ Pockets have no size limit. A new dungeon or public instance is placed over seve
 
 Deleting a pocket resets its workshop the same way in the background, at deletion's priority, and then frees the workshop slot for a new pocket. On every shutdown CWP notes the workshops no pocket uses, and on the next start, before any world loads, it deletes their folders. That gives the disk space back, since Minecraft never shrinks region files ([WorkshopWipes](../src/main/java/ekuzo/crazyworldprogression/portals/WorkshopWipes.java)).
 
-Capturing a pocket (saving it from the pocket editor) leaves air out, since instances are built into emptied slots, so a mostly empty pocket saves, loads and builds much faster. The capture itself still happens in one step, so saving a very large pocket can pause the server briefly.
+Saving a pocket from its workshop is spread over ticks too ([PocketCaptures](../src/main/java/ekuzo/crazyworldprogression/portals/PocketCaptures.java)): it finds the build's bounds chunk by chunk, reads the blocks section by section within instance creation's share of the budget (air is left out, since instances are built into emptied slots), and sorts and writes the structure file off the server thread. Chunks are loaded in the background ahead of time. Templates that are not cached yet are read and decoded off the server thread before an instance or workshop is built from them. Opening the workshop of an existing pocket builds it like an instance, and players who try to enter meanwhile are brought in when it is ready. Only the final save on server shutdown runs in one step.
 
 ## Portal contact and trust boundary
 
@@ -49,7 +49,7 @@ This shifts the broad detection loop to each client, while server work occurs on
 
 ## Known costs to measure before 1.0
 
-- [Structure capture and placement](../src/main/java/ekuzo/crazyworldprogression/portals/PortalTemplateService.java) and [building capture and placement](../src/main/java/ekuzo/crazyworldprogression/buildings/BuildingService.java) call `fillFromWorld` or `placeInWorld` synchronously. Volume limits prevent unlimited input, but a large valid template can still produce a long tick. The cleanup budget does not constrain placement.
+- [Building capture and placement](../src/main/java/ekuzo/crazyworldprogression/buildings/BuildingService.java) calls `fillFromWorld` or `placeInWorld` synchronously. Volume limits prevent unlimited input, but a large valid template can still produce a long tick. The cleanup budget does not constrain placement.
 - Encounter transitions and instance teardown have [world entity scans](../src/main/java/ekuzo/crazyworldprogression/mobforge/script/MobScriptExecutor.java), [raid entity scans](../src/main/java/ekuzo/crazyworldprogression/portals/RaidService.java), and [template entity scans](../src/main/java/ekuzo/crazyworldprogression/portals/PortalTemplateService.java). Measure them with high entity counts before adding indexes or chunk-scoped queries.
 - Script conditions that count entities in a box and many simultaneous active scripts can add repeated per-tick queries. Measure actual script count and entity density before changing condition semantics.
 - [PortalNetworking](../src/main/java/ekuzo/crazyworldprogression/portals/PortalNetworking.java) reconstructs and hashes the portal snapshot once per second even when unchanged. If portal counts grow substantially, measure this path and consider dirty-state invalidation.

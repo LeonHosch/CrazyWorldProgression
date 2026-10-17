@@ -994,12 +994,15 @@ public final class CwpAdminModule {
                         Integer.parseInt(required(values, "pocket_spawn_y")),
                         Integer.parseInt(required(values, "pocket_spawn_z")))
                 : PocketEditorService.entry(player.level().getServer(), id);
-        PortalTemplateService.TemplateInfo template = PortalTemplateService.captureAll(player.level().getServer(),
-                (net.minecraft.server.level.ServerLevel) player.level(), id, preferred,
-                player.getName().getString());
+        // Saving runs over several ticks; the result arrives as a chat message.
+        ekuzo.crazyworldprogression.portals.PocketCaptures.start(player.level().getServer(),
+                (net.minecraft.server.level.ServerLevel) player.level(), id, preferred, player.getName().getString(),
+                template -> player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                        "Saved pocket " + id + " · " + template.volume() + " blocks")),
+                exception -> player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                        "Saving pocket " + id + " failed: " + exception.getMessage())));
         AreaSelectionService.clear(player);
-        return AdminPanelRegistry.ActionResult.success("Saved pocket " + id + " · " + template.volume() + " blocks",
-                POCKETS);
+        return AdminPanelRegistry.ActionResult.success("Saving pocket " + id + "…", POCKETS);
     }
 
     // Create a reusable portal definition without a placement.

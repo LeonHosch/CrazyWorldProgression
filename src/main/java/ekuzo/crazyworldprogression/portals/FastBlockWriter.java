@@ -78,11 +78,19 @@ final class FastBlockWriter {
 
     /** Asks the chunk system to load a chunk in the background (off the server thread) and keep it loaded. */
     void prefetch(int cx, int cz) {
-        if (ticket != null) level.getChunkSource().addTicketWithRadius(ticket, new ChunkPos(cx, cz), 0);
+        prefetch(level, cx, cz);
     }
 
     /** True when the chunk is loaded, so working on it does not load it from disk on the server thread. */
     boolean ready(int cx, int cz) {
+        return ready(level, cx, cz);
+    }
+
+    static void prefetch(ServerLevel level, int cx, int cz) {
+        if (ticket != null) level.getChunkSource().addTicketWithRadius(ticket, new ChunkPos(cx, cz), 0);
+    }
+
+    static boolean ready(ServerLevel level, int cx, int cz) {
         return ticket == null || level.getChunkSource().getChunkNow(cx, cz) != null;
     }
 

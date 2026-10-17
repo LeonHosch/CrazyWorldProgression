@@ -64,6 +64,7 @@ public final class PortalService {
         InstanceEntityLeases.initialize();
         InstanceBuilds.initialize();
         WorkshopWipes.initialize();
+        PocketCaptures.initialize();
         ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
         StressPocket.initialize();
         Parties.initialize();
@@ -435,6 +436,13 @@ public final class PortalService {
         Identifier dimension = PocketEditorService.ensureEditor(server, pocketId);
         ServerLevel editor = server.getLevel(dimensionKey(dimension));
         if (editor == null) throw new IllegalStateException("Pocket editor dimension is not registered");
+        if (PocketEditorService.preparing(server, pocketId)) {
+            WORKSHOP_WAITERS.computeIfAbsent(server, ignored -> new HashMap<>())
+                    .computeIfAbsent(dimension, ignored -> new java.util.LinkedHashMap<>()).put(player.getUUID(), pocketId);
+            player.sendSystemMessage(Component.literal("The workshop of " + pocketId + " is being prepared ("
+                    + InstanceBuilds.percent(server, dimension.toString()) + "%). You will be brought in when it is ready."));
+            return;
+        }
         if (PocketEditorService.isEditorDimension(player.level().dimension().identifier())) {
             leavePocketEditor(player);
         }
@@ -448,6 +456,24 @@ public final class PortalService {
             throw new IllegalStateException("Pocket editor teleport was rejected; try again");
         }
         player.resetFallDistance();
+    }
+
+    private static final Map<MinecraftServer, Map<Identifier, Map<UUID, Identifier>>> WORKSHOP_WAITERS = new WeakHashMap<>();
+
+    /** Brings players who waited for a workshop in once it is built (or tells them it failed). */
+    static void finishWorkshop(MinecraftServer server, Identifier dimension) {
+        Map<Identifier, Map<UUID, Identifier>> waiting = WORKSHOP_WAITERS.get(server);
+        Map<UUID, Identifier> players = waiting == null ? null : waiting.remove(dimension);
+        if (players == null) return;
+        players.forEach((uuid, pocketId) -> {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player == null) return;
+            try {
+                enterPocketEditor(player, pocketId);
+            } catch (RuntimeException exception) {
+                player.sendSystemMessage(Component.literal("Could not enter the workshop: " + exception.getMessage()));
+            }
+        });
     }
 
     // Return an administrator from any pocket editor to their remembered source.
@@ -524,6 +550,7 @@ public final class PortalService {
         // Block work by priority after scripts: instance creation (and its clears), then deletion cleanup.
         BuildingService.tickScheduledClears(server);
         InstanceBuilds.tick(server);
+        PocketCaptures.tick(server);
         processCleanups(server);
         WorkshopWipes.tick(server);
         tickPreparing(server);
@@ -915,6 +942,10 @@ public final class PortalService {
             CrazyWorldProgression.LOGGER.info("Reconstructed portal template {} in slot {} for portal {}",
                     template.id(), slot, portal.id());
             finishPreparing(server, live);
+        }, exception -> {
+            CrazyWorldProgression.LOGGER.error("Could not build template {} for portal {}", template.id(), portal.id(),
+                    exception);
+            expireInstance(server, slot);
         });
         return instance;
     }

@@ -519,11 +519,16 @@ public final class PortalCommands {
         try {
             Identifier id = identifierArgument(context, "template_id");
             var player = context.getSource().getPlayerOrException();
-            PortalTemplateService.TemplateInfo template = PortalTemplateService.captureAll(
-                    context.getSource().getServer(), context.getSource().getLevel(), id, player.blockPosition(),
-                    context.getSource().getTextName());
-            return success(context, "Captured template " + id + " (" + template.sizeX() + "x"
-                    + template.sizeY() + "x" + template.sizeZ() + ", " + template.volume() + " blocks)");
+            var source = context.getSource();
+            // Saving runs over several ticks; the result arrives as a message.
+            ekuzo.crazyworldprogression.portals.PocketCaptures.start(source.getServer(), source.getLevel(), id,
+                    player.blockPosition(), source.getTextName(),
+                    template -> source.sendSuccess(() -> Component.literal("Captured template " + id + " ("
+                            + template.sizeX() + "x" + template.sizeY() + "x" + template.sizeZ() + ", "
+                            + template.volume() + " blocks)"), true),
+                    exception -> source.sendFailure(Component.literal("Saving pocket " + id + " failed: "
+                            + exception.getMessage())));
+            return success(context, "Saving pocket " + id + "…");
         } catch (Exception exception) {
             return failure(context, exception);
         }

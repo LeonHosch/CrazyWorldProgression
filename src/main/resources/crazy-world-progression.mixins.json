@@ -9,7 +9,9 @@
     "PocketWeatherMixin",
     "PlayerInventoryRuleMixin",
     "ServerPlayerMixin",
-    "StructureTemplateAccessor"
+    "StructureTemplateAccessor",
+    "StructureTemplateManagerAccessor",
+    "StructureTemplatePaletteInvoker"
   ],
   "client": [
     "client.AvatarRenderStateTitleMixin",

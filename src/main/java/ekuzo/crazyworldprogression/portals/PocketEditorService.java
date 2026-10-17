@@ -100,7 +100,14 @@ public final class PocketEditorService {
             Identifier dimension = slotDimension(slot);
             ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
             if (level == null) throw new IllegalStateException("Pocket editor dimension is not registered: " + dimension);
-            if (reconstruct) PortalTemplateService.reconstruct(server, level, id, ORIGIN);
+            // An existing pocket is built into its new workshop over several ticks; players who try to enter
+            // meanwhile are brought in when it is ready.
+            if (reconstruct) PortalTemplateService.reconstructThen(server, level, id, ORIGIN,
+                    () -> PortalService.finishWorkshop(server, dimension),
+                    exception -> {
+                        CrazyWorldProgression.LOGGER.error("Could not rebuild the workshop of pocket {}", id, exception);
+                        PortalService.finishWorkshop(server, dimension);
+                    });
             else if (level.getBlockState(ORIGIN.below()).isAir()) {
                 level.setBlock(ORIGIN.below(), Blocks.STONE.defaultBlockState(), 3);
             }
@@ -214,31 +221,46 @@ public final class PocketEditorService {
         }
     }
 
-    /** Save pending build edits immediately when leaving an editor or stopping the server. */
+    /**
+     * Starts saving pending build edits right away (when leaving a workshop or after the autosave delay). The save
+     * runs over several ticks; returns false only when it could not even start.
+     */
     public static boolean saveNow(MinecraftServer server, Identifier id) {
         Map<Identifier, AutoSave> pending = AUTO_SAVES.get(server);
         if (pending == null || !pending.containsKey(id)) return true;
+        if (PocketCaptures.capturing(server, id) || preparing(server, id)) return true;
         Identifier editor = dimension(server, id);
         if (editor == null) { pending.remove(id); return true; }
         ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, editor));
         if (level == null) return false;
         try {
-            PortalTemplateService.captureAll(server, level, id, entry(server, id), "CWP autosave");
-            pending.remove(id);
+            PocketCaptures.start(server, level, id, entry(server, id), "CWP autosave", info -> { },
+                    exception -> autoSaveFailed(server, id, exception));
             return true;
         } catch (RuntimeException exception) {
-            AutoSave state = pending.get(id);
-            String error = exception.getMessage() == null ? exception.getClass().getSimpleName()
-                    : exception.getMessage();
-            if (state != null) {
-                pending.put(id, new AutoSave(state.firstTick(), state.lastTick(),
-                        server.getTickCount() + RETRY_DELAY_TICKS, error));
-                if (!error.equals(state.error())) {
-                    CrazyWorldProgression.LOGGER.warn("Automatic save of pocket {} failed: {}", id, error);
-                }
-            }
+            autoSaveFailed(server, id, exception);
             return false;
         }
+    }
+
+    private static void autoSaveFailed(MinecraftServer server, Identifier id, RuntimeException exception) {
+        Map<Identifier, AutoSave> pending = AUTO_SAVES.get(server);
+        AutoSave state = pending == null ? null : pending.get(id);
+        String error = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+        if (state != null) {
+            pending.put(id, new AutoSave(state.firstTick(), state.lastTick(),
+                    server.getTickCount() + RETRY_DELAY_TICKS, error));
+            if (!error.equals(state.error())) {
+                CrazyWorldProgression.LOGGER.warn("Automatic save of pocket {} failed: {}", id, error);
+            }
+        }
+    }
+
+    /** A save that started at startTick finished: edits made before it are saved, later ones still pending. */
+    static void savedAt(MinecraftServer server, Identifier id, long startTick) {
+        Map<Identifier, AutoSave> pending = AUTO_SAVES.get(server);
+        AutoSave state = pending == null ? null : pending.get(id);
+        if (state != null && state.lastTick() < startTick) pending.remove(id);
     }
 
     public static String autoSaveStatus(MinecraftServer server, Identifier id) {
@@ -249,9 +271,21 @@ public final class PocketEditorService {
                 : "Automatic save failed: " + state.error();
     }
 
+    /** On server stop: finish running saves and save pending edits, in one step since the server is stopping. */
     public static void flushAutoSaves(MinecraftServer server) {
+        PocketCaptures.finishAll(server);
         Map<Identifier, AutoSave> pending = AUTO_SAVES.get(server);
-        if (pending != null) for (Identifier id : List.copyOf(pending.keySet())) saveNow(server, id);
+        if (pending == null) return;
+        for (Identifier id : List.copyOf(pending.keySet())) {
+            Identifier editor = dimension(server, id);
+            ServerLevel level = editor == null ? null : server.getLevel(ResourceKey.create(Registries.DIMENSION, editor));
+            if (level == null || preparing(server, id)) continue;
+            try {
+                PortalTemplateService.captureAll(server, level, id, entry(server, id), "CWP autosave");
+            } catch (RuntimeException exception) {
+                CrazyWorldProgression.LOGGER.warn("Saving pocket {} on shutdown failed: {}", id, exception.getMessage());
+            }
+        }
     }
 
     public static void clearAutoSave(MinecraftServer server, Identifier id) {
@@ -266,7 +300,8 @@ public final class PocketEditorService {
     private record AutoSave(long firstTick, long lastTick, long nextAttemptTick, String error) { }
 
     /** Scan edited chunks plus the last saved footprint and find a supported entry block. */
-    public static BuildScan scanBuild(MinecraftServer server, ServerLevel level, Identifier id, BlockPos preferred) {
+    /** The chunk columns a pocket save has to look at: built chunks, the previous saved area, around the entry. */
+    static Set<Long> scanChunks(MinecraftServer server, ServerLevel level, Identifier id, BlockPos preferred) {
         Identifier assigned = dimension(server, id);
         if (assigned == null || !assigned.equals(level.dimension().identifier())) {
             throw new IllegalArgumentException("Enter this pocket's build dimension before saving");
@@ -296,14 +331,22 @@ public final class PocketEditorService {
             for (int cz = preferredChunkZ - 2; cz <= preferredChunkZ + 2; cz++) chunks.add(ChunkPos.pack(cx, cz));
         }
         if (chunks.size() > 8192) throw new IllegalArgumentException("Pocket spans too many chunks to save");
-        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
-        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
-        BlockPos safeSpawn = null;
-        long bestDistance = Long.MAX_VALUE;
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        for (long packed : chunks) {
-            int chunkX = ChunkPos.getX(packed), chunkZ = ChunkPos.getZ(packed);
-            LevelChunk chunk = level.getChunk(chunkX, chunkZ);
+        return chunks;
+    }
+
+    /** Finds a build's bounds and a safe entry point chunk by chunk, so a save can spread it over ticks. */
+    static final class BuildScanner {
+        private final BlockPos preferred;
+        private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        private int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        private int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        private BlockPos safeSpawn;
+        private long bestDistance = Long.MAX_VALUE;
+
+        BuildScanner(BlockPos preferred) { this.preferred = preferred; }
+
+        void scan(ServerLevel level, LevelChunk chunk) {
+            int chunkX = chunk.getPos().x(), chunkZ = chunk.getPos().z();
             LevelChunkSection[] sections = chunk.getSections();
             for (int index = 0; index < sections.length; index++) {
                 LevelChunkSection section = sections[index];
@@ -330,12 +373,15 @@ public final class PocketEditorService {
                 }
             }
         }
-        if (safeSpawn == null) throw new IllegalArgumentException("Build a solid floor with two air blocks above it before saving");
-        maxY = Math.max(maxY, safeSpawn.getY() + 1);
-        BlockPos first = new BlockPos(minX, minY, minZ);
-        BlockPos last = new BlockPos(maxX, maxY, maxZ);
-        long volume = ((long) maxX - minX + 1) * ((long) maxY - minY + 1) * ((long) maxZ - minZ + 1);
-        return new BuildScan(first, last, safeSpawn, volume);
+
+        BuildScan result() {
+            if (safeSpawn == null) throw new IllegalArgumentException("Build a solid floor with two air blocks above it before saving");
+            int top = Math.max(maxY, safeSpawn.getY() + 1);
+            BlockPos first = new BlockPos(minX, minY, minZ);
+            BlockPos last = new BlockPos(maxX, top, maxZ);
+            long volume = ((long) maxX - minX + 1) * ((long) top - minY + 1) * ((long) maxZ - minZ + 1);
+            return new BuildScan(first, last, safeSpawn, volume);
+        }
     }
 
     public record BuildScan(BlockPos first, BlockPos last, BlockPos spawn, long volume) { }
@@ -465,8 +511,16 @@ public final class PocketEditorService {
         return translated.toString();
     }
 
+    /** True while an existing pocket is still being built into its workshop. */
+    public static boolean preparing(MinecraftServer server, Identifier id) {
+        Identifier editor = dimension(server, id);
+        return editor != null && InstanceBuilds.building(server, editor.toString());
+    }
+
     public static boolean delete(MinecraftServer server, Identifier id) throws java.io.IOException {
         if (!exists(server, id)) return false;
+        if (PocketCaptures.capturing(server, id)) throw new IllegalStateException("This pocket is being saved; try again in a moment");
+        if (preparing(server, id)) InstanceBuilds.cancel(server, dimension(server, id).toString());
         Identifier editor = dimension(server, id);
         if (editor != null && PortalService.portals(server).stream()
                 .anyMatch(portal -> PortalService.locations(server, portal.id()).values().stream()

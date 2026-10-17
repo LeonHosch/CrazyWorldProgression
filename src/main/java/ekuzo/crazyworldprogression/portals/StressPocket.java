@@ -61,6 +61,8 @@ public final class StressPocket {
     public static void start(ServerPlayer player, Identifier id, int sizeX, int sizeY, int sizeZ) {
         MinecraftServer server = player.level().getServer();
         if (JOBS.containsKey(server)) throw new IllegalStateException("A test pocket is already being generated");
+        if (PocketEditorService.exists(server, id) && PocketEditorService.preparing(server, id))
+            throw new IllegalStateException("This pocket's workshop is still being prepared");
         if (sizeX < 16 || sizeZ < 16 || sizeY < 6) throw new IllegalArgumentException("Use at least 16 x 6 x 16");
         Identifier dimension = PocketEditorService.exists(server, id) ? PocketEditorService.dimension(server, id)
                 : PocketEditorService.create(server, id);
@@ -116,18 +118,25 @@ public final class StressPocket {
         double generateSeconds = (System.nanoTime() - job.startedNanos) / 1e9;
         long captureStart = System.nanoTime();
         try {
-            PortalTemplateService.captureAll(server, job.level, job.id, ORIGIN.offset(8, 1, 8), "stress test");
-            double captureSeconds = (System.nanoTime() - captureStart) / 1e9;
-            String message = String.format("Test pocket %s saved: %,d blocks of volume, %,d non-air. Generation %.1f s "
-                    + "(spread over ticks), saving %.1f s (one step). Link a portal to it to test instance building.",
-                    job.id, job.volume, job.solid, generateSeconds, captureSeconds);
-            CrazyWorldProgression.LOGGER.info(message);
-            if (requester != null) requester.sendSystemMessage(Component.literal(message));
+            PocketCaptures.start(server, job.level, job.id, ORIGIN.offset(8, 1, 8), "stress test", info -> {
+                double captureSeconds = (System.nanoTime() - captureStart) / 1e9;
+                String message = String.format("Test pocket %s saved: %,d blocks of volume, %,d non-air. Generation "
+                        + "%.1f s, saving %.1f s (both spread over ticks). Link a portal to it to test instance building.",
+                        job.id, job.volume, job.solid, generateSeconds, captureSeconds);
+                CrazyWorldProgression.LOGGER.info(message);
+                ServerPlayer player = server.getPlayerList().getPlayer(job.requester);
+                if (player != null) player.sendSystemMessage(Component.literal(message));
+            }, exception -> saveFailed(server, job, exception));
         } catch (RuntimeException exception) {
-            CrazyWorldProgression.LOGGER.error("Saving test pocket {} failed", job.id, exception);
-            if (requester != null) requester.sendSystemMessage(Component.literal("Saving the test pocket failed: "
-                    + exception.getMessage()));
+            saveFailed(server, job, exception);
         }
+    }
+
+    private static void saveFailed(MinecraftServer server, Job job, RuntimeException exception) {
+        CrazyWorldProgression.LOGGER.error("Saving test pocket {} failed", job.id, exception);
+        ServerPlayer player = server.getPlayerList().getPlayer(job.requester);
+        if (player != null) player.sendSystemMessage(Component.literal("Saving the test pocket failed: "
+                + exception.getMessage()));
     }
 
     /** Rooms of 16 x 16: floor, walls with doorways, ceiling with skylights, and per-room contents. */

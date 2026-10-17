@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.portals;
 
+import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.cleanup.TickBudget;
 
 import net.minecraft.core.BlockPos;
@@ -40,33 +41,13 @@ public final class PortalTemplateService {
     /** Capture every built block in this pocket's discovered chunks, without corner selection. */
     public static TemplateInfo captureAll(MinecraftServer server, ServerLevel source, Identifier id,
                                           BlockPos preferredSpawn, String author) {
-        PocketEditorService.BuildScan build = PocketEditorService.scanBuild(server, source, id, preferredSpawn);
-        return capture(server, source, id, build.first(), build.last(), build.spawn(), author);
+        // One step; only for server shutdown. Everything else saves over several ticks through PocketCaptures.
+        return PocketCaptures.runNow(server, source, id, preferredSpawn, author);
     }
 
-    // Persist the automatically discovered build and its supported entry block.
-    private static TemplateInfo capture(MinecraftServer server, ServerLevel source, Identifier id,
-                                       BlockPos first, BlockPos second, BlockPos spawn, String author) {
-        Identifier editor = PocketEditorService.dimension(server, id);
-        if (editor == null || !editor.equals(source.dimension().identifier())) {
-            throw new IllegalArgumentException("Create this pocket and enter its build dimension before capture");
-        }
-        BlockPos minimum = new BlockPos(Math.min(first.getX(), second.getX()), Math.min(first.getY(), second.getY()),
-                Math.min(first.getZ(), second.getZ()));
-        BlockPos maximum = new BlockPos(Math.max(first.getX(), second.getX()), Math.max(first.getY(), second.getY()),
-                Math.max(first.getZ(), second.getZ()));
-        Vec3i size = new Vec3i(maximum.getX() - minimum.getX() + 1, maximum.getY() - minimum.getY() + 1,
-                maximum.getZ() - minimum.getZ() + 1);
-        StructureTemplate structure = server.getStructureManager().getOrCreate(id);
-        structure.setAuthor(author);
-        // Pocket templates contain builds. Capturing loose item entities would replay dropped
-        // doors and other pickups every time a new instance is reconstructed.
-        // Air is left out: instances are built into emptied slots, so it would only cost saving, loading and
-        // placing time (most of a large pocket's volume is air).
-        structure.fillFromWorld(source, minimum, size, false, List.of(Blocks.AIR, Blocks.CAVE_AIR, Blocks.VOID_AIR));
-        if (!server.getStructureManager().save(id)) {
-            throw new IllegalStateException("Minecraft could not save structure template " + id);
-        }
+    /** Records a saved pocket's size, entry and origin once its structure file is written. */
+    static TemplateInfo storeCaptured(MinecraftServer server, Identifier id, Vec3i size, BlockPos minimum,
+                                      BlockPos spawn, String author) {
         PortalTemplateData.PortalTemplate metadata = new PortalTemplateData.PortalTemplate(id,
                 size.getX(), size.getY(), size.getZ(), spawn.getX() - minimum.getX(),
                 spawn.getY() - minimum.getY(), spawn.getZ() - minimum.getZ(), author);
@@ -74,8 +55,42 @@ public final class PortalTemplateService {
         PocketEditorService.setEntry(server, id, spawn);
         PocketEditorService.setCaptureOrigin(server, id, minimum);
         PortalService.refreshProjectedPortals(server);
-        PocketEditorService.clearAutoSave(server, id);
         return view(metadata);
+    }
+
+    /**
+     * Runs then with a template on the server thread. A template not in Minecraft's cache yet is read and
+     * decoded off the server thread first, so a large pocket does not stall the tick.
+     */
+    static void loadTemplateThen(MinecraftServer server, Identifier id,
+                                 java.util.function.Consumer<StructureTemplate> then,
+                                 java.util.function.Consumer<RuntimeException> failed) {
+        var manager = (ekuzo.crazyworldprogression.mixin.StructureTemplateManagerAccessor) server.getStructureManager();
+        java.util.Optional<StructureTemplate> cached = manager.cwp$repository().get(id);
+        if (cached != null) {
+            if (cached.isPresent()) then.accept(cached.get());
+            else failed.accept(new IllegalStateException("Missing structure NBT for portal template " + id));
+            return;
+        }
+        List<net.minecraft.world.level.levelgen.structure.templatesystem.loader.TemplateSource> sources =
+                List.copyOf(manager.cwp$sources());
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            for (var source : sources) {
+                java.util.Optional<StructureTemplate> loaded = source.load(id);
+                if (loaded.isPresent()) return loaded;
+            }
+            return java.util.Optional.<StructureTemplate>empty();
+        }).whenComplete((loaded, error) -> server.execute(() -> {
+            if (error != null) {
+                failed.accept(new IllegalStateException("Could not load portal template " + id, error));
+                return;
+            }
+            // Something may have saved or loaded it meanwhile; that version wins.
+            java.util.Optional<StructureTemplate> current = manager.cwp$repository().putIfAbsent(id, loaded);
+            java.util.Optional<StructureTemplate> result = current != null ? current : loaded;
+            if (result.isPresent()) then.accept(result.get());
+            else failed.accept(new IllegalStateException("Missing structure NBT for portal template " + id));
+        }));
     }
 
     // Return all CWP-hosted templates in deterministic identifier order.
@@ -117,26 +132,43 @@ public final class PortalTemplateService {
      */
     static void reconstructThen(MinecraftServer server, ServerLevel destination, Identifier id, BlockPos origin,
                                 Runnable done) {
+        reconstructThen(server, destination, id, origin, done, exception -> CrazyWorldProgression.LOGGER.error(
+                "Could not build portal template {} in {}", id, destination.dimension().identifier(), exception));
+    }
+
+    /** Like {@link #reconstructThen(MinecraftServer, ServerLevel, Identifier, BlockPos, Runnable)}, reporting failures. */
+    static void reconstructThen(MinecraftServer server, ServerLevel destination, Identifier id, BlockPos origin,
+                                Runnable done, java.util.function.Consumer<RuntimeException> failed) {
         PortalTemplateData.PortalTemplate metadata = requireMetadata(server, id);
-        StructureTemplate structure = server.getStructureManager().get(id)
-                .orElseThrow(() -> new IllegalStateException("Missing structure NBT for portal template " + id));
-        if (structure.getSize().getX() != metadata.sizeX() || structure.getSize().getY() != metadata.sizeY()
-                || structure.getSize().getZ() != metadata.sizeZ()) {
-            throw new IllegalStateException("Template metadata size no longer matches structure NBT for " + id);
-        }
-        var palettes = ((ekuzo.crazyworldprogression.mixin.StructureTemplateAccessor) structure).cwp$palettes();
-        List<StructureTemplate.StructureBlockInfo> blocks = palettes.isEmpty() ? List.of() : palettes.getFirst().blocks();
-        // Biomes are recoloured chunk by chunk as the build completes them, instead of all at the end.
-        var plains = server.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
-        var sampler = destination.getChunkSource().randomState().sampler();
-        it.unimi.dsi.fastutil.longs.LongOpenHashSet coloured = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
-        InstanceBuilds.start(server, destination.dimension().identifier().toString(), destination, origin, blocks,
-                chunk -> {
-                    if (coloured.add(chunk.getPos().pack())) chunk.fillBiomesFromNoise((x, y, z, climate) -> plains, sampler);
-                }, () -> {
-                    finishReconstruct(server, destination, metadata, origin, coloured);
-                    done.run();
-                });
+        String key = destination.dimension().identifier().toString();
+        // Counts as building from the start, also while the template is still being read from disk.
+        InstanceBuilds.start(server, key, destination, origin, List.of(), chunk -> { }, () -> { });
+        InstanceBuilds.hold(server, key);
+        loadTemplateThen(server, id, structure -> {
+            if (!InstanceBuilds.building(server, key)) return; // cancelled meanwhile
+            if (structure.getSize().getX() != metadata.sizeX() || structure.getSize().getY() != metadata.sizeY()
+                    || structure.getSize().getZ() != metadata.sizeZ()) {
+                InstanceBuilds.cancel(server, key);
+                failed.accept(new IllegalStateException("Template metadata size no longer matches structure NBT for " + id));
+                return;
+            }
+            var palettes = ((ekuzo.crazyworldprogression.mixin.StructureTemplateAccessor) structure).cwp$palettes();
+            List<StructureTemplate.StructureBlockInfo> blocks = palettes.isEmpty() ? List.of() : palettes.getFirst().blocks();
+            // Biomes are recoloured chunk by chunk as the build completes them, instead of all at the end.
+            var plains = server.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
+            var sampler = destination.getChunkSource().randomState().sampler();
+            it.unimi.dsi.fastutil.longs.LongOpenHashSet coloured = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+            InstanceBuilds.start(server, key, destination, origin, blocks,
+                    chunk -> {
+                        if (coloured.add(chunk.getPos().pack())) chunk.fillBiomesFromNoise((x, y, z, climate) -> plains, sampler);
+                    }, () -> {
+                        finishReconstruct(server, destination, metadata, origin, coloured);
+                        done.run();
+                    });
+        }, exception -> {
+            InstanceBuilds.cancel(server, key);
+            failed.accept(exception);
+        });
     }
 
     /** Biome recolouring and pickup cleanup once the blocks of a template are in place. */
@@ -153,45 +185,6 @@ public final class PortalTemplateService {
                 chunk.markUnsaved();
             }
         }
-        AABB bounds = new AABB(origin.getX(), origin.getY(), origin.getZ(),
-                origin.getX() + metadata.sizeX(), origin.getY() + metadata.sizeY(),
-                origin.getZ() + metadata.sizeZ());
-        destination.getEntities((Entity) null, bounds, entity -> entity instanceof ItemEntity)
-                .forEach(Entity::discard);
-    }
-
-    // Place one captured structure into an empty registered instance slot.
-    static void reconstruct(MinecraftServer server, ServerLevel destination, Identifier id, BlockPos origin) {
-        PortalTemplateData.PortalTemplate metadata = requireMetadata(server, id);
-        StructureTemplate structure = server.getStructureManager().get(id)
-                .orElseThrow(() -> new IllegalStateException("Missing structure NBT for portal template " + id));
-        if (structure.getSize().getX() != metadata.sizeX() || structure.getSize().getY() != metadata.sizeY()
-                || structure.getSize().getZ() != metadata.sizeZ()) {
-            throw new IllegalStateException("Template metadata size no longer matches structure NBT for " + id);
-        }
-        // The captured build already contains complete block states and their supports. Minecraft's
-        // default structure finalization runs neighbor-shape updates across the whole template,
-        // which can break attached blocks and drop items while reconstruction is still in progress.
-        StructurePlaceSettings settings = new StructurePlaceSettings().setKnownShape(true)
-                .setIgnoreEntities(true);
-        // UPDATE_KNOWN_SHAPE also skips Level.setBlock's implicit shape updates. UPDATE_CLIENTS
-        // alone still runs them and can break doors or buttons before the template is complete.
-        int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
-        if (!structure.placeInWorld(destination, origin, origin, settings, destination.getRandom(), flags)) {
-            throw new IllegalStateException("Could not reconstruct portal template " + id);
-        }
-        // Older slot chunks were generated with the void biome, which suppresses rain entirely.
-        // Recolor the occupied chunks before players enter; new chunks use plains in the dimension JSON.
-        var plains = server.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
-        var sampler = destination.getChunkSource().randomState().sampler();
-        for (int chunkX = origin.getX() >> 4; chunkX <= (origin.getX() + metadata.sizeX() - 1) >> 4; chunkX++) {
-            for (int chunkZ = origin.getZ() >> 4; chunkZ <= (origin.getZ() + metadata.sizeZ() - 1) >> 4; chunkZ++) {
-                var chunk = destination.getChunk(chunkX, chunkZ);
-                chunk.fillBiomesFromNoise((x, y, z, climate) -> plains, sampler);
-                chunk.markUnsaved();
-            }
-        }
-        // Remove stale pickups left in a reused slot or created by a failed placement.
         AABB bounds = new AABB(origin.getX(), origin.getY(), origin.getZ(),
                 origin.getX() + metadata.sizeX(), origin.getY() + metadata.sizeY(),
                 origin.getZ() + metadata.sizeZ());

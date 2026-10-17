@@ -29,7 +29,6 @@ import java.util.List;
 
 /** Captures, persists, queries, places, and clears CWP-owned dimension templates. */
 public final class PortalTemplateService {
-    public static final long MAX_TEMPLATE_VOLUME = 1_048_576L;
 
     // Prevent instantiation of the stateless template facade.
     private PortalTemplateService() {
@@ -55,11 +54,6 @@ public final class PortalTemplateService {
                 Math.max(first.getZ(), second.getZ()));
         Vec3i size = new Vec3i(maximum.getX() - minimum.getX() + 1, maximum.getY() - minimum.getY() + 1,
                 maximum.getZ() - minimum.getZ() + 1);
-        long volume = (long) size.getX() * size.getY() * size.getZ();
-        if (volume > MAX_TEMPLATE_VOLUME) {
-            throw new IllegalArgumentException("Template contains " + volume + " blocks; maximum is "
-                    + MAX_TEMPLATE_VOLUME);
-        }
         StructureTemplate structure = server.getStructureManager().getOrCreate(id);
         structure.setAuthor(author);
         // Pocket templates contain builds. Capturing loose item entities would replay dropped
@@ -110,6 +104,46 @@ public final class PortalTemplateService {
         server.getStructureManager().remove(id);
         PortalTemplateData.get(server).remove(id);
         return true;
+    }
+
+    /**
+     * Places a captured pocket into an instance slot over several ticks (shared InstanceBuilds budget) and runs
+     * done once every block is in place.
+     */
+    static void reconstructThen(MinecraftServer server, ServerLevel destination, Identifier id, BlockPos origin,
+                                Runnable done) {
+        PortalTemplateData.PortalTemplate metadata = requireMetadata(server, id);
+        StructureTemplate structure = server.getStructureManager().get(id)
+                .orElseThrow(() -> new IllegalStateException("Missing structure NBT for portal template " + id));
+        if (structure.getSize().getX() != metadata.sizeX() || structure.getSize().getY() != metadata.sizeY()
+                || structure.getSize().getZ() != metadata.sizeZ()) {
+            throw new IllegalStateException("Template metadata size no longer matches structure NBT for " + id);
+        }
+        var palettes = ((ekuzo.crazyworldprogression.mixin.StructureTemplateAccessor) structure).cwp$palettes();
+        List<StructureTemplate.StructureBlockInfo> blocks = palettes.isEmpty() ? List.of() : palettes.getFirst().blocks();
+        InstanceBuilds.start(server, destination.dimension().identifier().toString(), destination, origin, blocks, () -> {
+            finishReconstruct(server, destination, metadata, origin);
+            done.run();
+        });
+    }
+
+    /** Biome recolouring and pickup cleanup once the blocks of a template are in place. */
+    private static void finishReconstruct(MinecraftServer server, ServerLevel destination,
+                                          PortalTemplateData.PortalTemplate metadata, BlockPos origin) {
+        var plains = server.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
+        var sampler = destination.getChunkSource().randomState().sampler();
+        for (int chunkX = origin.getX() >> 4; chunkX <= (origin.getX() + metadata.sizeX() - 1) >> 4; chunkX++) {
+            for (int chunkZ = origin.getZ() >> 4; chunkZ <= (origin.getZ() + metadata.sizeZ() - 1) >> 4; chunkZ++) {
+                var chunk = destination.getChunk(chunkX, chunkZ);
+                chunk.fillBiomesFromNoise((x, y, z, climate) -> plains, sampler);
+                chunk.markUnsaved();
+            }
+        }
+        AABB bounds = new AABB(origin.getX(), origin.getY(), origin.getZ(),
+                origin.getX() + metadata.sizeX(), origin.getY() + metadata.sizeY(),
+                origin.getZ() + metadata.sizeZ());
+        destination.getEntities((Entity) null, bounds, entity -> entity instanceof ItemEntity)
+                .forEach(Entity::discard);
     }
 
     // Place one captured structure into an empty registered instance slot.

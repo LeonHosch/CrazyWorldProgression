@@ -335,10 +335,6 @@ public final class PocketEditorService {
         BlockPos first = new BlockPos(minX, minY, minZ);
         BlockPos last = new BlockPos(maxX, maxY, maxZ);
         long volume = ((long) maxX - minX + 1) * ((long) maxY - minY + 1) * ((long) maxZ - minZ + 1);
-        if (volume > PortalTemplateService.MAX_TEMPLATE_VOLUME) {
-            throw new IllegalArgumentException("Built pocket spans " + volume + " blocks; maximum is "
-                    + PortalTemplateService.MAX_TEMPLATE_VOLUME);
-        }
         return new BuildScan(first, last, safeSpawn, volume);
     }
 

@@ -7,7 +7,8 @@
     "PocketBuildTrackingMixin",
     "PocketWeatherMixin",
     "PlayerInventoryRuleMixin",
-    "ServerPlayerMixin"
+    "ServerPlayerMixin",
+    "StructureTemplateAccessor"
   ],
   "client": [
     "client.AvatarRenderStateTitleMixin",

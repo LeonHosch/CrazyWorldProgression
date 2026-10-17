@@ -706,13 +706,15 @@ public final class RaidService {
                     || !PortalData.get(server).instances().containsKey(instance.slotDimension().toString())) return;
             // Boats, minecarts and MobForge mobs go; dropped items stay so players keep their death drops.
             PortalTemplateService.discardEntitiesExceptDrops(level);
-            PortalTemplateService.reconstruct(server, level, instance.templateId(),
-                    new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()));
-            PortalService.resetRuntimeLocations(server, instance.slotDimension());
-            PocketEditorService.startScripts(server, instance.templateId(), level,
-                    new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), instanceId,
-                    RaidCheckpoints.resumeFor(server, instance));
-            afterReset.run();
+            PortalTemplateService.reconstructThen(server, level, instance.templateId(),
+                    new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), () -> {
+                if (!PortalData.get(server).instances().containsKey(instance.slotDimension().toString())) return;
+                PortalService.resetRuntimeLocations(server, instance.slotDimension());
+                PocketEditorService.startScripts(server, instance.templateId(), level,
+                        new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), instanceId,
+                        RaidCheckpoints.resumeFor(server, instance));
+                afterReset.run();
+            });
         });
     }
 

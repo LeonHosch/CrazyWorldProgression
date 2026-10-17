@@ -23,6 +23,12 @@ Building removal is resumable: script `remove`, removal before another placement
 
 The **8,192 figure counts positions, not milliseconds**. Actual tick cost varies with loaded chunks, block updates, block entities, and entity work. The cap does not cover template capture or placement, network serialization, or every other action in these callbacks. Do not raise it solely to make cleanup finish faster; profile the worst tick first.
 
+## Instance building
+
+Pockets have no size limit. A new dungeon or public instance is not placed in one go: [InstanceBuilds](../src/main/java/ekuzo/crazyworldprogression/portals/InstanceBuilds.java) places the template's blocks over several ticks, at most **100,000 blocks per server tick shared by every instance being built at the same time** (a build that needs less hands the rest to the others). Rebuilding the pocket after a wipe uses the same queue. Players who enter meanwhile see "Your instance is being prepared… N%" on the action bar and are brought in when the build is finished, if they are still near the portal; others are told to walk in. Pocket scripts start only after the build. Like the cleanup budget, the figure counts blocks, not milliseconds; profile large pockets before raising it.
+
+Capturing a pocket (saving it from the pocket editor) still happens in one step, so saving a very large pocket can pause the server briefly.
+
 ## Portal contact and trust boundary
 
 [Client contact detection](../src/client/java/ekuzo/crazyworldprogression/client/PortalClientRenderer.java) uses the client portal snapshot and shared [contact geometry](../src/main/java/ekuzo/crazyworldprogression/portals/PortalContactGeometry.java). A contact packet is only a request. [PortalService.requestPortalContact](../src/main/java/ekuzo/crazyworldprogression/portals/PortalService.java) rate limits requests, resolves the exact placed portal in the player's dimension, checks the player's real position inside its shape, and applies entry rules. Confirmation revalidates the pending entry before teleporting. Keep these server checks whenever client detection changes; client state is not authoritative.

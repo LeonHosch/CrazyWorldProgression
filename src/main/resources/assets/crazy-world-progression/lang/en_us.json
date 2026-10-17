@@ -111,5 +111,8 @@
   "banner.crazy-world-progression.encounter.started_unlimited.subtitle": "Revives are unlimited",
   "menu.crazy-world-progression.party": "Party",
   "key.crazy-world-progression.open_party": "Open party screen",
-  "key.category.crazy-world-progression.party": "Parties"
+  "key.category.crazy-world-progression.party": "Parties",
+  "message.crazy-world-progression.instance.preparing": "Your instance is being prepared… %s%%",
+  "message.crazy-world-progression.instance.preparing_chat": "Your instance is being prepared. You will be brought in when it is ready; stay near the portal.",
+  "message.crazy-world-progression.instance.ready_elsewhere": "Your instance is ready. Walk into the portal to enter."
 }

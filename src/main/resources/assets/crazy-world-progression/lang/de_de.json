@@ -111,5 +111,8 @@
   "banner.crazy-world-progression.encounter.started_unlimited.subtitle": "Unbegrenzte Wiederbelebungen",
   "menu.crazy-world-progression.party": "Gruppe",
   "key.crazy-world-progression.open_party": "Gruppenfenster öffnen",
-  "key.category.crazy-world-progression.party": "Gruppen"
+  "key.category.crazy-world-progression.party": "Gruppen",
+  "message.crazy-world-progression.instance.preparing": "Deine Instanz wird vorbereitet… %s%%",
+  "message.crazy-world-progression.instance.preparing_chat": "Deine Instanz wird vorbereitet. Du wirst hineingebracht, sobald sie bereit ist; bleib in der Nähe des Portals.",
+  "message.crazy-world-progression.instance.ready_elsewhere": "Deine Instanz ist bereit. Geh durch das Portal, um sie zu betreten."
 }

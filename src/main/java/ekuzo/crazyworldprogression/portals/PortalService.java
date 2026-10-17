@@ -64,6 +64,7 @@ public final class PortalService {
     public static void initialize() {
         RaidService.initialize();
         InstanceEntityLeases.initialize();
+        InstanceBuilds.initialize();
         Parties.initialize();
         EncounterBanner.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
@@ -472,6 +473,9 @@ public final class PortalService {
 
     /** Expire one lease without affecting other groups using the same private portal. */
     public static boolean expireInstance(MinecraftServer server, Identifier slotDimension) {
+        InstanceBuilds.cancel(server, slotDimension.toString());
+        Map<String, Preparing> preparingSlots = PREPARING.get(server);
+        if (preparingSlots != null) preparingSlots.remove(slotDimension.toString());
         PortalData.StoredInstance instance = PortalData.get(server).instances().get(slotDimension.toString());
         if (instance == null) return false;
         synchronized (CLEANUPS) {
@@ -518,6 +522,7 @@ public final class PortalService {
         ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.tick(server);
         PortalPreviewNetworking.tick(server);
         if (!BuildingService.tickScheduledClears(server, CLEANUP_BLOCKS_PER_TICK)) processCleanups(server);
+        tickPreparing(server);
         restoreVehicleMomentum(server, tick);
         if (tick % 20L == 0L) expireEmptyPrivateInstances(server);
         if (tick % 20L == 0L) {
@@ -807,6 +812,13 @@ public final class PortalService {
 
     private static void teleportInto(MinecraftServer server, ServerPlayer player, PortalDefinition portal,
                                      PortalData.StoredInstance instance) {
+        Preparing waiting = PREPARING.getOrDefault(server, Map.of()).get(instance.slotDimension().toString());
+        if (waiting != null) {
+            if (waiting.waiting().add(player.getUUID())) player.sendSystemMessage(Component.translatableWithFallback(
+                    "message.crazy-world-progression.instance.preparing_chat",
+                    "Your instance is being prepared. You will be brought in when it is ready; stay near the portal."));
+            return;
+        }
         boolean sourceRaid = RaidService.isRaid(server, player.level().dimension().identifier());
         ServerLevel destination = server.getLevel(dimensionKey(instance.slotDimension()));
         if (destination == null) throw new IllegalStateException("Missing instance dimension " + instance.slotDimension());
@@ -858,7 +870,6 @@ public final class PortalService {
             throw new IllegalStateException("Clearing stale instance buildings; retry shortly");
         }
         PortalTemplateService.discardAllEntities(destination);
-        PortalTemplateService.reconstruct(server, destination, template.id(), origin);
         long created = Instant.now().toEpochMilli();
         PortalData.StoredInstance instance = new PortalData.StoredInstance(portal.id(), template.id(), slot,
                 created, portal.lifetimeSeconds() == 0L ? Long.MAX_VALUE
@@ -869,14 +880,72 @@ public final class PortalService {
         if (RaidService.isRaidPortal(portal)) RaidService.prepare(server, instance);
         PortalEnvironmentService.applyTime(server, view(instance), portal.environment());
         PortalEnvironmentService.applyWeather(server, view(instance), portal.environment());
-        rebuildIndex(server);
-        PortalNetworking.broadcast(server);
-        PortalRegistry.created(server, view(instance));
-        PocketEditorService.startScripts(server, template.id(), destination, origin, view(instance).instanceId(),
-                RaidCheckpoints.resumeFor(server, instance));
-        CrazyWorldProgression.LOGGER.info("Reconstructed portal template {} in slot {} for portal {}",
-                template.id(), slot, portal.id());
+        PREPARING.computeIfAbsent(server, ignored -> new HashMap<>())
+                .put(slot.toString(), new Preparing(portal.id(), new java.util.LinkedHashSet<>()));
+        PortalTemplateService.reconstructThen(server, destination, template.id(), origin, () -> {
+            PortalData.StoredInstance live = PortalData.get(server).instances().get(slot.toString());
+            if (live == null || live.createdEpochMillis() != created) return;
+            rebuildIndex(server);
+            PortalNetworking.broadcast(server);
+            PortalRegistry.created(server, view(live));
+            PocketEditorService.startScripts(server, template.id(), destination, origin, view(live).instanceId(),
+                    RaidCheckpoints.resumeFor(server, live));
+            CrazyWorldProgression.LOGGER.info("Reconstructed portal template {} in slot {} for portal {}",
+                    template.id(), slot, portal.id());
+            finishPreparing(server, live);
+        });
         return instance;
+    }
+
+    /** Players waiting for an instance that is still being built. */
+    private record Preparing(Identifier portalId, java.util.Set<UUID> waiting) { }
+    private static final Map<MinecraftServer, Map<String, Preparing>> PREPARING = new WeakHashMap<>();
+
+    public static boolean preparing(MinecraftServer server, Identifier slot) {
+        return PREPARING.getOrDefault(server, Map.of()).containsKey(slot.toString());
+    }
+
+    /** The build is done: everyone who asked to enter and is still at the portal is brought in. */
+    private static void finishPreparing(MinecraftServer server, PortalData.StoredInstance instance) {
+        Preparing preparing = PREPARING.getOrDefault(server, new HashMap<>()).remove(instance.slotDimension().toString());
+        if (preparing == null) return;
+        PortalDefinition portal = portal(server, preparing.portalId());
+        for (UUID id : preparing.waiting()) {
+            ServerPlayer player = server.getPlayerList().getPlayer(id);
+            if (player == null || portal == null) continue;
+            if (!stillAtPortal(player.level().dimension().identifier().equals(portal.dimension()),
+                    portal.isNear(player.position().add(0.0, 0.9, 0.0), GROUP_ENTRY_DISTANCE))) {
+                player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.instance.ready_elsewhere",
+                        "Your instance is ready. Walk into the portal to enter."));
+                continue;
+            }
+            try {
+                teleportInto(server, player, portal, instance);
+            } catch (RuntimeException exception) {
+                player.sendOverlayMessage(Component.literal("Portal unavailable: " + exception.getMessage()));
+            }
+        }
+    }
+
+    /** Only players who are still at the portal are pulled in when their instance is ready. */
+    static boolean stillAtPortal(boolean sameDimension, boolean nearPortal) {
+        return sameDimension && nearPortal;
+    }
+
+    /** Progress on the action bar of everyone waiting for an instance. */
+    private static void tickPreparing(MinecraftServer server) {
+        Map<String, Preparing> preparing = PREPARING.get(server);
+        if (preparing == null || preparing.isEmpty() || server.getTickCount() % 10 != 0) return;
+        preparing.keySet().removeIf(slot -> !PortalData.get(server).instances().containsKey(slot));
+        for (Map.Entry<String, Preparing> entry : preparing.entrySet()) {
+            int percent = InstanceBuilds.percent(server, entry.getKey());
+            for (UUID id : entry.getValue().waiting()) {
+                ServerPlayer player = server.getPlayerList().getPlayer(id);
+                if (player != null) player.sendOverlayMessage(Component.translatableWithFallback(
+                        "message.crazy-world-progression.instance.preparing",
+                        "Your instance is being prepared… %s%%", percent));
+            }
+        }
     }
 
     // Expire every lease whose real-time deadline has elapsed, including while the server was offline.

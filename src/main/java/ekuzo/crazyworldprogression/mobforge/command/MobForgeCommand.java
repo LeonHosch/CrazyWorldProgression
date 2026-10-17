@@ -152,10 +152,10 @@ public final class MobForgeCommand {
 	}
 	private static int openScriptEditor(CommandSourceStack source, String id) {
 		var player = source.getPlayer(); if (player == null) { source.sendFailure(Component.literal("The graphical script editor requires a player.")); return 0; }
-		MobScript script;
-		if (id == null) script = new MobScript("new_script", java.util.List.of());
-		else { var found = MobForge.SCRIPTS.get(id); if (found.isEmpty()) { source.sendFailure(Component.literal("Unknown MobForge script: " + id)); return 0; } script = found.get(); }
-		if (!MobForgeNetworking.openScript(player, script, id != null)) { source.sendFailure(Component.literal("The MobForge client mod is required to use the script editor.")); return 0; }
+		if (id != null && MobForge.SCRIPTS.get(id).isEmpty()) { source.sendFailure(Component.literal("Unknown MobForge script: " + id)); return 0; }
+		if (!ekuzo.crazyworldprogression.admin.CwpAdminModule.openScriptEditor(player, id)) {
+			source.sendFailure(Component.literal("CWP admin panel is unavailable.")); return 0;
+		}
 		return 1;
 	}
 	private static int openEditor(CommandSourceStack source, String id) {

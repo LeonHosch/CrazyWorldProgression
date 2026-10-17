@@ -7,10 +7,15 @@ import ekuzo.crazyworldprogression.command.BalanceCommands;
 import ekuzo.crazyworldprogression.command.CurrencyCommands;
 import ekuzo.crazyworldprogression.command.CwpAdminCommands;
 import ekuzo.crazyworldprogression.command.PortalCommands;
+import ekuzo.crazyworldprogression.command.PostmasterCommands;
+import ekuzo.crazyworldprogression.command.TitleCommands;
+import ekuzo.crazyworldprogression.titles.TitleNetworking;
+import ekuzo.crazyworldprogression.loot.PostmasterService;
 import ekuzo.crazyworldprogression.command.SkillTreeCommands;
 import ekuzo.crazyworldprogression.events.RandomEventManager;
 import ekuzo.crazyworldprogression.events.RandomEventService;
 import ekuzo.crazyworldprogression.portals.PortalService;
+import ekuzo.crazyworldprogression.portals.PortalBuildProtection;
 import ekuzo.crazyworldprogression.portals.PortalNetworking;
 import ekuzo.crazyworldprogression.selection.AreaSelectionService;
 import ekuzo.crazyworldprogression.selection.AreaSelectionNetworking;
@@ -49,8 +54,13 @@ public class CrazyWorldProgression implements ModInitializer {
 		SkillStatRegistry.initialize();
 		RandomEventService.initialize();
 		PortalNetworking.registerPayloadType();
+		TitleNetworking.initialize();
+		ekuzo.crazyworldprogression.portals.PortalPreviewNetworking.registerPayloadType();
+		ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.registerPayloadType();
 		PortalNetworking.registerServerReceiver();
 		PortalService.initialize();
+		PostmasterService.initialize();
+		PortalBuildProtection.initialize();
 		AreaSelectionNetworking.registerPayloadType();
 		AreaSelectionNetworking.registerServerReceiver();
 		AreaSelectionService.initialize();
@@ -75,6 +85,8 @@ public class CrazyWorldProgression implements ModInitializer {
 			SkillTreeCommands.register(dispatcher);
 			CwpAdminCommands.register(dispatcher);
 			PortalCommands.registerPlayer(dispatcher);
+			PostmasterCommands.register(dispatcher);
+			TitleCommands.register(dispatcher);
 		});
 	}
 

@@ -27,6 +27,15 @@ public final class PortalEntryPromptClient {
 
     // Open the dedicated Minecraft-style portal confirmation screen.
     private static void open(Minecraft client, PortalNetworking.PortalEntryPromptPayload payload) {
+        if (payload.keepInventory() && (payload.destinationKind().equals("coordinates")
+                && !EchelonClientSettings.coordinatePortalMenu
+                || payload.destinationKind().equals("exit") && !EchelonClientSettings.exitPortalMenu)) {
+            if (ClientPlayNetworking.canSend(PortalNetworking.PortalEntryResponsePayload.TYPE)) {
+                ClientPlayNetworking.send(new PortalNetworking.PortalEntryResponsePayload(
+                        payload.portalId(), true, false));
+            }
+            return;
+        }
         client.gui.setScreen(new PortalConfirmationScreen(client.gui.screen(), payload));
     }
 
@@ -52,6 +61,8 @@ public final class PortalEntryPromptClient {
         private int panelWidth;
         private int panelHeight;
         private boolean answered;
+        private boolean finalRiskStep;
+        private Button travelButton;
 
         // Store the server-issued destination data until the player makes one decision.
         private PortalConfirmationScreen(Screen parent, PortalNetworking.PortalEntryPromptPayload payload) {
@@ -66,18 +77,20 @@ public final class PortalEntryPromptClient {
             panelWidth = Math.min(MAX_PANEL_WIDTH, width - 32);
             descriptionLines = font.split(Component.literal(description()), panelWidth - PANEL_PADDING * 2)
                     .stream().limit(7).toList();
-            panelHeight = Math.max(payload.accessMode().equals("private") ? 216 : 180,
-                    142 + descriptionLines.size() * 10 + (payload.accessMode().equals("private") ? 36 : 0));
+            panelHeight = Math.max(payload.keepInventory() ? 0 : payload.accessMode().equals("private") ? 300 : 270,
+                    Math.max(payload.accessMode().equals("private") ? 216 : 180,
+                    142 + descriptionLines.size() * 10 + (payload.accessMode().equals("private") ? 36 : 0)));
             panelLeft = (width - panelWidth) / 2;
             panelTop = (height - panelHeight) / 2;
             int buttonY = panelTop + panelHeight - 34;
             int gap = 10;
             int firstX = panelLeft + (panelWidth - BUTTON_WIDTH * 2 - gap) / 2;
-            addRenderableWidget(Button.builder(Component.literal("Travel"), ignored -> answer(true))
+            travelButton = addRenderableWidget(Button.builder(Component.literal("Travel"), ignored -> answer(true))
                     .bounds(firstX, buttonY, BUTTON_WIDTH, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Cancel"), ignored -> answer(false))
                     .bounds(firstX + BUTTON_WIDTH + gap, buttonY, BUTTON_WIDTH, 20).build());
-            if (payload.accessMode().equals("private")) {
+            if (payload.destinationKind().equals("pocket") && payload.secondsRemaining() != 0L
+                    && payload.accessMode().equals("private")) {
                 addRenderableWidget(Button.builder(Component.literal("Manage group"), ignored -> {
                     answer(false);
                     if (ClientPlayNetworking.canSend(PortalNetworking.PortalGroupActionPayload.TYPE)) {
@@ -90,7 +103,7 @@ public final class PortalEntryPromptClient {
         // Draw a dark world overlay, shadowed panel, colored border, and requested information hierarchy.
         @Override
         public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-            int difficultyColor = difficultyColor(payload.difficulty());
+            int difficultyColor = payload.keepInventory() ? difficultyColor(payload.difficulty()) : 0xFFFF3030;
             graphics.fill(0, 0, width, height, 0xA0000000);
             graphics.fill(panelLeft + 5, panelTop + 5, panelLeft + panelWidth + 5,
                     panelTop + panelHeight + 5, 0x90000000);
@@ -115,15 +128,37 @@ public final class PortalEntryPromptClient {
             String skulls = "☠ ".repeat(Math.max(1, Math.min(5, payload.difficulty()))).trim();
             graphics.text(font, Component.literal("Difficulty: " + skulls), textX, y, difficultyColor, false);
             y += 14;
-            String time = "Instance time: " + formatDuration(payload.secondsRemaining())
+            String time = payload.destinationKind().equals("coordinates") ? "Travel to destination coordinates"
+                    : payload.secondsRemaining() == 0L ? "Return to the main world"
+                    : "Instance time: " + (payload.secondsRemaining() < 0L ? "No expiry"
+                    : formatDuration(payload.secondsRemaining()))
                     + (payload.existingInstance() ? " (already running)" : "");
             graphics.text(font, Component.literal(time), textX, y, 0xFFE7E7E7, false);
-            if (payload.accessMode().equals("private")) {
+            if (payload.destinationKind().equals("exit")) {
+                graphics.text(font, Component.literal("Exit portal"), textX, y + 15, 0xFFD6D9DF, false);
+            } else if (payload.destinationKind().equals("coordinates")) {
+                graphics.text(font, Component.literal("Coordinate portal"), textX, y + 15, 0xFFD6D9DF, false);
+            } else if (payload.accessMode().equals("private")) {
                 graphics.text(font, Component.literal("Private group · max " + payload.maxPlayers()
-                        + " players · entry closes when travel starts"), textX, y + 15, 0xFFD6D9DF, false);
+                        + " players · roster locks when travel starts"), textX, y + 15, 0xFFD6D9DF, false);
             } else {
                 graphics.text(font, Component.literal("Public · shared instance"), textX, y + 15,
                         0xFFD6D9DF, false);
+            }
+            if (!payload.keepInventory()) {
+                int warningY = panelTop + panelHeight - (payload.accessMode().equals("private") ? 127 : 102);
+                graphics.fill(textX - 5, warningY - 7, panelLeft + panelWidth - PANEL_PADDING + 5,
+                        warningY + 62, 0xFF570B0B);
+                graphics.fill(textX - 3, warningY - 5, panelLeft + panelWidth - PANEL_PADDING + 3,
+                        warningY + 60, 0xFF240B0B);
+                graphics.text(font, Component.literal(finalRiskStep ? "FINAL CONFIRMATION" : "KEEP INVENTORY IS OFF"),
+                        textX, warningY, 0xFFFF3535, false);
+                graphics.text(font, Component.literal("Dying here drops your carried items."),
+                        textX, warningY + 15, 0xFFFFD4D4, false);
+                graphics.text(font, Component.literal(finalRiskStep
+                                ? "Are you absolutely sure you want to enter?"
+                                : "You must confirm again before travel."),
+                        textX, warningY + 30, 0xFFFFD4D4, false);
             }
             super.extractRenderState(graphics, mouseX, mouseY, delta);
         }
@@ -153,11 +188,16 @@ public final class PortalEntryPromptClient {
         // Send one accepted or rejected decision and restore the previously open screen.
         private void answer(boolean accepted) {
             if (answered) return;
+            if (accepted && !payload.keepInventory() && !finalRiskStep) {
+                finalRiskStep = true;
+                travelButton.setMessage(Component.literal("Enter anyway"));
+                return;
+            }
             answered = true;
             minecraft.gui.setScreen(parent);
             if (ClientPlayNetworking.canSend(PortalNetworking.PortalEntryResponsePayload.TYPE)) {
                 ClientPlayNetworking.send(new PortalNetworking.PortalEntryResponsePayload(
-                        payload.portalId(), accepted));
+                        payload.portalId(), accepted, accepted && finalRiskStep));
             }
         }
 

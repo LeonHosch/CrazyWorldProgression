@@ -14,6 +14,7 @@ import ekuzo.crazyworldprogression.mixin.client.RenderPipelinesAccessor;
 import ekuzo.crazyworldprogression.mixin.client.RenderTypeAccessor;
 import ekuzo.crazyworldprogression.portals.PortalDefinition;
 import ekuzo.crazyworldprogression.portals.PortalNetworking;
+import ekuzo.crazyworldprogression.portals.PortalPreviewNetworking;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -40,6 +41,7 @@ public final class PortalClientRenderer {
     private static final int SURFACE_ALPHA = 64;
     private static final Map<String, CachedMesh> CACHE = new HashMap<>();
     private static volatile List<PortalNetworking.PortalSnapshot> portals = List.of();
+    private static volatile List<PortalNetworking.PortalSnapshot> previews = List.of();
     private static int particleTick;
     private static final RenderPipeline PORTAL_PIPELINE = RenderPipelinesAccessor.cwp$register(
             RenderPipeline.builder()
@@ -56,6 +58,21 @@ public final class PortalClientRenderer {
                     .build());
     private static final RenderType PORTAL_RENDER_TYPE = RenderTypeAccessor.cwp$create(
             "cwp_translucent_portal", RenderSetup.builder(PORTAL_PIPELINE).createRenderSetup());
+    private static final RenderPipeline PREVIEW_PIPELINE = RenderPipelinesAccessor.cwp$register(
+            RenderPipeline.builder()
+                    .withLocation(CrazyWorldProgression.id("pipeline/portal_preview"))
+                    .withBindGroupLayout(BindGroupLayouts.GLOBALS)
+                    .withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
+                    .withVertexShader("core/position_color")
+                    .withFragmentShader("core/position_color")
+                    .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+                    .withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR)
+                    .withPrimitiveTopology(PrimitiveTopology.QUADS)
+                    .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
+                    .withCull(false)
+                    .build());
+    private static final RenderType PREVIEW_RENDER_TYPE = RenderTypeAccessor.cwp$create(
+            "cwp_portal_preview", RenderSetup.builder(PREVIEW_PIPELINE).createRenderSetup());
 
     // Prevent construction of the static client portal renderer.
     private PortalClientRenderer() {
@@ -65,7 +82,15 @@ public final class PortalClientRenderer {
     public static void initialize() {
         ClientPlayNetworking.registerGlobalReceiver(PortalNetworking.PortalSnapshotPayload.TYPE,
                 (payload, context) -> replaceSnapshot(PortalNetworking.decode(payload.json())));
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> replaceSnapshot(List.of()));
+        ClientPlayNetworking.registerGlobalReceiver(PortalPreviewNetworking.Payload.TYPE,
+                (payload, context) -> {
+                    previews = PortalNetworking.decode(payload.json());
+                    pruneCache();
+                });
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            replaceSnapshot(List.of());
+            previews = List.of();
+        });
         LevelRenderEvents.COLLECT_SUBMITS.register(PortalClientRenderer::submit);
         ClientTickEvents.END_CLIENT_TICK.register(PortalClientRenderer::spawnBorderParticles);
     }
@@ -73,8 +98,15 @@ public final class PortalClientRenderer {
     // Atomically replace render state and discard cached meshes for removed or resized portals.
     private static void replaceSnapshot(List<PortalNetworking.PortalSnapshot> replacement) {
         portals = replacement;
+        pruneCache();
+    }
+
+    private static void pruneCache() {
         synchronized (CACHE) {
-            CACHE.keySet().retainAll(replacement.stream().map(PortalNetworking.PortalSnapshot::id).toList());
+            var live = new java.util.HashSet<String>();
+            portals.forEach(portal -> live.add(placementKey(portal)));
+            previews.forEach(preview -> live.add(placementKey(preview)));
+            CACHE.keySet().retainAll(live);
         }
     }
 
@@ -91,35 +123,56 @@ public final class PortalClientRenderer {
             Mesh mesh = mesh(portal);
             submitMesh(context, camera, portal, mesh);
         }
+        if (!EchelonClientSettings.editorPlacementPreviews) return;
+        for (PortalNetworking.PortalSnapshot preview : previews) {
+            if (!preview.dimension().equals(dimension)
+                    || camera.distanceToSqr(preview.centerX(), preview.centerY(), preview.centerZ())
+                    > RENDER_DISTANCE_SQUARED) continue;
+            submitMesh(context, camera, preview, mesh(preview), PREVIEW_RENDER_TYPE,
+                    BuildingPreviewRenderer.PURPLE);
+        }
     }
 
     // Resolve or rebuild the local-space mesh for one portal geometry revision.
     private static Mesh mesh(PortalNetworking.PortalSnapshot portal) {
         int geometryHash = java.util.Objects.hash(portal.shape(), portal.plane(), portal.width(), portal.height());
         synchronized (CACHE) {
-            CachedMesh cached = CACHE.get(portal.id());
+            String key = placementKey(portal);
+            CachedMesh cached = CACHE.get(key);
             if (cached == null || cached.geometryHash() != geometryHash) {
                 cached = new CachedMesh(geometryHash, buildMesh(portal));
-                CACHE.put(portal.id(), cached);
+                CACHE.put(key, cached);
             }
             return cached.mesh();
         }
     }
 
+    private static String placementKey(PortalNetworking.PortalSnapshot portal) {
+        return portal.id() + "|" + portal.dimension() + "|" + portal.centerX() + "|"
+                + portal.centerY() + "|" + portal.centerZ();
+    }
+
     // Translate local geometry to camera space and submit one uniformly colored render node.
     private static void submitMesh(LevelRenderContext context, Vec3 camera,
                                    PortalNetworking.PortalSnapshot portal, Mesh mesh) {
+        submitMesh(context, camera, portal, mesh, PORTAL_RENDER_TYPE,
+                SURFACE_ALPHA << 24 | portal.colorRgb());
+    }
+
+    private static void submitMesh(LevelRenderContext context, Vec3 camera,
+                                   PortalNetworking.PortalSnapshot portal, Mesh mesh,
+                                   RenderType renderType, int color) {
         PoseStack poseStack = context.poseStack();
         poseStack.pushPose();
         poseStack.translate(portal.centerX() - camera.x, portal.centerY() - camera.y, portal.centerZ() - camera.z);
-        int color = SURFACE_ALPHA << 24 | portal.colorRgb();
-        context.submitNodeCollector().submitCustomGeometry(poseStack, PORTAL_RENDER_TYPE,
+        context.submitNodeCollector().submitCustomGeometry(poseStack, renderType,
                 (pose, vertices) -> emit(pose, vertices, mesh.vertices(), color));
         poseStack.popPose();
     }
 
     // Spawn a dense client-only ring of white vanilla particles around nearby open portal boundaries.
     private static void spawnBorderParticles(Minecraft minecraft) {
+        if (!EchelonClientSettings.portalParticles) return;
         if (minecraft.level == null || minecraft.player == null || ++particleTick % 2 != 0) return;
         String dimension = minecraft.level.dimension().identifier().toString();
         RandomSource random = minecraft.level.getRandom();

@@ -31,6 +31,7 @@ public final class PortalNetworking {
     // Register the clientbound portal snapshot payload during common startup.
     public static void registerPayloadType() {
         PayloadTypeRegistry.clientboundPlay().register(PortalSnapshotPayload.TYPE, PortalSnapshotPayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(PortalVisibilityPayload.TYPE, PortalVisibilityPayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(PortalEntryPromptPayload.TYPE, PortalEntryPromptPayload.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(PortalEntryResponsePayload.TYPE, PortalEntryResponsePayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(PortalGroupPayload.TYPE, PortalGroupPayload.CODEC);
@@ -41,7 +42,7 @@ public final class PortalNetworking {
     public static void registerServerReceiver() {
         ServerPlayNetworking.registerGlobalReceiver(PortalEntryResponsePayload.TYPE,
                 (payload, context) -> PortalService.respondToEntryPrompt(
-                        context.player(), payload.portalId(), payload.accepted()));
+                        context.player(), payload.portalId(), payload.accepted(), payload.riskConfirmed()));
         ServerPlayNetworking.registerGlobalReceiver(PortalGroupActionPayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
             MinecraftServer server = player.level().getServer();
@@ -69,18 +70,26 @@ public final class PortalNetworking {
         if (ServerPlayNetworking.canSend(player, PortalSnapshotPayload.TYPE)) {
             ServerPlayNetworking.send(player, new PortalSnapshotPayload(GSON.toJson(snapshot(player.level().getServer()))));
         }
+        if (ServerPlayNetworking.canSend(player, PortalVisibilityPayload.TYPE)) {
+            ServerPlayNetworking.send(player, new PortalVisibilityPayload(GSON.toJson(hiddenPlayerDimensions(player.level().getServer()))));
+        }
     }
 
     // Broadcast changed geometry, colors, or schedule state to every compatible client.
     public static void broadcast(MinecraftServer server) {
         List<PortalSnapshot> snapshot = snapshot(server);
+        List<String> hiddenDimensions = hiddenPlayerDimensions(server);
         synchronized (LAST_BROADCAST_HASH) {
-            LAST_BROADCAST_HASH.put(server, snapshot.hashCode());
+            LAST_BROADCAST_HASH.put(server, java.util.Objects.hash(snapshot, hiddenDimensions));
         }
         PortalSnapshotPayload payload = new PortalSnapshotPayload(GSON.toJson(snapshot));
+        PortalVisibilityPayload visibility = new PortalVisibilityPayload(GSON.toJson(hiddenDimensions));
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (ServerPlayNetworking.canSend(player, PortalSnapshotPayload.TYPE)) {
                 ServerPlayNetworking.send(player, payload);
+            }
+            if (ServerPlayNetworking.canSend(player, PortalVisibilityPayload.TYPE)) {
+                ServerPlayNetworking.send(player, visibility);
             }
         }
     }
@@ -88,7 +97,7 @@ public final class PortalNetworking {
     // Broadcast only when a real-time schedule boundary changes an open portal set.
     public static void broadcastIfChanged(MinecraftServer server) {
         List<PortalSnapshot> snapshot = snapshot(server);
-        int hash = snapshot.hashCode();
+        int hash = java.util.Objects.hash(snapshot, hiddenPlayerDimensions(server));
         synchronized (LAST_BROADCAST_HASH) {
             if (LAST_BROADCAST_HASH.getOrDefault(server, Integer.MIN_VALUE) == hash) return;
         }
@@ -110,10 +119,21 @@ public final class PortalNetworking {
 
     // Reduce persistent portal definitions to the fields required for rendering.
     private static List<PortalSnapshot> snapshot(MinecraftServer server) {
-        return PortalService.portals(server).stream().map(portal -> new PortalSnapshot(
+        return PortalService.visiblePortals(server).stream().map(portal -> new PortalSnapshot(
                 portal.id().toString(), portal.dimension().toString(), portal.shape().serializedName(),
                 portal.plane().serializedName(), portal.centerX(), portal.centerY(), portal.centerZ(),
                 portal.width(), portal.height(), portal.colorRgb(), PortalService.isOpen(portal))).toList();
+    }
+
+    private static List<String> hiddenPlayerDimensions(MinecraftServer server) {
+        return PortalData.get(server).instances().values().stream()
+                .filter(instance -> {
+                    PortalDefinition portal = PortalService.portal(server, instance.portalId());
+                    return portal != null && portal.admission().mode() == PortalDefinition.Mode.PUBLIC
+                            && !portal.showOtherPlayers();
+                })
+                .map(instance -> instance.slotDimension().toString())
+                .sorted().toList();
     }
 
     // Ask one client to confirm travel and describe the lifetime it is accepting.
@@ -123,7 +143,8 @@ public final class PortalNetworking {
             ServerPlayNetworking.send(player, new PortalEntryPromptPayload(portal.id().toString(),
                     portal.effectiveDisplayName(), portal.description(), secondsRemaining, existingInstance,
                     portal.entryPolicy().serializedName(), portal.difficulty(),
-                    portal.admission().mode().serializedName(), portal.admission().maxPlayers()));
+                    portal.admission().mode().serializedName(), portal.admission().maxPlayers(),
+                    portal.keepInventory(), portal.isExit() ? "exit" : portal.isCoordinates() ? "coordinates" : "pocket"));
         }
     }
 
@@ -158,10 +179,21 @@ public final class PortalNetworking {
         }
     }
 
+    /** Active public instance dimensions whose players are hidden by default. */
+    public record PortalVisibilityPayload(String json) implements CustomPacketPayload {
+        public static final Type<PortalVisibilityPayload> TYPE =
+                new Type<>(CrazyWorldProgression.id("portal_visibility"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, PortalVisibilityPayload> CODEC =
+                StreamCodec.composite(ByteBufCodecs.stringUtf8(65_536), PortalVisibilityPayload::json,
+                        PortalVisibilityPayload::new);
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     /** Native confirmation-screen content for one proposed portal journey. */
     public record PortalEntryPromptPayload(String portalId, String displayName, String description,
                                            long secondsRemaining, boolean existingInstance, String entryPolicy,
-                                           int difficulty, String accessMode, int maxPlayers)
+                                           int difficulty, String accessMode, int maxPlayers,
+                                           boolean keepInventory, String destinationKind)
             implements CustomPacketPayload {
         public static final Type<PortalEntryPromptPayload> TYPE =
                 new Type<>(CrazyWorldProgression.id("portal_entry_prompt"));
@@ -175,6 +207,8 @@ public final class PortalNetworking {
                         ByteBufCodecs.VAR_INT, PortalEntryPromptPayload::difficulty,
                         ByteBufCodecs.STRING_UTF8, PortalEntryPromptPayload::accessMode,
                         ByteBufCodecs.VAR_INT, PortalEntryPromptPayload::maxPlayers,
+                        ByteBufCodecs.BOOL, PortalEntryPromptPayload::keepInventory,
+                        ByteBufCodecs.STRING_UTF8, PortalEntryPromptPayload::destinationKind,
                         PortalEntryPromptPayload::new);
 
         // Return the registered clientbound portal-prompt payload type.
@@ -205,12 +239,14 @@ public final class PortalNetworking {
     }
 
     /** Client decision returned for a specific server-issued portal prompt. */
-    public record PortalEntryResponsePayload(String portalId, boolean accepted) implements CustomPacketPayload {
+    public record PortalEntryResponsePayload(String portalId, boolean accepted,
+                                             boolean riskConfirmed) implements CustomPacketPayload {
         public static final Type<PortalEntryResponsePayload> TYPE =
                 new Type<>(CrazyWorldProgression.id("portal_entry_response"));
         public static final StreamCodec<RegistryFriendlyByteBuf, PortalEntryResponsePayload> CODEC =
                 StreamCodec.composite(ByteBufCodecs.STRING_UTF8, PortalEntryResponsePayload::portalId,
                         ByteBufCodecs.BOOL, PortalEntryResponsePayload::accepted,
+                        ByteBufCodecs.BOOL, PortalEntryResponsePayload::riskConfirmed,
                         PortalEntryResponsePayload::new);
 
         // Return the registered serverbound portal-response payload type.

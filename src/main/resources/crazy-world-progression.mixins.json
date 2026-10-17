@@ -4,9 +4,18 @@
   "mixins": [
     "BlockMixin",
     "LivingEntityMixin",
+    "PocketBuildTrackingMixin",
+    "PocketWeatherMixin",
+    "PlayerInventoryRuleMixin",
     "ServerPlayerMixin"
   ],
   "client": [
+    "client.AvatarRenderStateTitleMixin",
+    "client.AvatarTitleMixin",
+    "client.ContainerHotbarDropMixin",
+    "client.EntityVisibilityMixin",
+    "client.LocalPlayerDropMixin",
+    "client.PlayerTabTitleMixin",
     "client.RenderPipelinesAccessor",
     "client.RenderTypeAccessor"
   ],

@@ -1,6 +1,8 @@
 package ekuzo.crazyworldprogression.mobforge.script;
 
 import org.junit.jupiter.api.Test;
+import net.minecraft.resources.Identifier;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -8,6 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MobScriptYamlTest {
 	private final MobScriptYaml yaml = new MobScriptYaml();
+
+	@Test void raidCompletionRoundTrips() {
+		MobScript script = yaml.decode("id: raid\nsteps:\n  - raid_complete: true\n");
+		assertInstanceOf(MobScript.RaidCompleteStep.class, script.steps().get(0));
+		assertInstanceOf(MobScript.RaidCompleteStep.class, yaml.decode(yaml.encode(script)).steps().get(0));
+	}
 
 	@Test void parsesOrderedSpawnAndSleepBlocks() {
 		MobScript script = yaml.decode("""
@@ -54,5 +62,61 @@ class MobScriptYamlTest {
 
 	@Test void rejectsUnknownStepTypes() {
 		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: bad\nsteps:\n  - type: explode\n"));
+	}
+
+	@Test void rewardStepsRoundTripAndRejectInvalidAmounts() {
+		MobScript script = yaml.decode("""
+				id: victory
+				steps:
+				  - reward_currency: {currency: echeloncore:echelon_points, amount: 12}
+				  - reward_item: {item: minecraft:diamond, count: 3}
+				  - reward_loot: {loot_table: minecraft:chests/simple_dungeon, rolls: 2}
+				""");
+		assertEquals(new MobScript.RewardCurrencyStep(
+				net.minecraft.resources.Identifier.parse("echeloncore:echelon_points"), 12), script.steps().getFirst());
+		assertEquals(script, yaml.decode(yaml.encode(script)));
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("""
+				id: bad
+				steps:
+				  - reward_currency: {currency: echeloncore:echelon_points, amount: 0}
+				"""));
+	}
+
+	@Test void raidControlFlowAndSensorsRoundTrip() {
+		MobScript script = yaml.decode("""
+				id: raid
+				steps:
+				  - event_box: {name: plate, min: {x: 1, y: 64, z: 1}, max: {x: 2, y: 66, z: 2}}
+				  - redstone_sensor: {name: switch, position: {x: 4, y: 64, z: 4}}
+				  - variable: {name: charge, operation: set, value: 0}
+				  - event: {condition: '${box.plate >= 2}', variable: charge, operation: increment, value: 1}
+				  - event: {condition: '${kills.raid_add}', variable: charge, operation: increment, value: 1}
+				  - loop: {condition: '${var.charge < 3}', max_iterations: 1000}
+				  - sleep: 1s
+				  - end_loop: true
+				  - if: '${redstone.switch == true}'
+				  - portal_location: {portal: cwp:raid_gate, action: add, location: arena, position: {x: 5, y: 65, z: 5}}
+				  - else: true
+				  - portal_location: {portal: cwp:raid_gate, action: clear, location: arena}
+				  - end_if: true
+				""");
+		assertEquals(script, yaml.decode(yaml.encode(script)));
+		assertEquals(13, script.steps().size());
+		MobScriptFlow flow = MobScriptFlow.compile(script.steps());
+		assertEquals(8, flow.falseJump.get(5));
+		assertEquals(11, flow.falseJump.get(8));
+		assertEquals(13, flow.endJump.get(10));
+		assertEquals(5, flow.loopBack.get(7));
+		ScriptCondition.validate("${portal.cwp:raid_gate >= 1}");
+		ScriptCondition.Context counters = new ScriptCondition.Context(null, Map.of(), Map.of(), Map.of(),
+				Map.of("raid_add", 2L), Map.of(Identifier.parse("cwp:raid_gate"), 3L));
+		assertEquals(2L, ScriptCondition.eventCounter("${kills.raid_add}", counters));
+		assertEquals(3L, ScriptCondition.eventCounter("${portal.cwp:raid_gate}", counters));
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("""
+				id: broken
+				steps:
+				  - if: '${var.charge}'
+				  - sleep: 1s
+				"""));
 	}
 }

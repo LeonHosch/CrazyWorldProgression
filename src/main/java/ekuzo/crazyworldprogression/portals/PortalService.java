@@ -1,6 +1,8 @@
 package ekuzo.crazyworldprogression.portals;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
+import ekuzo.crazyworldprogression.mobforge.MobForge;
+import ekuzo.crazyworldprogression.buildings.BuildingService;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -30,17 +32,20 @@ import java.util.WeakHashMap;
 
 /** Authoritative portal scheduling, entry detection, slot reconstruction, evacuation, cleanup, and reuse. */
 public final class PortalService {
-    public static final Identifier WORKSHOP_DIMENSION = CrazyWorldProgression.id("portal_workshop");
     private static final double TRIGGER_THICKNESS = 0.85;
     private static final double GROUP_ENTRY_DISTANCE = 20.0;
     private static final long PROMPT_LIFETIME_TICKS = 600L;
+    private static final long COORDINATE_TRAVEL_COOLDOWN_TICKS = 20L;
     private static final int CLEANUP_BLOCKS_PER_TICK = 8_192;
     private static final BlockPos INSTANCE_CENTER = new BlockPos(0, 64, 0);
     private static final Map<MinecraftServer, Map<Identifier, List<PortalDefinition>>> PORTALS_BY_DIMENSION =
             new WeakHashMap<>();
-    private static final Map<MinecraftServer, Map<UUID, Identifier>> PORTAL_CONTACTS = new WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<UUID, String>> PORTAL_CONTACTS = new WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<Identifier, Map<Identifier, PlacementState>>> RUNTIME_LOCATIONS = new WeakHashMap<>();
     private static final Map<MinecraftServer, Map<UUID, PendingEntry>> PENDING_ENTRIES = new WeakHashMap<>();
-    private static final Map<MinecraftServer, Map<UUID, ReturnPoint>> RETURN_POINTS = new WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<String, Map<UUID, Long>>> RISK_APPROVALS = new WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<UUID, Long>> COORDINATE_TRAVEL_TICKS = new WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<UUID, java.util.ArrayDeque<ReturnPoint>>> RETURN_POINTS = new WeakHashMap<>();
     private static final Map<MinecraftServer, Map<Identifier, CleanupTask>> CLEANUPS = new WeakHashMap<>();
 
     // Prevent instantiation of the server portal service.
@@ -49,19 +54,30 @@ public final class PortalService {
 
     // Register server lifecycle restoration and lightweight portal enforcement ticks.
     public static void initialize() {
+        RaidService.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             rebuildIndex(server);
             expireDueInstances(server, Instant.now().toEpochMilli());
+            for (ActiveInstance instance : activeInstances(server)) {
+                PortalDefinition portal = portal(server, instance.portalId());
+                if (portal != null) PortalEnvironmentService.restore(server, instance, portal.environment());
+            }
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            PocketEditorService.clearAutoSaves(server);
             synchronized (PORTALS_BY_DIMENSION) {
                 PORTALS_BY_DIMENSION.remove(server);
             }
             synchronized (PORTAL_CONTACTS) {
                 PORTAL_CONTACTS.remove(server);
             }
+            synchronized (RUNTIME_LOCATIONS) { RUNTIME_LOCATIONS.remove(server); }
             synchronized (PENDING_ENTRIES) {
                 PENDING_ENTRIES.remove(server);
+            }
+            synchronized (RISK_APPROVALS) { RISK_APPROVALS.remove(server); }
+            synchronized (COORDINATE_TRAVEL_TICKS) {
+                COORDINATE_TRAVEL_TICKS.remove(server);
             }
             synchronized (RETURN_POINTS) {
                 RETURN_POINTS.remove(server);
@@ -72,11 +88,26 @@ public final class PortalService {
             PortalNetworking.clear(server);
             PortalGroups.clear(server);
         });
+        ServerLifecycleEvents.SERVER_STOPPING.register(PocketEditorService::flushAutoSaves);
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayer player = handler.getPlayer();
-            if (PortalRegistry.instanceSlots().contains(player.level().dimension().identifier())) {
+            Identifier current = player.level().dimension().identifier();
+            boolean orphanInstance = PortalRegistry.instanceSlots().contains(current)
+                    && !PortalData.get(server).instances().containsKey(current.toString());
+            PortalData.StoredInstance currentInstance = PortalData.get(server).instances().get(current.toString());
+            boolean unauthorizedInstance = currentInstance != null
+                    && !currentInstance.admittedPlayers().isEmpty()
+                    && !currentInstance.admittedPlayers().contains(player.getUUID().toString());
+            if ((PortalRegistry.instanceSlots().contains(current)
+                    && (!RaidService.isRaid(server, current) || unauthorizedInstance))
+                    || current.equals(CrazyWorldProgression.id("portal_workshop"))
+                    || (PocketEditorService.isEditorDimension(current)
+                    && !PocketEditorService.isAssignedDimension(server, current))) {
                 teleportBack(server, player);
+                if ((orphanInstance || unauthorizedInstance) && player.isSpectator())
+                    player.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
             }
+            RaidService.onJoin(player);
             PortalNetworking.send(player);
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
@@ -97,10 +128,56 @@ public final class PortalService {
         return PortalData.get(server).portals().get(id.toString());
     }
 
+    /** Named, persistent placements of a shared portal definition. */
+    public static Map<String, PortalPlacement> locations(MinecraftServer server, Identifier id) {
+        Map<String, PortalPlacement> result = new java.util.LinkedHashMap<>();
+        PortalData.get(server).locations(id).forEach((name, location) -> result.put(name,
+                new PortalPlacement(location.dimension(), location.x(), location.y(), location.z())));
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    public record PortalPlacement(Identifier dimension, double x, double y, double z) { }
+
+    public static void addLocation(MinecraftServer server, Identifier id, String name,
+                                   Identifier dimension, Vec3 center) {
+        if (portal(server, id) == null) throw new IllegalArgumentException("Unknown portal: " + id);
+        if (name == null || !name.matches("[a-z0-9_-]{1,48}"))
+            throw new IllegalArgumentException("Location name must use lowercase letters, numbers, _ or -");
+        if (locations(server, id).containsKey(name))
+            throw new IllegalArgumentException("Portal location already exists: " + name);
+        setLocation(server, id, name, dimension, center);
+    }
+
+    public static void setLocation(MinecraftServer server, Identifier id, String name,
+                                   Identifier dimension, Vec3 center) {
+        if (portal(server, id) == null) throw new IllegalArgumentException("Unknown portal: " + id);
+        if (name == null || !name.matches("[a-z0-9_-]{1,48}"))
+            throw new IllegalArgumentException("Location name must use lowercase letters, numbers, _ or -");
+        PortalData.get(server).putLocation(id, name,
+                new PortalData.PortalLocation(dimension, center.x, center.y, center.z));
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
+    }
+
+    public static boolean removeLocation(MinecraftServer server, Identifier id, String name) {
+        if (!PortalData.get(server).removeLocation(id, name)) return false;
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
+        return true;
+    }
+
     // Persist a new directly template-linked portal and refresh its dimension index.
     public static void create(MinecraftServer server, PortalDefinition portal) {
+        createUnplaced(server, portal);
+        PortalData.get(server).putLocation(portal.id(), "original", new PortalData.PortalLocation(
+                portal.dimension(), portal.centerX(), portal.centerY(), portal.centerZ()));
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
+    }
+
+    public static void createUnplaced(MinecraftServer server, PortalDefinition portal) {
         if (portal(server, portal.id()) != null) throw new IllegalArgumentException("Portal already exists: " + portal.id());
-        requireTemplate(server, portal.templateId());
+        validateDestination(server, portal);
         PortalData.get(server).putPortal(portal);
         rebuildIndex(server);
         PortalNetworking.broadcast(server);
@@ -108,10 +185,31 @@ public final class PortalService {
 
     // Replace an existing portal after validating its linked template.
     public static void update(MinecraftServer server, PortalDefinition portal) {
-        if (portal(server, portal.id()) == null) throw new IllegalArgumentException("Unknown portal: " + portal.id());
-        requireTemplate(server, portal.templateId());
+        PortalDefinition old = portal(server, portal.id());
+        if (old == null) throw new IllegalArgumentException("Unknown portal: " + portal.id());
+        if ((!old.templateId().equals(portal.templateId())
+                || old.admission().mode() != portal.admission().mode()
+                || old.raidMode() != portal.raidMode())
+                && PortalData.get(server).instances().values().stream()
+                        .anyMatch(instance -> instance.portalId().equals(portal.id()))) {
+            throw new IllegalStateException("Expire this portal's active instances before changing its destination");
+        }
+        validateDestination(server, portal);
         PortalData.get(server).putPortal(portal);
         rebuildIndex(server);
+        if (!old.environment().equals(portal.environment())) {
+            for (ActiveInstance instance : activeInstances(server)) {
+                if (!instance.portalId().equals(portal.id())) continue;
+                if (old.environment().daytime() != portal.environment().daytime()
+                        || old.environment().dayNightCycle() != portal.environment().dayNightCycle()) {
+                    PortalEnvironmentService.updateTime(server, instance, old.environment(), portal.environment());
+                }
+                if (old.environment().weather() != portal.environment().weather()
+                        || old.environment().weatherCycle() != portal.environment().weatherCycle()) {
+                    PortalEnvironmentService.applyWeather(server, instance, portal.environment());
+                }
+            }
+        }
         PortalNetworking.broadcast(server);
     }
 
@@ -132,38 +230,145 @@ public final class PortalService {
                 .map(PortalService::view).toList();
     }
 
+    public static List<PortalDefinition> visiblePortals(MinecraftServer server) {
+        return portalIndex(server).values().stream().flatMap(List::stream)
+                .sorted(Comparator.comparing((PortalDefinition portal) -> portal.dimension().toString())
+                        .thenComparing(portal -> portal.id().toString())).toList();
+    }
+
+    /** Null outside a portal instance so the world's normal keepInventory rule applies. */
+    public static Boolean keepInventoryOverride(ServerPlayer player) {
+        MinecraftServer server = player.level().getServer();
+        PortalData.StoredInstance instance = PortalData.get(server).instances()
+                .get(player.level().dimension().identifier().toString());
+        if (instance == null) return null;
+        PortalDefinition source = portal(server, instance.portalId());
+        return source == null ? null : source.keepInventory();
+    }
+
+    static void refreshProjectedPortals(MinecraftServer server) {
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
+    }
+
+    public static boolean canBuild(ServerPlayer player) {
+        Identifier dimension = player.level().dimension().identifier();
+        PortalData.StoredInstance instance = PortalData.get(player.level().getServer()).instances()
+                .get(dimension.toString());
+        if (instance == null) return true;
+        PortalDefinition source = portal(player.level().getServer(), instance.portalId());
+        return source != null && source.allowBuilding();
+    }
+
     // Return whether a portal accepts new entries at the current real-world instant.
     public static boolean isOpen(PortalDefinition portal) {
         return portal.schedule().allows(Instant.now());
     }
 
     // Accept or reject a client response only when it matches a recent server-issued nearby portal prompt.
-    public static void respondToEntryPrompt(ServerPlayer player, String portalId, boolean accepted) {
+    public static void respondToEntryPrompt(ServerPlayer player, String portalId, boolean accepted,
+                                            boolean riskConfirmed) {
         MinecraftServer server = player.level().getServer();
         PendingEntry pending;
         synchronized (PENDING_ENTRIES) {
             pending = PENDING_ENTRIES.computeIfAbsent(server, ignored -> new HashMap<>()).remove(player.getUUID());
         }
         if (pending == null || !pending.portalId().toString().equals(portalId)
-                || server.getTickCount() - pending.issuedTick() > PROMPT_LIFETIME_TICKS || !accepted) return;
-        PortalDefinition portal = portal(server, pending.portalId());
+                || server.getTickCount() - pending.issuedTick() > PROMPT_LIFETIME_TICKS) return;
+        if (!accepted) {
+            revokeRiskApproval(server, player.getUUID());
+            return;
+        }
+        PortalDefinition portal = portalIndex(server).getOrDefault(player.level().dimension().identifier(), List.of())
+                .stream().filter(candidate -> contactKey(candidate).equals(pending.contactKey())).findFirst().orElse(null);
         Vec3 center = player.position().add(0.0, 0.9, 0.0);
-        if (portal == null || !portal.dimension().equals(player.level().dimension().identifier())
-                || !portal.bounds(4.0).contains(center) || !isOpen(portal) || !canPlayerEnter(server, player, portal)) {
+        boolean groupRisk = portal != null && !portal.keepInventory() && !portal.isExit()
+                && !portal.isCoordinates()
+                && portal.admission().mode() == PortalDefinition.Mode.PRIVATE
+                && playerInstance(server, portal.id(), player.getUUID()) == null;
+        if (portal == null
+                || !portal.dimension().equals(player.level().dimension().identifier())
+                || !(groupRisk ? portal.isNear(center, GROUP_ENTRY_DISTANCE) : portal.bounds(4.0).contains(center))
+                || !isOpen(portal) || !canPlayerEnter(server, player, portal)) {
             player.sendOverlayMessage(Component.literal("Portal travel could not be confirmed from here"));
             return;
         }
-        if (portal.admission().mode() == PortalDefinition.Mode.PRIVATE
-                && !PortalGroups.leader(server, player.getUUID()).equals(player.getUUID())) {
+        if (portal.isCoordinates() && coordinateTravelOnCooldown(server, player.getUUID(), server.getTickCount())) return;
+        if (!portal.keepInventory() && !riskConfirmed) {
+            player.sendOverlayMessage(Component.literal("Confirm the inventory-loss warning twice to enter"));
+            return;
+        }
+        if (!portal.isExit() && !portal.isCoordinates()
+                && portal.admission().mode() == PortalDefinition.Mode.PRIVATE
+                && playerInstance(server, portal.id(), player.getUUID()) == null
+                && !groupRisk && !PortalGroups.leader(server, player.getUUID()).equals(player.getUUID())) {
             player.sendOverlayMessage(Component.literal("Your group leader must confirm private portal travel"));
             return;
         }
+        if (groupRisk) {
+            confirmRiskGroup(server, player, portal, pending);
+            return;
+        }
         try {
+            ServerLevel source = player.level();
             enter(server, player, portal);
+            MobForge.SCRIPT_EXECUTOR.portalUsed(source, portal.id());
+            RaidService.portalUsed(player, source, portal.id(), portal.entryPolicy());
         } catch (RuntimeException exception) {
             player.sendOverlayMessage(Component.literal("Portal unavailable: " + exception.getMessage()));
             CrazyWorldProgression.LOGGER.error("Portal {} could not accept {}", portal.id(),
                     player.getGameProfile().name(), exception);
+        }
+    }
+
+    private static void confirmRiskGroup(MinecraftServer server, ServerPlayer player,
+                                         PortalDefinition portal, PendingEntry pending) {
+        UUID leaderId = PortalGroups.leader(server, player.getUUID());
+        String key = portal.id() + "|" + leaderId + "|" + pending.contactKey();
+        long tick = server.getTickCount();
+        Map<UUID, Long> approvals;
+        synchronized (RISK_APPROVALS) {
+            approvals = RISK_APPROVALS.computeIfAbsent(server, ignored -> new HashMap<>())
+                    .computeIfAbsent(key, ignored -> new HashMap<>());
+            approvals.put(player.getUUID(), tick);
+            approvals.entrySet().removeIf(entry -> tick - entry.getValue() > PROMPT_LIFETIME_TICKS);
+        }
+        List<UUID> members = PortalGroups.members(server, leaderId);
+        for (UUID memberId : members) {
+            if (approvals.containsKey(memberId)) continue;
+            ServerPlayer member = server.getPlayerList().getPlayer(memberId);
+            if (member == null || member.level() != player.level()
+                    || !portal.isNear(member.position().add(0, 0.9, 0), GROUP_ENTRY_DISTANCE)) continue;
+            synchronized (PENDING_ENTRIES) {
+                Map<UUID, PendingEntry> pendingEntries = PENDING_ENTRIES.computeIfAbsent(server,
+                        ignored -> new HashMap<>());
+                if (pendingEntries.containsKey(memberId)) continue;
+                pendingEntries.put(memberId, new PendingEntry(portal.id(), pending.contactKey(), tick));
+            }
+            PortalNetworking.prompt(member, portal, portal.lifetimeSeconds(), false);
+        }
+        if (!approvals.keySet().containsAll(members)) {
+            player.sendSystemMessage(Component.literal("Waiting for every group member to confirm the inventory-loss warning."));
+            return;
+        }
+        ServerPlayer leader = server.getPlayerList().getPlayer(leaderId);
+        if (leader == null) return;
+        synchronized (RISK_APPROVALS) { RISK_APPROVALS.get(server).remove(key); }
+        try {
+            ServerLevel source = leader.level();
+            enterPrivate(server, leader, portal);
+            MobForge.SCRIPT_EXECUTOR.portalUsed(source, portal.id());
+            RaidService.portalUsed(leader, source, portal.id(), portal.entryPolicy());
+        } catch (RuntimeException exception) {
+            player.sendOverlayMessage(Component.literal("Portal unavailable: " + exception.getMessage()));
+            CrazyWorldProgression.LOGGER.error("Risk-confirmed group could not enter {}", portal.id(), exception);
+        }
+    }
+
+    private static void revokeRiskApproval(MinecraftServer server, UUID playerId) {
+        synchronized (RISK_APPROVALS) {
+            Map<String, Map<UUID, Long>> groups = RISK_APPROVALS.get(server);
+            if (groups != null) groups.values().forEach(approvals -> approvals.remove(playerId));
         }
     }
 
@@ -178,26 +383,35 @@ public final class PortalService {
         return true;
     }
 
-    // Move a game master into CWP's persistent, never-leased void workshop and remember their source.
-    public static void enterWorkshop(ServerPlayer player) {
+    // Move an administrator into this pocket's dedicated persistent build dimension.
+    public static void enterPocketEditor(ServerPlayer player, Identifier pocketId) {
         MinecraftServer server = player.level().getServer();
-        ServerLevel workshop = server.getLevel(dimensionKey(WORKSHOP_DIMENSION));
-        if (workshop == null) throw new IllegalStateException("CWP portal workshop dimension is not registered");
-        synchronized (RETURN_POINTS) {
-            RETURN_POINTS.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(),
-                    new ReturnPoint(player.level().dimension().identifier(), player.position(),
-                            player.getYRot(), player.getXRot()));
+        Identifier dimension = PocketEditorService.ensureEditor(server, pocketId);
+        ServerLevel editor = server.getLevel(dimensionKey(dimension));
+        if (editor == null) throw new IllegalStateException("Pocket editor dimension is not registered");
+        if (PocketEditorService.isEditorDimension(player.level().dimension().identifier())) {
+            leavePocketEditor(player);
         }
-        BlockPos platform = new BlockPos(0, 63, 0);
-        if (workshop.getBlockState(platform).isAir()) workshop.setBlock(platform, Blocks.STONE.defaultBlockState(), 3);
+        BlockPos entry = PocketEditorService.safeEditorEntry(server, editor, pocketId);
+        pushReturn(server, player, new ReturnPoint(player.level().dimension().identifier(), player.position(),
+                player.getYRot(), player.getXRot()));
         player.stopRiding();
-        player.teleportTo(workshop, 0.5, 64.0, 0.5, Set.of(), player.getYRot(), player.getXRot(), false);
+        if (!player.teleportTo(editor, entry.getX() + 0.5, entry.getY(), entry.getZ() + 0.5,
+                Set.of(), player.getYRot(), player.getXRot(), false)) {
+            popReturn(server, player);
+            throw new IllegalStateException("Pocket editor teleport was rejected; try again");
+        }
         player.resetFallDistance();
     }
 
-    // Return a game master from the persistent template workshop to their remembered source.
-    public static boolean leaveWorkshop(ServerPlayer player) {
-        if (!player.level().dimension().identifier().equals(WORKSHOP_DIMENSION)) return false;
+    // Return an administrator from any pocket editor to their remembered source.
+    public static boolean leavePocketEditor(ServerPlayer player) {
+        if (!PocketEditorService.isEditorDimension(player.level().dimension().identifier())) return false;
+        Identifier pocket = PocketEditorService.pocketForDimension(player.level().getServer(),
+                player.level().dimension().identifier());
+        if (pocket != null && !PocketEditorService.saveNow(player.level().getServer(), pocket)) {
+            player.sendSystemMessage(Component.literal("Pocket autosave is pending; check the server log"));
+        }
         teleportBack(player.level().getServer(), player);
         return true;
     }
@@ -232,6 +446,13 @@ public final class PortalService {
             publicInstance = view(instance);
         }
         ekuzo.crazyworldprogression.api.mobforge.MobForgeApi.cancelPocketRuns(publicInstance.instanceId());
+        RaidService.remove(server, slotDimension);
+        synchronized (RUNTIME_LOCATIONS) {
+            Map<Identifier, Map<Identifier, PlacementState>> locations = RUNTIME_LOCATIONS.get(server);
+            if (locations != null) locations.remove(slotDimension);
+        }
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
         PortalRegistry.expiring(server, publicInstance);
         for (ServerPlayer player : new ArrayList<>(level.players())) teleportBack(server, player);
         PortalTemplateService.discardEntities(level, instance);
@@ -247,7 +468,12 @@ public final class PortalService {
     // Process entries and cleanup every tick, then schedules and expiry once per second.
     private static void tick(MinecraftServer server) {
         long tick = server.getTickCount();
+        PortalEnvironmentService.tickIndependentTime(server);
+        PocketEditorService.tickAutoSave(server);
+        ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.tick(server);
+        PortalPreviewNetworking.tick(server);
         processCleanups(server);
+        if (tick % 20L == 0L) expireEmptyPrivateInstances(server);
         detectEntries(server, tick);
         if (tick % 20L == 0L) {
             PortalNetworking.broadcastIfChanged(server);
@@ -258,7 +484,7 @@ public final class PortalService {
     // Detect first contact with an open portal and request confirmation without repeatedly reopening the prompt.
     private static void detectEntries(MinecraftServer server, long tick) {
         Map<Identifier, List<PortalDefinition>> index = portalIndex(server);
-        Map<UUID, Identifier> contacts;
+        Map<UUID, String> contacts;
         synchronized (PORTAL_CONTACTS) {
             contacts = PORTAL_CONTACTS.computeIfAbsent(server, ignored -> new HashMap<>());
         }
@@ -266,19 +492,24 @@ public final class PortalService {
             Identifier dimension = player.level().dimension().identifier();
             Vec3 center = player.position().add(0.0, 0.9, 0.0);
             PortalDefinition touching = index.getOrDefault(dimension, List.of()).stream()
-                    .filter(portal -> portal.contains(center, TRIGGER_THICKNESS) && isOpen(portal))
+                    .filter(portal -> portal.contains(center, TRIGGER_THICKNESS) && isOpen(portal)
+                            && (!portal.isExit()
+                                || PortalRegistry.instanceSlots().contains(dimension)))
                     .findFirst().orElse(null);
             if (touching == null) {
                 contacts.remove(player.getUUID());
                 continue;
             }
-            if (touching.id().equals(contacts.put(player.getUUID(), touching.id()))) continue;
+            if (contactKey(touching).equals(contacts.put(player.getUUID(), contactKey(touching)))) continue;
             if (!canPlayerEnter(server, player, touching)) {
                 player.sendOverlayMessage(Component.literal("You have already used "
                         + touching.effectiveDisplayName()));
                 continue;
             }
-            if (touching.admission().mode() == PortalDefinition.Mode.PRIVATE
+            if (touching.isCoordinates() && coordinateTravelOnCooldown(server, player.getUUID(), tick)) continue;
+            if (!touching.isExit() && !touching.isCoordinates() && touching.keepInventory()
+                    && touching.admission().mode() == PortalDefinition.Mode.PRIVATE
+                    && playerInstance(server, touching.id(), player.getUUID()) == null
                     && !PortalGroups.leader(server, player.getUUID()).equals(player.getUUID())) continue;
             synchronized (PENDING_ENTRIES) {
                 PendingEntry pending = PENDING_ENTRIES.computeIfAbsent(server, ignored -> new HashMap<>())
@@ -293,21 +524,33 @@ public final class PortalService {
     private static void requestEntryConfirmation(MinecraftServer server, ServerPlayer player,
                                                  PortalDefinition portal, long tick) {
         long now = Instant.now().toEpochMilli();
-        PortalData.StoredInstance instance = portal.admission().mode() == PortalDefinition.Mode.PUBLIC
-                ? publicInstance(server, portal.id()) : null;
+        PortalData.StoredInstance instance = portal.isExit() || portal.isCoordinates()
+                ? null : playerInstance(server, portal.id(), player.getUUID());
+        if (instance == null && !portal.isCoordinates()
+                && portal.admission().mode() == PortalDefinition.Mode.PUBLIC) {
+            instance = publicInstance(server, portal.id());
+        }
         boolean existing = instance != null && instance.expiresEpochMillis() > now;
-        long seconds = existing ? Math.max(1L, (instance.expiresEpochMillis() - now + 999L) / 1_000L)
+        long seconds = portal.isExit() ? 0L : portal.lifetimeSeconds() == 0L ? -1L
+                : existing ? Math.max(1L, (instance.expiresEpochMillis() - now + 999L) / 1_000L)
                 : portal.lifetimeSeconds();
         synchronized (PENDING_ENTRIES) {
             PENDING_ENTRIES.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(),
-                    new PendingEntry(portal.id(), tick));
+                    new PendingEntry(portal.id(), contactKey(portal), tick));
         }
         PortalNetworking.prompt(player, portal, seconds, existing);
     }
 
     // Check the persistent per-player entry record against one portal's configured reuse policy.
     private static boolean canPlayerEnter(MinecraftServer server, ServerPlayer player, PortalDefinition portal) {
-        return portal.entryPolicy() == PortalDefinition.EntryPolicy.REPEATABLE
+        if (!RaidService.canUse(player, portal)) return false;
+        if (portal.entryPolicy() == PortalDefinition.EntryPolicy.ONCE_PER_ATTEMPT
+                && RaidService.isRaid(server, player.level().dimension().identifier())) return true;
+        if (portal.isCoordinates()) return portal.entryPolicy() == PortalDefinition.EntryPolicy.REPEATABLE
+                || !PortalData.get(server).hasPlayerEntry(portal.id(), player.getUUID());
+        return portal.isExit()
+                || playerInstance(server, portal.id(), player.getUUID()) != null
+                || portal.entryPolicy() == PortalDefinition.EntryPolicy.REPEATABLE
                 || portal.admission().mode() == PortalDefinition.Mode.PRIVATE
                         && portal.entryPolicy() == PortalDefinition.EntryPolicy.ONCE_PER_INSTANCE
                 || !PortalData.get(server).hasPlayerEntry(portal.id(), player.getUUID());
@@ -321,10 +564,58 @@ public final class PortalService {
         synchronized (PENDING_ENTRIES) {
             PENDING_ENTRIES.computeIfAbsent(server, ignored -> new HashMap<>()).remove(playerId);
         }
+        synchronized (COORDINATE_TRAVEL_TICKS) {
+            COORDINATE_TRAVEL_TICKS.computeIfAbsent(server, ignored -> new HashMap<>()).remove(playerId);
+        }
+    }
+
+    private static boolean coordinateTravelOnCooldown(MinecraftServer server, UUID playerId, long tick) {
+        synchronized (COORDINATE_TRAVEL_TICKS) {
+            Long previous = COORDINATE_TRAVEL_TICKS.computeIfAbsent(server, ignored -> new HashMap<>()).get(playerId);
+            return previous != null && tick - previous < COORDINATE_TRAVEL_COOLDOWN_TICKS;
+        }
+    }
+
+    private static void enterCoordinates(MinecraftServer server, ServerPlayer player, PortalDefinition portal,
+                                         long tick) {
+        PortalDefinition.CoordinateTarget target = portal.coordinateTarget()
+                .orElseThrow(() -> new IllegalStateException("destination coordinates are missing"));
+        ServerLevel destination = player.level();
+        BlockPos block = BlockPos.containing(target.x(), target.y(), target.z());
+        if (block.getY() < destination.getMinY()
+                || block.getY() >= destination.getMinY() + destination.getLogicalHeight()
+                || !destination.getWorldBorder().isWithinBounds(block)) {
+            throw new IllegalStateException("destination coordinates are outside this world");
+        }
+        player.stopRiding();
+        if (!player.teleportTo(destination, target.x(), target.y(), target.z(), Set.of(),
+                player.getYRot(), player.getXRot(), false)) {
+            throw new IllegalStateException("destination rejected teleport");
+        }
+        player.resetFallDistance();
+        synchronized (COORDINATE_TRAVEL_TICKS) {
+            COORDINATE_TRAVEL_TICKS.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(), tick);
+        }
+        if (portal.entryPolicy() != PortalDefinition.EntryPolicy.REPEATABLE
+                && (portal.entryPolicy() != PortalDefinition.EntryPolicy.ONCE_PER_ATTEMPT
+                    || !RaidService.isRaid(server, destination.dimension().identifier()))) {
+            PortalData.get(server).recordPlayerEntry(portal.id(), player.getUUID());
+        }
     }
 
     // Allocate or reuse an instance, remember the return point, and teleport one entering player.
     private static void enter(MinecraftServer server, ServerPlayer player, PortalDefinition portal) {
+        if (portal.isCoordinates()) {
+            enterCoordinates(server, player, portal, server.getTickCount());
+            return;
+        }
+        if (portal.isExit()) {
+            if (!PortalRegistry.instanceSlots().contains(player.level().dimension().identifier())) {
+                throw new IllegalStateException("Return portals can only be used inside an instance");
+            }
+            returnToMainWorld(server, player);
+            return;
+        }
         if (portal.admission().mode() == PortalDefinition.Mode.PRIVATE) {
             enterPrivate(server, player, portal);
             return;
@@ -344,7 +635,22 @@ public final class PortalService {
                 .findFirst().orElse(null);
     }
 
+    private static PortalData.StoredInstance playerInstance(MinecraftServer server, Identifier portalId, UUID playerId) {
+        long now = Instant.now().toEpochMilli();
+        return PortalData.get(server).instances().values().stream()
+                .filter(instance -> instance.portalId().equals(portalId)
+                        && instance.expiresEpochMillis() > now
+                        && (instance.admittedPlayers().contains(playerId.toString())
+                            || instance.visitors().contains(playerId.toString())))
+                .findFirst().orElse(null);
+    }
+
     private static void enterPrivate(MinecraftServer server, ServerPlayer player, PortalDefinition portal) {
+        PortalData.StoredInstance existing = playerInstance(server, portal.id(), player.getUUID());
+        if (existing != null) {
+            teleportInto(server, player, portal, existing);
+            return;
+        }
         UUID leader = PortalGroups.leader(server, player.getUUID());
         if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your group leader can start private travel");
         List<UUID> members = PortalGroups.members(server, leader);
@@ -379,27 +685,30 @@ public final class PortalService {
 
     private static void teleportInto(MinecraftServer server, ServerPlayer player, PortalDefinition portal,
                                      PortalData.StoredInstance instance) {
+        boolean sourceRaid = RaidService.isRaid(server, player.level().dimension().identifier());
         ServerLevel destination = server.getLevel(dimensionKey(instance.slotDimension()));
         if (destination == null) throw new IllegalStateException("Missing instance dimension " + instance.slotDimension());
         PortalTemplateService.TemplateInfo template = requireTemplate(server, instance.templateId());
         Vec3 entry = new Vec3(instance.originX() + template.spawnX() + 0.5,
                 instance.originY() + template.spawnY(), instance.originZ() + template.spawnZ() + 0.5);
-        synchronized (RETURN_POINTS) {
-            RETURN_POINTS.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(),
-                    new ReturnPoint(player.level().dimension().identifier(), portal.safeReturnPosition(
-                            player.position(), player.position().add(0.0, 0.9, 0.0), player.getDeltaMovement()),
-                            player.getYRot(), player.getXRot()));
-        }
+        pushReturn(server, player, new ReturnPoint(player.level().dimension().identifier(),
+                portal.safeReturnPosition(player.position(), player.position().add(0.0, 0.9, 0.0),
+                        player.getDeltaMovement()), player.getYRot(), player.getXRot()));
         player.stopRiding();
         if (!player.teleportTo(destination, entry.x, entry.y, entry.z, Set.of(),
                 player.getYRot(), player.getXRot(), false)) {
+            popReturn(server, player);
             throw new IllegalStateException("destination rejected teleport");
         }
+        PortalEnvironmentService.syncWeather(player);
         if (portal.entryPolicy() != PortalDefinition.EntryPolicy.REPEATABLE
+                && (portal.entryPolicy() != PortalDefinition.EntryPolicy.ONCE_PER_ATTEMPT
+                    || !sourceRaid)
                 && (portal.admission().mode() == PortalDefinition.Mode.PUBLIC
                     || portal.entryPolicy() == PortalDefinition.EntryPolicy.ONCE_EVER)) {
             PortalData.get(server).recordPlayerEntry(portal.id(), player.getUUID());
         }
+        PortalData.get(server).putInstance(instance.withVisitor(player.getUUID()));
         player.resetFallDistance();
     }
 
@@ -418,14 +727,22 @@ public final class PortalService {
                 || origin.getY() + template.sizeY() > destination.getMinY() + destination.getLogicalHeight()) {
             throw new IllegalStateException("template height does not fit the instance dimension");
         }
+        BuildingService.clearInstance(destination);
         PortalTemplateService.reconstruct(server, destination, template.id(), origin);
         long created = Instant.now().toEpochMilli();
         PortalData.StoredInstance instance = new PortalData.StoredInstance(portal.id(), template.id(), slot,
-                created, Math.addExact(created, Math.multiplyExact(portal.lifetimeSeconds(), 1_000L)),
+                created, portal.lifetimeSeconds() == 0L ? Long.MAX_VALUE
+                        : Math.addExact(created, Math.multiplyExact(portal.lifetimeSeconds(), 1_000L)),
                 origin.getX(), origin.getY(), origin.getZ(), template.sizeX(), template.sizeY(), template.sizeZ(),
                 admittedPlayers);
         PortalData.get(server).putInstance(instance);
+        if (portal.raidMode()) RaidService.prepare(server, instance);
+        PortalEnvironmentService.applyTime(server, view(instance), portal.environment());
+        PortalEnvironmentService.applyWeather(server, view(instance), portal.environment());
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
         PortalRegistry.created(server, view(instance));
+        PocketEditorService.startScripts(server, template.id(), destination, origin, view(instance).instanceId());
         CrazyWorldProgression.LOGGER.info("Reconstructed portal template {} in slot {} for portal {}",
                 template.id(), slot, portal.id());
         return instance;
@@ -437,6 +754,15 @@ public final class PortalService {
                 .filter(instance -> instance.expiresEpochMillis() <= nowEpochMillis)
                 .map(PortalData.StoredInstance::slotDimension).toList();
         due.forEach(id -> expireInstance(server, id));
+    }
+
+    private static void expireEmptyPrivateInstances(MinecraftServer server) {
+        for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
+            if (instance.admittedPlayers().isEmpty()) continue;
+            ServerLevel level = server.getLevel(dimensionKey(instance.slotDimension()));
+            if (level != null && level.players().isEmpty() && !RaidService.retainEmpty(server, instance))
+                expireInstance(server, instance.slotDimension());
+        }
     }
 
     // Spread destructive block removal across ticks so large expired templates cannot freeze the server.
@@ -455,8 +781,12 @@ public final class PortalService {
             synchronized (CLEANUPS) {
                 Map<Identifier, CleanupTask> live = CLEANUPS.get(server);
                 if (next < 0L) {
+                    BuildingService.clearInstance(level);
+                    PortalTemplateService.discardEntities(level, task.instance());
                     live.remove(entry.getKey());
                     PortalData.get(server).removeInstance(entry.getKey());
+                    rebuildIndex(server);
+                    PortalNetworking.broadcast(server);
                     Identifier portalId = task.instance().portalId();
                     PortalDefinition portal = portal(server, portalId);
                     boolean last = PortalData.get(server).instances().values().stream()
@@ -477,7 +807,12 @@ public final class PortalService {
     private static void teleportBack(MinecraftServer server, ServerPlayer player) {
         ReturnPoint point;
         synchronized (RETURN_POINTS) {
-            point = RETURN_POINTS.computeIfAbsent(server, ignored -> new HashMap<>()).remove(player.getUUID());
+            var points = RETURN_POINTS.computeIfAbsent(server, ignored -> new HashMap<>())
+                    .get(player.getUUID());
+            while (points != null && !points.isEmpty() && !validReturnDimension(server, points.peekLast().dimension())) {
+                points.removeLast();
+            }
+            point = points == null ? null : points.peekLast();
         }
         ServerLevel destination = point == null ? server.overworld() : server.getLevel(dimensionKey(point.dimension()));
         if (destination == null) destination = server.overworld();
@@ -488,25 +823,196 @@ public final class PortalService {
         ServerPlayer.RespawnConfig respawn = player.getRespawnConfig();
         if (respawn != null && (PortalRegistry.instanceSlots().contains(
                 respawn.respawnData().dimension().identifier())
-                || respawn.respawnData().dimension().identifier().equals(WORKSHOP_DIMENSION))) {
+                || PocketEditorService.isEditorDimension(respawn.respawnData().dimension().identifier()))) {
             player.setRespawnPosition(null, false);
         }
         player.stopRiding();
-        player.teleportTo(destination, feet.x, feet.y, feet.z, Set.<Relative>of(), yaw, pitch, false);
+        if (!player.teleportTo(destination, feet.x, feet.y, feet.z, Set.<Relative>of(), yaw, pitch, false)) {
+            throw new IllegalStateException("Return teleport was rejected; try again");
+        }
+        if (point != null) popReturn(server, player);
         player.resetFallDistance();
+    }
+
+    private static void returnToMainWorld(MinecraftServer server, ServerPlayer player) {
+        Identifier overworld = server.overworld().dimension().identifier();
+        ReturnPoint mainWorldPoint = null;
+        synchronized (RETURN_POINTS) {
+            var stacks = RETURN_POINTS.get(server);
+            var stack = stacks == null ? null : stacks.get(player.getUUID());
+            if (stack != null) for (var iterator = stack.descendingIterator(); iterator.hasNext();) {
+                ReturnPoint candidate = iterator.next();
+                if (candidate.dimension().equals(overworld)) { mainWorldPoint = candidate; break; }
+            }
+        }
+        Vec3 feet = mainWorldPoint == null
+                ? Vec3.atBottomCenterOf(server.overworld().getRespawnData().pos()) : mainWorldPoint.feet();
+        float yaw = mainWorldPoint == null ? 0.0F : mainWorldPoint.yaw();
+        float pitch = mainWorldPoint == null ? 0.0F : mainWorldPoint.pitch();
+        player.stopRiding();
+        if (!player.teleportTo(server.overworld(), feet.x, feet.y, feet.z, Set.<Relative>of(), yaw, pitch, false)) {
+            throw new IllegalStateException("Exit teleport was rejected; try again");
+        }
+        synchronized (RETURN_POINTS) {
+            var stacks = RETURN_POINTS.get(server);
+            if (stacks != null) stacks.remove(player.getUUID());
+        }
+        player.resetFallDistance();
+    }
+
+    private static boolean validReturnDimension(MinecraftServer server, Identifier dimension) {
+        if (PortalRegistry.instanceSlots().contains(dimension)) {
+            PortalData.StoredInstance instance = PortalData.get(server).instances().get(dimension.toString());
+            if (instance == null || instance.expiresEpochMillis() <= Instant.now().toEpochMilli()) return false;
+            synchronized (CLEANUPS) {
+                return !CLEANUPS.computeIfAbsent(server, ignored -> new HashMap<>()).containsKey(dimension);
+            }
+        }
+        if (PocketEditorService.isEditorDimension(dimension)) {
+            return PocketEditorService.isAssignedDimension(server, dimension);
+        }
+        return server.getLevel(dimensionKey(dimension)) != null;
+    }
+
+    private static void pushReturn(MinecraftServer server, ServerPlayer player, ReturnPoint point) {
+        synchronized (RETURN_POINTS) {
+            RETURN_POINTS.computeIfAbsent(server, ignored -> new HashMap<>())
+                    .computeIfAbsent(player.getUUID(), ignored -> new java.util.ArrayDeque<>()).addLast(point);
+        }
+    }
+
+    private static void popReturn(MinecraftServer server, ServerPlayer player) {
+        synchronized (RETURN_POINTS) {
+            var points = RETURN_POINTS.get(server);
+            if (points == null) return;
+            var stack = points.get(player.getUUID());
+            if (stack == null) return;
+            if (!stack.isEmpty()) stack.removeLast();
+            if (stack.isEmpty()) points.remove(player.getUUID());
+        }
     }
 
     // Rebuild the dimension grouping after one persistent portal mutation.
     private static void rebuildIndex(MinecraftServer server) {
         Map<Identifier, List<PortalDefinition>> mutable = new HashMap<>();
-        for (PortalDefinition portal : portals(server)) {
-            mutable.computeIfAbsent(portal.dimension(), ignored -> new ArrayList<>()).add(portal);
+        for (PortalDefinition definition : portals(server)) {
+            for (PortalPlacement location : locations(server, definition.id()).values()) {
+                PortalDefinition portal = definition.movedTo(location.dimension(),
+                        new Vec3(location.x(), location.y(), location.z()));
+                if (portal.baseActive() && !suppressed(server, portal.dimension(), portal.id()))
+                    mutable.computeIfAbsent(portal.dimension(), ignored -> new ArrayList<>()).add(portal);
+                Identifier sourcePocket = PocketEditorService.pocketForDimension(server, portal.dimension());
+                if (sourcePocket == null) continue;
+                BlockPos captureOrigin = PocketEditorService.captureOrigin(server, sourcePocket);
+                if (captureOrigin == null) continue;
+                for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
+                    if (!instance.templateId().equals(sourcePocket)) continue;
+                    if (portal.baseActive() && !suppressed(server, instance.slotDimension(), portal.id()))
+                        mutable.computeIfAbsent(instance.slotDimension(), ignored -> new ArrayList<>())
+                                .add(projectPortal(portal, captureOrigin, instance));
+                }
+            }
+        }
+        synchronized (RUNTIME_LOCATIONS) {
+            Map<Identifier, Map<Identifier, PlacementState>> byDimension = RUNTIME_LOCATIONS.get(server);
+            if (byDimension != null) byDimension.forEach((dimension, byPortal) -> byPortal.forEach((id, state) -> {
+                PortalDefinition preset = portal(server, id);
+                if (preset == null) return;
+                PortalDefinition basis = preset;
+                PortalData.StoredInstance instance = PortalData.get(server).instances().get(dimension.toString());
+                Identifier pocket = PocketEditorService.pocketForDimension(server, preset.dimension());
+                if (instance != null && pocket != null && pocket.equals(instance.templateId())) {
+                    BlockPos origin = PocketEditorService.captureOrigin(server, pocket);
+                    if (origin != null) basis = projectPortal(preset, origin, instance);
+                }
+                PortalDefinition placed = basis;
+                for (Placement location : state.locations.values()) {
+                    PortalDefinition projected = placed.movedTo(dimension, location.position());
+                    if (location.target() != null) projected = projected.withCoordinateTarget(
+                            new PortalDefinition.CoordinateTarget(location.target().x,
+                                    location.target().y, location.target().z));
+                    mutable.computeIfAbsent(dimension, ignored -> new ArrayList<>()).add(projected);
+                }
+            }));
         }
         Map<Identifier, List<PortalDefinition>> frozen = new HashMap<>();
         mutable.forEach((dimension, definitions) -> frozen.put(dimension, List.copyOf(definitions)));
         synchronized (PORTALS_BY_DIMENSION) {
             PORTALS_BY_DIMENSION.put(server, Map.copyOf(frozen));
         }
+    }
+
+    private static String contactKey(PortalDefinition portal) {
+        return portal.id() + "|" + portal.dimension() + "|" + portal.centerX() + "|" + portal.centerY()
+                + "|" + portal.centerZ();
+    }
+
+    private static boolean suppressed(MinecraftServer server, Identifier dimension, Identifier portalId) {
+        synchronized (RUNTIME_LOCATIONS) {
+            var byDimension = RUNTIME_LOCATIONS.get(server);
+            var byPortal = byDimension == null ? null : byDimension.get(dimension);
+            var state = byPortal == null ? null : byPortal.get(portalId);
+            return state != null && state.suppressBase;
+        }
+    }
+
+    /** Change a preset's named placements in one live world or pocket instance. */
+    public static void changeLocation(MinecraftServer server, Identifier dimension, Identifier portalId,
+                                      String action, String locationId, Vec3 position) {
+        changeLocation(server, dimension, portalId, action, locationId, position, null);
+    }
+
+    public static void changeLocation(MinecraftServer server, Identifier dimension, Identifier portalId,
+                                      String action, String locationId, Vec3 position, Vec3 target) {
+        PortalDefinition preset = portal(server, portalId);
+        if (preset == null) throw new IllegalArgumentException("Unknown portal preset " + portalId);
+        if (target != null && !preset.isCoordinates())
+            throw new IllegalArgumentException("Only Coordinates portal presets accept a script target");
+        synchronized (RUNTIME_LOCATIONS) {
+            PlacementState state = RUNTIME_LOCATIONS.computeIfAbsent(server, ignored -> new HashMap<>())
+                    .computeIfAbsent(dimension, ignored -> new HashMap<>())
+                    .computeIfAbsent(portalId, ignored -> new PlacementState());
+            switch (action) {
+                case "add" -> state.locations.put(locationId, new Placement(position, target));
+                case "remove" -> state.locations.remove(locationId);
+                case "clear" -> { state.locations.clear(); state.suppressBase = true; }
+                default -> throw new IllegalArgumentException("Unknown portal location action " + action);
+            }
+        }
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
+    }
+
+    static void resetRuntimeLocations(MinecraftServer server, Identifier dimension) {
+        synchronized (RUNTIME_LOCATIONS) {
+            Map<Identifier, Map<Identifier, PlacementState>> locations = RUNTIME_LOCATIONS.get(server);
+            if (locations != null) locations.remove(dimension);
+        }
+        rebuildIndex(server);
+        PortalNetworking.broadcast(server);
+    }
+
+    static UUID instanceId(PortalData.StoredInstance instance) { return view(instance).instanceId(); }
+
+    private static final class PlacementState {
+        private boolean suppressBase;
+        private final Map<String, Placement> locations = new java.util.LinkedHashMap<>();
+    }
+
+    private record Placement(Vec3 position, Vec3 target) { }
+
+    static PortalDefinition projectPortal(PortalDefinition portal, BlockPos captureOrigin,
+                                          PortalData.StoredInstance instance) {
+        Vec3 center = new Vec3(instance.originX() + portal.centerX() - captureOrigin.getX(),
+                instance.originY() + portal.centerY() - captureOrigin.getY(),
+                instance.originZ() + portal.centerZ() - captureOrigin.getZ());
+        PortalDefinition projected = portal.movedTo(instance.slotDimension(), center);
+        if (!portal.isCoordinates() || portal.coordinateTarget().isEmpty()) return projected;
+        PortalDefinition.CoordinateTarget target = portal.coordinateTarget().orElseThrow();
+        return projected.withCoordinateTarget(new PortalDefinition.CoordinateTarget(
+                target.x() + instance.originX() - captureOrigin.getX(),
+                target.y() + instance.originY() - captureOrigin.getY(),
+                target.z() + instance.originZ() - captureOrigin.getZ()));
     }
 
     // Return an initialized dimension index even when queried unusually early.
@@ -526,6 +1032,16 @@ public final class PortalService {
         PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
         if (template == null) throw new IllegalArgumentException("Unknown CWP portal template: " + id);
         return template;
+    }
+
+    private static void validateDestination(MinecraftServer server, PortalDefinition portal) {
+        if (!portal.keepInventory() && (portal.isCoordinates() || portal.isExit()))
+            throw new IllegalArgumentException("Keep inventory can be disabled only for pocket portals");
+        if (portal.isCoordinates()) {
+            if (portal.coordinateTarget().isEmpty()) {
+                throw new IllegalArgumentException("Coordinate portals need destination X, Y and Z");
+            }
+        } else if (!portal.isExit()) requireTemplate(server, portal.templateId());
     }
 
     // Convert an identifier into the registry key required by Minecraft's level lookup.
@@ -564,7 +1080,7 @@ public final class PortalService {
     private record ReturnPoint(Identifier dimension, Vec3 feet, float yaw, float pitch) {
     }
 
-    private record PendingEntry(Identifier portalId, long issuedTick) {
+    private record PendingEntry(Identifier portalId, String contactKey, long issuedTick) {
     }
 
     private record CleanupTask(PortalData.StoredInstance instance, long nextIndex) {

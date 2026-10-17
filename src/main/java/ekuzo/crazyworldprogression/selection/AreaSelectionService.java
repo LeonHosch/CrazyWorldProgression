@@ -91,6 +91,31 @@ public final class AreaSelectionService {
         return updated;
     }
 
+    // Apply precise panel coordinates as one validated selection, including its in-bounds anchor.
+    public static Selection setCoordinates(ServerPlayer player, Identifier owner, BlockPos first,
+                                           BlockPos second, BlockPos anchor) {
+        if (owner == null || first == null || second == null || anchor == null) {
+            throw new IllegalArgumentException("Selection coordinates must be complete");
+        }
+        for (BlockPos point : List.of(first, second, anchor)) {
+            if (point.getY() < player.level().getMinY() || point.getY() >= player.level().getMaxY()
+                    || Math.abs((long) point.getX()) > 29_999_984L
+                    || Math.abs((long) point.getZ()) > 29_999_984L) {
+                throw new IllegalArgumentException("Selection coordinate is outside the dimension build bounds");
+            }
+        }
+        Selection updated = new Selection(owner, player.level().dimension().identifier(),
+                first.immutable(), second.immutable(), anchor.immutable());
+        if (!updated.contains(anchor)) throw new IllegalArgumentException("Spawn must be inside the selection");
+        updated.volume(); // Reject arithmetic overflow before storing a selection.
+        synchronized (SELECTIONS) {
+            SELECTIONS.put(player.getUUID(), updated);
+        }
+        AreaSelectionRegistry.changed(player, updated);
+        AreaSelectionNetworking.send(player, true);
+        return updated;
+    }
+
     // Validate and apply a client selector click without permitting arbitrary remote coordinates.
     static void selectPoint(ServerPlayer player, BlockPos position, boolean first) {
         if (!isSelecting(player) || !player.level().isLoaded(position)
@@ -261,9 +286,10 @@ public final class AreaSelectionService {
 
     // Calculate an inclusive cuboid volume using widened arithmetic.
     private static long volume(BlockPos minimum, BlockPos maximum) {
-        return (long) (maximum.getX() - minimum.getX() + 1)
-                * (maximum.getY() - minimum.getY() + 1)
-                * (maximum.getZ() - minimum.getZ() + 1);
+        return Math.multiplyExact(Math.multiplyExact(
+                (long) maximum.getX() - minimum.getX() + 1L,
+                (long) maximum.getY() - minimum.getY() + 1L),
+                (long) maximum.getZ() - minimum.getZ() + 1L);
     }
 
     /** One mod-owned selection session; corners may be incomplete while the player is choosing them. */

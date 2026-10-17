@@ -1,4 +1,6 @@
 {
+  "key.category.crazy-world-progression.admin": "Crazy World Progression",
+  "key.crazy-world-progression.open_admin": "Admin-Panel öffnen (Strg+Umschalt+A)",
   "screen.crazy-world-progression.skill_trees.title": "Fähigkeitsbäume",
   "screen.crazy-world-progression.skill_trees.free": "Kostenlos",
   "screen.crazy-world-progression.skill_trees.status.already_unlocked": "Bereits freigeschaltet",

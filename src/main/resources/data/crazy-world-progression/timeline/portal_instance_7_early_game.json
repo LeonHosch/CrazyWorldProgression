@@ -1,0 +1,18 @@
+{
+  "clock": "crazy-world-progression:portal_instance_7",
+  "tracks": {
+    "minecraft:gameplay/can_pillager_patrol_spawn": {
+      "keyframes": [
+        {
+          "ticks": 0,
+          "value": false
+        },
+        {
+          "ticks": 120000,
+          "value": true
+        }
+      ],
+      "modifier": "and"
+    }
+  }
+}

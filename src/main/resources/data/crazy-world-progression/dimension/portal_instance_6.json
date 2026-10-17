@@ -1,9 +1,9 @@
 {
-  "type": "minecraft:overworld",
+  "type": "crazy-world-progression:portal_instance_6",
   "generator": {
     "type": "minecraft:flat",
     "settings": {
-      "biome": "minecraft:the_void",
+      "biome": "minecraft:plains",
       "layers": [
         {
           "block": "minecraft:air",

@@ -1,6 +1,7 @@
 package ekuzo.crazyworldprogression.admin;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
+import ekuzo.crazyworldprogression.buildings.BuildingService;
 import ekuzo.crazyworldprogression.currency.CurrencyDefinition;
 import ekuzo.crazyworldprogression.currency.CurrencyRegistry;
 import ekuzo.crazyworldprogression.currency.CurrencyService;
@@ -12,6 +13,7 @@ import ekuzo.crazyworldprogression.portals.PortalDefinition;
 import ekuzo.crazyworldprogression.portals.PortalRegistry;
 import ekuzo.crazyworldprogression.portals.PortalService;
 import ekuzo.crazyworldprogression.portals.PortalTemplateService;
+import ekuzo.crazyworldprogression.portals.PocketEditorService;
 import ekuzo.crazyworldprogression.progression.skilltrees.BaselineStatRegistry;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillStatRegistry;
 import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeDefinition;
@@ -27,6 +29,7 @@ import ekuzo.crazyworldprogression.api.mobforge.SpawnContext;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -54,25 +57,41 @@ import static ekuzo.crazyworldprogression.admin.AdminPanelRegistry.Tone.WARNING;
 public final class CwpAdminModule {
     private static final String OVERVIEW = "overview";
     private static final String POCKETS = "pockets";
+    private static final String POCKET_NEW = POCKETS + "/new";
+    private static final String POCKET_EDIT = POCKETS + "/edit/";
+    private static final String POCKET_INSTANCES = POCKETS + "/instances";
+    private static final String SCRIPT_SEGMENT = "/scripts/";
     private static final String PORTALS = "portals";
     private static final String PORTAL_NEW = PORTALS + "/new";
     private static final String PORTAL_EDIT = PORTALS + "/edit/";
+    private static final String BUILDINGS = "buildings";
+    private static final String BUILDING_NEW = BUILDINGS + "/new";
     private static final String CURRENCIES = "currencies";
+    private static final String CURRENCY_EDIT = CURRENCIES + "/edit/";
     private static final String SKILL_TREES = "skill_trees";
     private static final String EVENTS = "events";
     private static final String MOBFORGE = "mobforge";
+    private static final String MOB_MOBS = MOBFORGE + "/mobs";
+    private static final String MOB_SCRIPTS = MOBFORGE + "/script-list";
+    private static final String MOB_API = MOBFORGE + "/registered";
+    private static final String MOB_EDIT = MOB_MOBS + "/edit/";
+    private static final String MOB_SCRIPT_EDIT = MOBFORGE + SCRIPT_SEGMENT;
     private static final List<String> SHAPES = List.of("Rectangle", "Ellipse", "Diamond", "Triangle");
     private static final List<String> PLANES = List.of(
             "Vertical north/south", "Vertical east/west", "Horizontal floor/ceiling");
     private static final List<String> PORTAL_COLORS = Arrays.stream(PortalDefinition.PortalColor.values())
             .map(color -> PortalDefinition.PortalColor.displayName(color.rgb())).toList();
-    private static final List<String> ENTRY_POLICIES = List.of("Repeatable", "Once per instance", "Once ever");
+    private static final List<String> ENTRY_POLICIES = List.of("Repeatable", "Once per instance", "Once per attempt", "Once ever");
     private static final List<String> ACCESS_MODES = List.of("Public", "Private");
+    private static final List<String> DAYTIMES = List.of("Dawn", "Morning", "Noon", "Dusk", "Night", "Midnight");
+    private static final List<String> WEATHER_STATES = List.of("Clear", "Rain", "Thunder");
     private static final List<String> DIFFICULTIES = List.of("1 skull", "2 skulls", "3 skulls", "4 skulls", "5 skulls");
     private static final List<AdminPanelRegistry.AdminTab> TABS = List.of(
             new AdminPanelRegistry.AdminTab(OVERVIEW, "Overview"),
             new AdminPanelRegistry.AdminTab(POCKETS, "Pockets"),
             new AdminPanelRegistry.AdminTab(PORTALS, "Portals"),
+            new AdminPanelRegistry.AdminTab(BUILDINGS, "Buildings"),
+            new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot Pools"),
             new AdminPanelRegistry.AdminTab(CURRENCIES, "Currency"),
             new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill Trees"),
             new AdminPanelRegistry.AdminTab(MOBFORGE, "MobForge"),
@@ -90,19 +109,45 @@ public final class CwpAdminModule {
                 "minecraft:nether_star", OVERVIEW, CwpAdminModule::page, CwpAdminModule::action));
     }
 
+    public static boolean openScriptEditor(ServerPlayer player, String scriptId) {
+        return AdminPanelNetworking.openPage(player, CrazyWorldProgression.id("admin"),
+                MOB_SCRIPT_EDIT + (scriptId == null ? "@new" : scriptId));
+    }
+
     // Route a requested tab to a fresh server-authoritative page.
     private static AdminPanelRegistry.AdminPage page(ServerPlayer player, String pageId) {
+        if (AdminLootPoolEditor.owns(pageId)) return AdminLootPoolEditor.page(player, pageId, TABS);
+        ScriptRoute scriptRoute = scriptRoute(pageId);
+        if (scriptRoute != null) return AdminScriptEditor.page(player, pageId, scriptRoute.backPage(),
+                scriptRoute.pocketId(), scriptRoute.scriptId(), TABS);
+        if (pageId.startsWith(MOB_EDIT)) return AdminMobEditor.page(player, pageId,
+                pageId.substring(MOB_EDIT.length()), TABS, MOB_MOBS);
+        if (pageId.equals(POCKET_NEW)) return newPocketPage();
+        if (pageId.equals(POCKET_INSTANCES)) return activeInstancesPage(player);
+        if (pageId.startsWith(POCKET_EDIT)) {
+            Identifier id = Identifier.tryParse(pageId.substring(POCKET_EDIT.length()));
+            return pocketEditorPage(player, id);
+        }
         if (pageId.equals(PORTAL_NEW)) return portalEditorPage(player, null);
+        if (pageId.equals(BUILDING_NEW)) return newBuildingPage(player);
         if (pageId.startsWith(PORTAL_EDIT)) {
             Identifier id = Identifier.tryParse(pageId.substring(PORTAL_EDIT.length()));
             return portalEditorPage(player, id);
         }
+        if (pageId.startsWith(CURRENCY_EDIT)) {
+            Identifier id = Identifier.tryParse(pageId.substring(CURRENCY_EDIT.length()));
+            return currencyEditorPage(player, id);
+        }
         return switch (pageId) {
             case POCKETS -> pocketsPage(player);
             case PORTALS -> portalsPage(player);
+            case BUILDINGS -> buildingsPage(player);
             case CURRENCIES -> currenciesPage(player);
             case SKILL_TREES -> skillTreesPage(player);
             case MOBFORGE -> mobForgePage(player);
+            case MOB_MOBS -> mobMobsPage();
+            case MOB_SCRIPTS -> mobScriptsPage();
+            case MOB_API -> mobApiPage();
             case EVENTS -> eventsPage(player);
             default -> overviewPage(player);
         };
@@ -134,52 +179,133 @@ public final class CwpAdminModule {
         return page(OVERVIEW, "Framework overview", "Live state from the running server", entries);
     }
 
-    // Manage the template workshop, selected draft, spawn anchor, templates, and live instances.
+    // List saved pockets separately from running portal instances.
     private static AdminPanelRegistry.AdminPage pocketsPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        AreaSelectionService.Selection selection = AreaSelectionService.selection(player).orElse(null);
-        String selectionStatus = selection == null ? "No active selection"
-                : selection.complete() ? selection.minimum().toShortString() + " → "
-                + selection.maximum().toShortString() + " · " + selection.volume() + " blocks"
-                : "Selection active · choose both corners";
-        String spawnStatus = selection == null || selection.anchor() == null
-                ? "No spawn selected · stand at the intended arrival position"
-                : "Spawn at " + selection.anchor().toShortString();
-        entries.add(new AdminPanelRegistry.AdminEntry("Template workshop",
-                "Enter or leave the persistent authoring world.", NORMAL,
-                List.of(new AdminPanelRegistry.AdminAction("workshop.enter", "Enter", false),
-                        new AdminPanelRegistry.AdminAction("workshop.leave", "Leave", false))));
-        entries.add(new AdminPanelRegistry.AdminEntry("Current draft selection", selectionStatus, NORMAL,
-                List.of(new AdminPanelRegistry.AdminField("template_id", "Template ID",
-                                "forgotten_vault", 128, templateSuggestions(server))),
-                List.of(new AdminPanelRegistry.AdminAction("selection.begin", "Select", false),
-                        new AdminPanelRegistry.AdminAction("selection.cancel", "Cancel", false),
-                        new AdminPanelRegistry.AdminAction("draft.save", "Save draft", false),
-                        new AdminPanelRegistry.AdminAction("draft.clear", "Clear area", true))));
-        entries.add(new AdminPanelRegistry.AdminEntry("Pocket spawn", spawnStatus, NORMAL,
-                List.of(new AdminPanelRegistry.AdminAction("draft.spawn", "Set spawn", false))));
+        entries.add(new AdminPanelRegistry.AdminEntry("Create pocket", "Create a dedicated build dimension first.",
+                GOOD, List.of(AdminPanelRegistry.AdminAction.navigate("Create", POCKET_NEW))));
+        entries.add(new AdminPanelRegistry.AdminEntry("Active instances",
+                PortalService.activeInstances(server).size() + " running portal instances",
+                NORMAL, List.of(AdminPanelRegistry.AdminAction.navigate("Show instances", POCKET_INSTANCES))));
+        for (Identifier id : PocketEditorService.pockets(server)) {
+            PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
+            entries.add(new AdminPanelRegistry.AdminEntry(id.toString(),
+                    template == null ? "Build space ready · no build saved yet"
+                            : template.sizeX() + "×" + template.sizeY() + "×" + template.sizeZ()
+                            + " · spawn " + template.spawnX() + ", " + template.spawnY() + ", "
+                            + template.spawnZ(), GOOD, List.of(),
+                    List.of(AdminPanelRegistry.AdminAction.navigate("Edit", POCKET_EDIT + id),
+                            new AdminPanelRegistry.AdminAction("pocket.delete|" + id, "Delete", true)),
+                    null));
+        }
+        return new AdminPanelRegistry.AdminPage(POCKETS, "Pocket dimensions",
+                PocketEditorService.pockets(server).size() + " saved pockets", TABS, entries,
+                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    private static AdminPanelRegistry.AdminPage activeInstancesPage(ServerPlayer player) {
+        MinecraftServer server = player.level().getServer();
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(new AdminPanelRegistry.AdminEntry("Saved pockets", "Return to pocket editing",
+                NORMAL, List.of(AdminPanelRegistry.AdminAction.navigate("Back", POCKETS))));
         for (PortalService.ActiveInstance instance : PortalService.activeInstances(server)) {
-            long seconds = Math.max(0L, Duration.between(Instant.now(), instance.expires()).toSeconds());
-            entries.add(new AdminPanelRegistry.AdminEntry("Active: " + instance.portalId(),
-                    instance.templateId() + " in " + instance.slotDimension() + " · " + seconds + "s remaining",
+            String remaining = instance.expires().toEpochMilli() == Long.MAX_VALUE ? "no expiry"
+                    : Math.max(0L, Duration.between(Instant.now(), instance.expires()).toSeconds())
+                    + "s remaining";
+            entries.add(new AdminPanelRegistry.AdminEntry(instance.portalId().toString(),
+                    instance.templateId() + " in " + instance.slotDimension() + " · " + remaining,
                     GOOD, List.of(new AdminPanelRegistry.AdminAction(
                     "instance.expire|" + instance.slotDimension(), "Expire", true))));
         }
-        for (PortalTemplateService.TemplateInfo template : PortalTemplateService.templates(server)) {
-            entries.add(AdminPanelRegistry.AdminEntry.info("Template: " + template.id(),
-                    template.sizeX() + "×" + template.sizeY() + "×" + template.sizeZ()
-                            + " · spawn " + template.spawnX() + ", " + template.spawnY() + ", "
-                            + template.spawnZ()));
-        }
-        if (entries.size() == 3) entries.add(AdminPanelRegistry.AdminEntry.info("No pocket content",
-                "Select a workshop build and its spawn, then save the draft."));
-        return page(POCKETS, "Pocket dimensions",
+        return new AdminPanelRegistry.AdminPage(POCKET_INSTANCES, "Active instances",
                 PortalService.activeInstances(server).size() + "/" + PortalRegistry.instanceSlots().size()
-                        + " reusable slots active", entries);
+                        + " reusable slots active", TABS, entries,
+                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
-    // List placed portals as visual cards with direct edit, teleport, and delete controls.
+    private static AdminPanelRegistry.AdminPage newPocketPage() {
+        return new AdminPanelRegistry.AdminPage(POCKET_NEW, "Create pocket",
+                "Choose a permanent pocket ID, then enter its private build dimension.", TABS,
+                List.of(AdminPanelRegistry.AdminEntry.editor("Pocket", "Identity", "One build dimension per pocket",
+                        List.of(textField("template_id", "Pocket ID", "", "cwp:my_pocket", 128, List.of())),
+                        List.of(AdminPanelRegistry.AdminAction.wide("pocket.create", "Create pocket", false),
+                                AdminPanelRegistry.AdminAction.navigate("Back to pockets", POCKETS)))),
+                AdminPanelRegistry.PageLayout.EDITOR);
+    }
+
+    // Edit only the private build dimension and structure owned by the selected pocket.
+    private static AdminPanelRegistry.AdminPage pocketEditorPage(ServerPlayer player, Identifier requestedId) {
+        MinecraftServer server = player.level().getServer();
+        if (requestedId == null || !PocketEditorService.exists(server, requestedId)) return pocketsPage(player);
+        AreaSelectionService.clear(player);
+        PortalTemplateService.TemplateInfo existing = PortalTemplateService.template(server, requestedId);
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Identity",
+                (existing == null ? "No build saved yet. " : "")
+                        + PocketEditorService.autoSaveStatus(server, requestedId),
+                List.of(AdminPanelRegistry.AdminField.readOnly("template_id", "Pocket ID", requestedId.toString())),
+                List.of()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Build dimension",
+                "Enter this pocket to build and edit its blocks.", List.of(),
+                List.of(new AdminPanelRegistry.AdminAction("pocket.enter", "Enter", false),
+                        new AdminPanelRegistry.AdminAction("pocket.leave", "Leave", false))));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Build capture",
+                "Build and spawn changes save automatically. Entry uses a safe floor near these coordinates.",
+                List.of(textField("pocket_spawn_x", "Spawn X", Integer.toString(PocketEditorService.entry(server, requestedId).getX()), "0", 12, List.of()),
+                        textField("pocket_spawn_y", "Spawn Y", Integer.toString(PocketEditorService.entry(server, requestedId).getY()), "64", 12, List.of()),
+                        textField("pocket_spawn_z", "Spawn Z", Integer.toString(PocketEditorService.entry(server, requestedId).getZ()), "0", 12, List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("pocket.spawn.current", "Use my position", false))));
+        Identifier editorDimension = PocketEditorService.dimension(server, requestedId);
+        boolean insideEditor = editorDimension != null
+                && editorDimension.equals(player.level().dimension().identifier());
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Exit portals", "Create portal",
+                insideEditor ? "Place a portal here. New portals in this editor return players by default."
+                        : "Enter this pocket's build dimension before placing a portal.", List.of(),
+                insideEditor ? List.of(AdminPanelRegistry.AdminAction.navigate("New exit portal", PORTAL_NEW))
+                        : List.of()));
+        if (editorDimension != null) for (PortalDefinition inside : PortalService.portals(server)) {
+            if (PortalService.locations(server, inside.id()).values().stream()
+                    .noneMatch(location -> location.dimension().equals(editorDimension))) continue;
+            entries.add(AdminPanelRegistry.AdminEntry.editor("Exit portals", inside.effectiveDisplayName(),
+                    inside.isExit() ? "Returns to the main world" : inside.isCoordinates()
+                            ? "Leads to coordinates in this world" : "Leads to " + inside.templateId(),
+                    List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", PORTAL_EDIT + inside.id()))));
+        }
+        List<String> availableScripts = MobForge.SCRIPTS.all().stream().map(MobScript::id).toList();
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Mob scripts", "Create script",
+                "Build a timeline in this panel and attach it to this pocket when saved.", List.of(),
+                List.of(AdminPanelRegistry.AdminAction.navigate("New script",
+                        POCKET_EDIT + requestedId + SCRIPT_SEGMENT + "@new"))));
+        if (!availableScripts.isEmpty()) {
+            entries.add(AdminPanelRegistry.AdminEntry.editor("Mob scripts", "Attach existing script",
+                    "Attached scripts start when a portal instance is created.",
+                    List.of(AdminPanelRegistry.AdminField.select("pocket_script", "Script",
+                            availableScripts.getFirst(), availableScripts)),
+                    List.of(new AdminPanelRegistry.AdminAction("pocket.script.attach", "Attach", false))));
+        }
+        for (String scriptId : PocketEditorService.scripts(server, requestedId)) {
+            MobScript script = MobForge.SCRIPTS.get(scriptId).orElse(null);
+            entries.add(AdminPanelRegistry.AdminEntry.editor("Mob scripts", scriptId,
+                    script == null ? "Script file missing" : script.steps().size() + " steps",
+                    List.of(), script == null
+                            ? List.of(new AdminPanelRegistry.AdminAction("pocket.script.remove|" + scriptId,
+                                    "Remove", true))
+                            : List.of(AdminPanelRegistry.AdminAction.navigate("Edit",
+                                    POCKET_EDIT + requestedId + SCRIPT_SEGMENT + scriptId),
+                                    new AdminPanelRegistry.AdminAction("pocket.script.remove|" + scriptId,
+                                            "Remove", true))));
+        }
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Automatic saving",
+                "Changes save after 10 seconds of inactivity, periodically while building, and when leaving.",
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back to pockets", POCKETS))));
+        return new AdminPanelRegistry.AdminPage(POCKET_EDIT + requestedId,
+                "Edit pocket", "Private build dimension and automatic capture",
+                TABS, entries, AdminPanelRegistry.PageLayout.EDITOR,
+                "pocket.autosave|" + requestedId);
+    }
+
+    // List portal definitions independently of their placements.
     private static AdminPanelRegistry.AdminPage portalsPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
@@ -187,19 +313,62 @@ public final class CwpAdminModule {
                 GOOD, List.of(AdminPanelRegistry.AdminAction.navigate("Create", PORTAL_NEW))));
         for (PortalDefinition portal : PortalService.portals(server)) {
             String portalId = portal.id().toString();
+            int locationCount = PortalService.locations(server, portal.id()).size();
             entries.add(new AdminPanelRegistry.AdminEntry(portal.effectiveDisplayName(),
-                    "Linked to: " + portal.templateId(), PortalService.isOpen(portal) ? GOOD : NORMAL, List.of(),
+                    "Linked to: " + (portal.isExit() ? "Exit"
+                            : portal.isCoordinates() ? "Coordinates" : portal.templateId())
+                            + " · " + locationCount + " location(s)",
+                    PortalService.isOpen(portal) ? GOOD : NORMAL, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", PORTAL_EDIT + portalId),
-                            new AdminPanelRegistry.AdminAction("portal.teleport|" + portalId, "Teleport", false),
                             new AdminPanelRegistry.AdminAction("portal.delete|" + portalId, "Delete", true)),
                     new AdminPanelRegistry.EntryPreview("portal", portal.shape().serializedName(),
                             portal.colorRgb())));
         }
-        if (entries.size() == 1) entries.add(AdminPanelRegistry.AdminEntry.info("No portals placed",
-                "Create one to link a location directly to a pocket template."));
+        if (entries.size() == 1) entries.add(AdminPanelRegistry.AdminEntry.info("No portals defined",
+                "Create a portal, then add as many locations as needed."));
         return new AdminPanelRegistry.AdminPage(PORTALS, "Portals",
-                PortalService.portals(server).size() + " placed portal(s)", TABS, entries,
+                PortalService.portals(server).size() + " portal definition(s)", TABS, entries,
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    private static AdminPanelRegistry.AdminPage buildingsPage(ServerPlayer player) {
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(new AdminPanelRegistry.AdminEntry("Create building",
+                "Select a built block range and save an independent copy.", GOOD, List.of(),
+                List.of(AdminPanelRegistry.AdminAction.navigate("Create", BUILDING_NEW)), null));
+        for (BuildingService.BuildingInfo building : BuildingService.buildings(player.level().getServer())) {
+            entries.add(new AdminPanelRegistry.AdminEntry(building.id().toString(),
+                    building.sizeX() + " × " + building.sizeY() + " × " + building.sizeZ()
+                            + " blocks · by " + building.author(), NORMAL, List.of(),
+                    List.of(new AdminPanelRegistry.AdminAction("building.delete|" + building.id(),
+                            "Delete", true)), null));
+        }
+        return new AdminPanelRegistry.AdminPage(BUILDINGS, "Buildings",
+                "Saved building copies for scripts", TABS, entries,
+                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    private static AdminPanelRegistry.AdminPage newBuildingPage(ServerPlayer player) {
+        var selection = AreaSelectionService.selection(player).filter(value ->
+                BuildingService.SELECTION_OWNER.equals(value.owner())).orElse(null);
+        String status = selection == null ? "No active selection"
+                : selection.complete() ? selection.minimum().toShortString() + " to "
+                        + selection.maximum().toShortString() + " · " + selection.volume() + " blocks"
+                        : "Select both corners in the world";
+        List<AdminPanelRegistry.AdminEntry> entries = List.of(
+                AdminPanelRegistry.AdminEntry.editor("Building", "Identity",
+                        "A permanent namespaced ID for this saved copy.",
+                        List.of(textField("build_id", "Building ID", "", "cwp:arena_wall", 128, List.of())),
+                        List.of()),
+                AdminPanelRegistry.AdminEntry.editor("Building", "Block range", status,
+                        List.of(), List.of(new AdminPanelRegistry.AdminAction("building.select", "Select corners", false))),
+                AdminPanelRegistry.AdminEntry.editor("Actions", "Save copy",
+                        "The saved building remains available after the original blocks are removed.",
+                        List.of(), List.of(new AdminPanelRegistry.AdminAction("building.capture", "Save building", false),
+                                AdminPanelRegistry.AdminAction.navigate("Cancel", BUILDINGS))));
+        return new AdminPanelRegistry.AdminPage(BUILDING_NEW, "Create building",
+                "Capture blocks from the current world", TABS, entries,
+                AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     // Build a dedicated, sectioned editor prefilled from one portal or sensible creation defaults.
@@ -210,7 +379,11 @@ public final class CwpAdminModule {
         boolean creating = portal == null;
         String id = creating ? "" : portal.id().toString();
         List<String> templates = templateSuggestions(server);
-        String template = creating ? (templates.isEmpty() ? "" : templates.getFirst()) : portal.templateId().toString();
+        String template = creating ? templates.stream().filter(value -> !value.equals("Exit") && !value.equals("Coordinates"))
+                .findFirst().orElse("Exit") : portal.isExit() ? "Exit" : portal.templateId().toString();
+        if (!creating && portal.isCoordinates()) template = "Coordinates";
+        Identifier currentPocket = PocketEditorService.pocketForDimension(server, player.level().dimension().identifier());
+        if (creating && currentPocket != null) template = "Exit";
         PortalDefinition.Schedule schedule = creating ? PortalDefinition.Schedule.always() : portal.schedule();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
         entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Portal ID",
@@ -221,27 +394,43 @@ public final class CwpAdminModule {
                         : AdminPanelRegistry.AdminField.readOnly("portal_id", "Portal ID", id)),
                 List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Identity",
-                "Player-facing name and the pocket template opened by this portal.",
+                "Choose a pocket, Exit to return to the main world, or Coordinates for direct travel in this world.",
                 List.of(textField("portal_name", "Name", creating ? "" : portal.effectiveDisplayName(),
                                 "Forgotten Vault", 96, List.of()),
                         templateField(template, templates)), List.of()));
+        PortalDefinition.CoordinateTarget target = creating
+                ? defaultCoordinateTarget(player.getX(), player.getY(), player.getZ(), PortalDefinition.Plane.XY)
+                : portal.coordinateTarget().orElseGet(() -> defaultCoordinateTarget(
+                        portal.centerX(), portal.centerY(), portal.centerZ(), portal.plane()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Destination coordinates",
+                "Direct travel in the portal's world. Pocket editor coordinates move with the active instance.",
+                List.of(textField("portal_target_x", "Destination X", decimal(target.x()), "0", 24, List.of()),
+                        textField("portal_target_y", "Destination Y", decimal(target.y()), "64", 24, List.of()),
+                        textField("portal_target_z", "Destination Z", decimal(target.z()), "0", 24, List.of())),
+                List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Description",
                 "Shown in the Minecraft-style travel confirmation window.",
                 List.of(textField("portal_description", "Description", creating ? "" : portal.description(),
                         "An unstable passage into a forgotten place.", 512, List.of())), List.of()));
-        entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Location",
-                "Coordinates in " + (creating ? player.level().dimension().identifier() : portal.dimension()),
-                List.of(textField("portal_x", "X", decimal(creating ? player.getX() : portal.centerX()), "0", 24,
-                                List.of()),
-                        textField("portal_y", "Y", decimal(creating ? player.getY() + 0.9 : portal.centerY()), "64",
-                                24, List.of()),
-                        textField("portal_z", "Z", decimal(creating ? player.getZ() : portal.centerZ()), "0", 24,
-                                List.of())), List.of()));
-        entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Current position",
-                "Replace all coordinates with your current location.", List.of(),
-                List.of(AdminPanelRegistry.AdminAction.wide(
-                        creating ? "portal.position.current" : "portal.position|" + id,
-                        "Set to current position", false))));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Availability",
+                "Controls whether the portal's saved locations are active.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_base_active", "Saved locations active",
+                        creating || portal.baseActive() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+        if (!creating) {
+            entries.add(AdminPanelRegistry.AdminEntry.editor("Locations", "Add location",
+                    "Place another copy of this portal at your current position.",
+                    List.of(textField("portal_location_name", "Location ID", "", "main_gate", 48, List.of())),
+                    List.of(new AdminPanelRegistry.AdminAction("portal.location.add|" + id,
+                            "Add at my position", false))));
+            PortalService.locations(server, portal.id()).forEach((name, location) ->
+                    entries.add(AdminPanelRegistry.AdminEntry.editor("Locations", name,
+                            location.dimension() + " · " + decimal(location.x()) + ", "
+                                    + decimal(location.y()) + ", " + decimal(location.z()), List.of(),
+                            List.of(new AdminPanelRegistry.AdminAction("portal.location.teleport|" + id + "|" + name,
+                                            "Teleport", false),
+                                    new AdminPanelRegistry.AdminAction("portal.location.remove|" + id + "|" + name,
+                                            "Remove", true)))));
+        }
         entries.add(AdminPanelRegistry.AdminEntry.editor("Style", "Shape and color",
                 "The preview and in-world surface use these settings.",
                 List.of(AdminPanelRegistry.AdminField.select("portal_shape", "Shape",
@@ -260,11 +449,11 @@ public final class CwpAdminModule {
                 List.of(AdminPanelRegistry.AdminField.select("portal_plane", "Orientation",
                         creating ? PLANES.getFirst() : planeLabel(portal.plane()), PLANES)), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Difficulty and instance",
-                "Difficulty controls presentation; lifetime controls pocket cleanup.",
+                "Lifetime is in minutes. Zero keeps a public instance until an admin expires it.",
                 List.of(AdminPanelRegistry.AdminField.select("portal_difficulty", "Difficulty",
                                 (creating ? 1 : portal.difficulty()) + (creating || portal.difficulty() == 1
                                         ? " skull" : " skulls"), DIFFICULTIES),
-                        textField("portal_lifetime", "Instance lifetime (minutes)",
+                        textField("portal_lifetime", "Lifetime minutes (0 = permanent public)",
                                 Long.toString((creating ? 5_400L : portal.lifetimeSeconds()) / 60L), "90", 10,
                                 List.of())), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Entry policy",
@@ -272,17 +461,50 @@ public final class CwpAdminModule {
                 List.of(AdminPanelRegistry.AdminField.select("portal_entry_policy", "Entry policy",
                         creating ? "Repeatable" : entryPolicyLabel(portal.entryPolicy()), ENTRY_POLICIES)), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Instance access",
-                "Public shares one instance. Private starts one sealed instance per group.",
-                List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
-                                creating ? "Public" : title(portal.admission().mode().serializedName()), ACCESS_MODES),
-                        textField("portal_max_players", "Private group limit",
-                                Integer.toString(creating ? 4 : portal.admission().maxPlayers()), "4", 3,
-                                List.of())), List.of()));
+                "Public uses one shared instance for everyone. Group size applies only to private access.",
+                creating || portal.admission().mode() == PortalDefinition.Mode.PRIVATE
+                        ? List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
+                                        creating ? "Public" : "Private", ACCESS_MODES),
+                                textField("portal_max_players", "Private group limit (ignored for public)",
+                                        Integer.toString(creating ? 4 : portal.admission().maxPlayers()), "4", 3,
+                                        List.of()))
+                        : List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
+                                "Public", ACCESS_MODES)), List.of()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Raid attempt",
+                "Private group raids keep the instance through a wipe and reset the encounter for another try.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_raid_mode", "Raid mode",
+                        !creating && portal.raidMode() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Building",
+                "Allow players to place and break blocks in instances opened by this portal.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_allow_building", "Build in instance",
+                        creating || portal.allowBuilding() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Keep inventory",
+                "If disabled, players drop their inventory on death in this portal's instance. Entry requires two confirmations.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_keep_inventory", "Keep inventory on death",
+                        creating || portal.keepInventory() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Other players in public instances",
+                "When hidden, each player can still choose to show others in their own ECHELON settings.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_show_players", "Show other players",
+                        creating || portal.showOtherPlayers() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+        PortalDefinition.Environment environment = creating
+                ? PortalDefinition.Environment.defaults() : portal.environment();
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Environment", "Day and night",
+                "Each instance has its own clock. Daytime sets the starting time; disabling the cycle freezes it.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_daytime", "Daytime",
+                                title(environment.daytime().serializedName()), DAYTIMES),
+                        AdminPanelRegistry.AdminField.select("portal_day_night_cycle", "Day/night cycle",
+                                environment.dayNightCycle() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Environment", "Weather",
+                "Weather begins at the selected state. Disabling the cycle keeps that state.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_weather", "Weather",
+                                title(environment.weather().serializedName()), WEATHER_STATES),
+                        AdminPanelRegistry.AdminField.select("portal_weather_cycle", "Weather cycle",
+                                environment.weatherCycle() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
         if (!creating) addScheduleEditor(entries, schedule);
         String saveAction = creating ? "portal.create" : "";
         entries.add(AdminPanelRegistry.AdminEntry.editor("Actions",
                 creating ? "Create portal" : "Changes apply automatically",
-                creating ? "Creates the portal in your current dimension at the coordinates above."
+                creating ? "Creates the definition. Add locations from its editor afterward."
                         : "Text applies after a short pause; dropdowns apply immediately.",
                 List.of(),
                 creating ? List.of(new AdminPanelRegistry.AdminAction(saveAction, "Create", false),
@@ -291,7 +513,8 @@ public final class CwpAdminModule {
         return new AdminPanelRegistry.AdminPage(creating ? PORTAL_NEW : PORTAL_EDIT + id,
                 creating ? "Create portal" : "Edit · " + portal.effectiveDisplayName(),
                 creating ? "General, style, gameplay, then optional time gates"
-                        : portal.id() + " · changes save automatically · linked to " + portal.templateId(),
+                        : portal.id() + " · changes save automatically · linked to "
+                        + (portal.isExit() ? "Exit" : portal.isCoordinates() ? "Coordinates" : portal.templateId()),
                 TABS, entries,
                 AdminPanelRegistry.PageLayout.EDITOR, creating ? "" : "portal.autosave|" + id);
     }
@@ -299,51 +522,86 @@ public final class CwpAdminModule {
     // Append periodic and calendar scheduling controls to an existing portal editor.
     private static void addScheduleEditor(List<AdminPanelRegistry.AdminEntry> entries,
                                           PortalDefinition.Schedule schedule) {
+        if (schedule.periodSeconds() == 0L && !schedule.calendarEnabled()) {
+            entries.add(AdminPanelRegistry.AdminEntry.info("No time settings",
+                    "This portal is available at any time."));
+        }
         entries.add(AdminPanelRegistry.AdminEntry.editor("Time settings", "Repeating window",
-                schedule.periodSeconds() == 0L ? "Disabled · optionally open for Y minutes every X minutes."
-                        : "Currently active from its saved real-time anchor.",
-                List.of(textField("period_minutes", "Every minutes",
-                                schedule.periodSeconds() == 0L ? "240" : Long.toString(schedule.periodSeconds() / 60L),
-                                "240", 10, List.of()),
-                        textField("open_minutes", "Open minutes",
-                                schedule.openSeconds() == 0L ? "30" : Long.toString(schedule.openSeconds() / 60L),
-                                "30", 10, List.of())),
-                List.of(new AdminPanelRegistry.AdminAction("portal.periodic.clear", "Disable", false))));
+                schedule.periodSeconds() == 0L ? "Not added. Add a 30-minute opening every 240 minutes."
+                        : "Opens for the configured minutes in each cycle.",
+                schedule.periodSeconds() == 0L ? List.of()
+                        : List.of(textField("period_minutes", "Every minutes",
+                                        Long.toString(schedule.periodSeconds() / 60L), "240", 10, List.of()),
+                                textField("open_minutes", "Open minutes",
+                                        Long.toString(schedule.openSeconds() / 60L), "30", 10, List.of())),
+                List.of(new AdminPanelRegistry.AdminAction(schedule.periodSeconds() == 0L
+                        ? "portal.periodic.add" : "portal.periodic.clear",
+                        schedule.periodSeconds() == 0L ? "Add" : "Remove", false))));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Time settings", "Calendar window",
-                "Restrict entry by local weekday and clock time; overnight windows are supported.",
-                List.of(textField("calendar_zone", "Timezone", schedule.timezone().getId(), "Europe/Berlin", 64,
-                                List.of("Europe/Berlin", "UTC")),
-                        textField("calendar_days", "Weekdays", schedule.weekdays().stream().sorted()
-                                .map(DayOfWeek::name).collect(Collectors.joining(",")), "FRIDAY", 96, List.of()),
-                        textField("calendar_start", "Start", schedule.start().toString(), "19:00", 8, List.of()),
-                        textField("calendar_end", "End", schedule.end().toString(), "23:00", 8, List.of())),
-                List.of(new AdminPanelRegistry.AdminAction("portal.calendar.clear", "Disable", false))));
+                schedule.calendarEnabled() ? "Entry follows these local weekdays and times."
+                        : "Not added. Add a daily 09:00-17:00 UTC window, then edit it.",
+                !schedule.calendarEnabled() ? List.of()
+                        : List.of(textField("calendar_zone", "Timezone", schedule.timezone().getId(),
+                                        "Europe/Berlin", 64, List.of("Europe/Berlin", "UTC")),
+                                textField("calendar_days", "Weekdays", schedule.weekdays().stream().sorted()
+                                        .map(DayOfWeek::name).collect(Collectors.joining(",")),
+                                        "FRIDAY", 96, List.of()),
+                                textField("calendar_start", "Start", schedule.start().toString(), "09:00", 8,
+                                        List.of()),
+                                textField("calendar_end", "End", schedule.end().toString(), "17:00", 8,
+                                        List.of())),
+                List.of(new AdminPanelRegistry.AdminAction(schedule.calendarEnabled()
+                        ? "portal.calendar.clear" : "portal.calendar.add",
+                        schedule.calendarEnabled() ? "Remove" : "Add", false))));
     }
 
-    // Show global and online-player wallets with deliberate small adjustment controls.
+    // Keep registered currencies in a compact list; open each wallet's controls individually.
     private static AdminPanelRegistry.AdminPage currenciesPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        for (CurrencyDefinition currency : CurrencyRegistry.values()) {
+            long balance = CurrencyService.getBalance(server, player.getUUID(), currency.id());
+            String detail = currency.id() + " · " + currency.scope().name().toLowerCase()
+                    + " · " + (currency.scope() == CurrencyDefinition.CurrencyScope.GLOBAL ? "shared" : "your")
+                    + " balance " + balance + " " + currency.abbreviation();
+            entries.add(new AdminPanelRegistry.AdminEntry(currency.displayName(), detail, NORMAL,
+                    List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", CURRENCY_EDIT + currency.id())),
+                    null));
+        }
+        if (entries.isEmpty()) entries.add(AdminPanelRegistry.AdminEntry.info("No currencies",
+                "Dependent mods have not registered any currency definitions."));
+        return new AdminPanelRegistry.AdminPage(CURRENCIES, "Currencies", "Registered wallets", TABS, entries,
+                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    private static AdminPanelRegistry.AdminPage currencyEditorPage(ServerPlayer player, Identifier id) {
+        CurrencyDefinition currency = CurrencyRegistry.require(id);
+        MinecraftServer server = player.level().getServer();
         List<String> players = server.getPlayerList().getPlayers().stream()
                 .map(target -> target.getName().getString()).sorted(String.CASE_INSENSITIVE_ORDER).toList();
-        entries.add(new AdminPanelRegistry.AdminEntry("Wallet operation",
-                "Type an online player and amount. Press Tab to accept the shown player completion.", NORMAL,
-                List.of(new AdminPanelRegistry.AdminField("currency_player", "Player", "Player name", 64, players),
-                        AdminPanelRegistry.AdminField.text("currency_amount", "Amount", "0", 20)), List.of()));
-        for (CurrencyDefinition currency : CurrencyRegistry.values()) {
-            long balance = currency.scope() == CurrencyDefinition.CurrencyScope.GLOBAL
-                    ? CurrencyService.getBalance(server, player.getUUID(), currency.id()) : 0L;
-            String detail = currency.id() + " · " + currency.scope().name().toLowerCase()
-                    + (currency.scope() == CurrencyDefinition.CurrencyScope.GLOBAL
-                    ? " · current " + balance + " " + currency.abbreviation() : "");
-            entries.add(new AdminPanelRegistry.AdminEntry(currency.displayName(), detail, NORMAL,
-                    List.of(new AdminPanelRegistry.AdminAction("currency.credit|" + currency.id(), "Give", false),
-                            new AdminPanelRegistry.AdminAction("currency.debit|" + currency.id(), "Take", false),
-                            new AdminPanelRegistry.AdminAction("currency.set|" + currency.id(), "Set", true))));
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Currency", "Definition",
+                "Currency definitions come from content mods; this editor manages their balances.",
+                List.of(AdminPanelRegistry.AdminField.readOnly("currency_id", "ID", id.toString()),
+                        AdminPanelRegistry.AdminField.readOnly("currency_scope", "Scope", currency.scope().name()),
+                        AdminPanelRegistry.AdminField.readOnly("currency_abbreviation", "Symbol", currency.abbreviation())),
+                List.of()));
+        if (currency.scope() == CurrencyDefinition.CurrencyScope.PLAYER) {
+            entries.add(AdminPanelRegistry.AdminEntry.editor("Wallet", "Player", "Select an online player.",
+                    List.of(new AdminPanelRegistry.AdminField("currency_player", "Player", "",
+                            player.getName().getString(), 64, players)), List.of()));
         }
-        if (entries.size() == 1) entries.add(AdminPanelRegistry.AdminEntry.info("No currencies",
-                "Dependent mods have not registered any currency definitions."));
-        return page(CURRENCIES, "Currency control", "One compact operation form for every registered currency", entries);
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Wallet", "Amount",
+                "Current " + (currency.scope() == CurrencyDefinition.CurrencyScope.GLOBAL ? "shared" : "your")
+                        + " balance: " + CurrencyService.getBalance(server, player.getUUID(), id),
+                List.of(new AdminPanelRegistry.AdminField("currency_amount", "Amount", "", "1", 20, List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("currency.credit|" + id, "Give", false),
+                        new AdminPanelRegistry.AdminAction("currency.debit|" + id, "Take", false),
+                        new AdminPanelRegistry.AdminAction("currency.set|" + id, "Set", true))));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Navigation", "Currencies", "Return to the currency list.",
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", CURRENCIES))));
+        return new AdminPanelRegistry.AdminPage(CURRENCY_EDIT + id, currency.displayName(), id.toString(), TABS,
+                entries, AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     // Show loaded trees and offer reload and live attribute refresh operations.
@@ -364,27 +622,58 @@ public final class CwpAdminModule {
     // List configured events and expose force-start/stop buttons with active-state feedback.
     private static AdminPanelRegistry.AdminPage mobForgePage(ServerPlayer player) {
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(new AdminPanelRegistry.AdminEntry("Create content",
-                "Templates configure YAML mobs; scripts sequence spawns, abilities, phases, waits and events.",
-                NORMAL, List.of(new AdminPanelRegistry.AdminAction("mob.template.new", "New mob", false),
-                        new AdminPanelRegistry.AdminAction("mob.script.new", "New script", false))));
+        entries.add(new AdminPanelRegistry.AdminEntry("Mobs", MobForge.TEMPLATES.all().size()
+                + " editable YAML mobs", GOOD, List.of(),
+                List.of(AdminPanelRegistry.AdminAction.navigate("Manage mobs", MOB_MOBS)), null));
+        entries.add(new AdminPanelRegistry.AdminEntry("Scripts", MobForge.SCRIPTS.all().size()
+                + " encounter scripts", GOOD, List.of(),
+                List.of(AdminPanelRegistry.AdminAction.navigate("Manage scripts", MOB_SCRIPTS)), null));
+        entries.add(new AdminPanelRegistry.AdminEntry("Registered API mobs", MobForge.mobs().all().size()
+                + " content mod mobs", NORMAL, List.of(),
+                List.of(AdminPanelRegistry.AdminAction.navigate("View", MOB_API)), null));
         entries.add(new AdminPanelRegistry.AdminEntry("Reload MobForge YAML",
                 "Reload templates and scripts from config/mobforge.", NORMAL,
                 List.of(new AdminPanelRegistry.AdminAction("mob.reload", "Reload", false))));
+        return new AdminPanelRegistry.AdminPage(MOBFORGE, "MobForge", "Mobs and encounter scripts", TABS,
+                entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    private static AdminPanelRegistry.AdminPage mobMobsPage() {
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(new AdminPanelRegistry.AdminEntry("Create mob", "Add a MobForge YAML template.", GOOD,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_EDIT + "@new")), null));
         for (MobTemplate template : MobForge.TEMPLATES.all()) {
-            entries.add(new AdminPanelRegistry.AdminEntry("Mob: " + template.id(),
+            entries.add(new AdminPanelRegistry.AdminEntry(template.id(),
                     template.entity() + " · " + template.ai().mode() + " AI",
-                    GOOD, List.of(new AdminPanelRegistry.AdminAction("mob.template.edit|" + template.id(),
-                            "Edit", false), new AdminPanelRegistry.AdminAction("mob.template.spawn|" + template.id(),
-                            "Spawn here", false))));
+                    GOOD, List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_EDIT + template.id()),
+                            new AdminPanelRegistry.AdminAction("mob.template.spawn|" + template.id(),
+                                    "Spawn here", false)), null));
         }
+        entries.add(new AdminPanelRegistry.AdminEntry("Navigation", "Back to MobForge", NORMAL,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", MOBFORGE)), null));
+        return new AdminPanelRegistry.AdminPage(MOB_MOBS, "MobForge mobs", "Manage each YAML mob", TABS,
+                entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    private static AdminPanelRegistry.AdminPage mobScriptsPage() {
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(new AdminPanelRegistry.AdminEntry("Create script", "Add an encounter timeline.", GOOD,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_SCRIPT_EDIT + "@new")), null));
         for (MobScript script : MobForge.SCRIPTS.all()) {
-            entries.add(new AdminPanelRegistry.AdminEntry("Script: " + script.id(),
+            entries.add(new AdminPanelRegistry.AdminEntry(script.id(),
                     script.steps().size() + " steps · " + MobForge.SCRIPT_EXECUTOR.activeRuns(script.id())
-                            + " active runs", NORMAL,
-                    List.of(new AdminPanelRegistry.AdminAction("mob.script.edit|" + script.id(), "Edit", false),
-                            new AdminPanelRegistry.AdminAction("mob.script.run|" + script.id(), "Run here", false))));
+                            + " active runs", NORMAL, List.of(),
+                    List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_SCRIPT_EDIT + script.id()),
+                            new AdminPanelRegistry.AdminAction("mob.script.run|" + script.id(), "Run here", false)), null));
         }
+        entries.add(new AdminPanelRegistry.AdminEntry("Navigation", "Back to MobForge", NORMAL,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", MOBFORGE)), null));
+        return new AdminPanelRegistry.AdminPage(MOB_SCRIPTS, "MobForge scripts", "Manage each encounter script", TABS,
+                entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    private static AdminPanelRegistry.AdminPage mobApiPage() {
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
         for (var definition : MobForge.mobs().all().values().stream()
                 .sorted(java.util.Comparator.comparing(mob -> mob.id().toString())).toList()) {
             entries.add(new AdminPanelRegistry.AdminEntry("API mob: " + definition.id(),
@@ -406,7 +695,10 @@ public final class CwpAdminModule {
                     MobForge.behaviors().all().keySet().stream().map(Object::toString).sorted()
                             .collect(Collectors.joining(", "))));
         }
-        return page(MOBFORGE, "MobForge", "CWP mobs, YAML content and encounter scripts", entries);
+        entries.add(new AdminPanelRegistry.AdminEntry("Navigation", "Back to MobForge", NORMAL,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", MOBFORGE)), null));
+        return new AdminPanelRegistry.AdminPage(MOB_API, "MobForge API", "Content mod registrations are read only",
+                TABS, entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
     private static AdminPanelRegistry.AdminPage eventsPage(ServerPlayer player) {
@@ -432,7 +724,14 @@ public final class CwpAdminModule {
     // Execute one native action after the networking layer has authenticated the administrator.
     private static AdminPanelRegistry.ActionResult action(ServerPlayer player, String pageId, String actionId,
                                                           Map<String, String> values) {
+        if (AdminLootPoolEditor.owns(pageId) && actionId.startsWith("loot."))
+            return AdminLootPoolEditor.action(player, actionId, values);
         MinecraftServer server = player.level().getServer();
+        ScriptRoute scriptRoute = scriptRoute(pageId);
+        if (scriptRoute != null) return AdminScriptEditor.action(player, pageId, actionId, values,
+                scriptRoute.backPage(), scriptRoute.pocketId(), scriptRoute.scriptId());
+        if (pageId.startsWith(MOB_EDIT)) return AdminMobEditor.action(player, pageId,
+                pageId.substring(MOB_EDIT.length()), actionId, values, MOB_MOBS);
         if (actionId.equals("reload")) return reload(server);
         if (actionId.equals("mob.reload")) {
             var templates = MobForge.TEMPLATES.reload();
@@ -447,40 +746,49 @@ public final class CwpAdminModule {
                     : AdminPanelRegistry.ActionResult.failure("MobForge editor is unavailable on this client");
         }
         if (actionId.equals("mob.script.new")) {
-            return MobForgeNetworking.openScript(player, new MobScript("new_script", List.of()), false)
-                    ? AdminPanelRegistry.ActionResult.silentSuccess()
-                    : AdminPanelRegistry.ActionResult.failure("MobForge script editor is unavailable on this client");
+            return AdminPanelRegistry.ActionResult.success("", MOB_SCRIPT_EDIT + "@new");
         }
-        if (actionId.equals("workshop.enter")) {
-            PortalService.enterWorkshop(player);
-            return AdminPanelRegistry.ActionResult.success("Entered the template workshop");
+        if (actionId.equals("pocket.create")) {
+            if (!pageId.equals(POCKET_NEW)) throw new IllegalArgumentException("Open Create pocket first");
+            Identifier id = formId(values, "template_id");
+            PocketEditorService.create(server, id);
+            return AdminPanelRegistry.ActionResult.success("Created pocket " + id, POCKET_EDIT + id);
         }
-        if (actionId.equals("workshop.leave")) {
-            return PortalService.leaveWorkshop(player)
-                    ? AdminPanelRegistry.ActionResult.success("Left the template workshop")
-                    : AdminPanelRegistry.ActionResult.failure("You are not in the template workshop");
+        if (actionId.equals("building.select")) {
+            AreaSelectionService.begin(player, BuildingService.SELECTION_OWNER);
+            return AdminPanelRegistry.ActionResult.success("Select the first and second corners in the world");
         }
-        if (actionId.equals("selection.begin")) {
-            AreaSelectionService.begin(player, CrazyWorldProgression.id("portal_template_draft"));
-            return AdminPanelRegistry.ActionResult.success(
-                    "Selection started · close the panel, then left/right-click the corners");
+        if (actionId.equals("building.capture")) {
+            Identifier id = formId(values, "build_id");
+            BuildingService.capture(player, id);
+            return AdminPanelRegistry.ActionResult.success("Saved building " + id, BUILDINGS);
         }
-        if (actionId.equals("selection.cancel")) {
+        if (actionId.equals("pocket.enter")) {
+            Identifier id = pocketPageId(pageId);
             AreaSelectionService.clear(player);
-            return AdminPanelRegistry.ActionResult.success("Area selection cancelled");
+            PortalService.enterPocketEditor(player, id);
+            return AdminPanelRegistry.ActionResult.success("Entered pocket " + id);
         }
-        if (actionId.equals("draft.spawn")) {
-            requireWorkshop(player);
-            AreaSelectionService.Selection selection = AreaSelectionService.setAnchor(player, player.blockPosition());
-            return AdminPanelRegistry.ActionResult.success("Pocket spawn set to "
-                    + selection.anchor().toShortString());
+        if (actionId.equals("pocket.leave")) {
+            pocketPageId(pageId);
+            return PortalService.leavePocketEditor(player)
+                    ? AdminPanelRegistry.ActionResult.success("Left pocket editor")
+                    : AdminPanelRegistry.ActionResult.failure("You are not in a pocket editor");
         }
-        if (actionId.equals("draft.save")) return saveDraft(player, values);
-        if (actionId.equals("draft.clear")) {
-            requireWorkshop(player);
-            long blocks = AreaSelectionService.clearSelectedArea(player);
-            return AdminPanelRegistry.ActionResult.success("Clearing " + blocks + " selected workshop blocks");
+        if (actionId.equals("pocket.spawn.current")) {
+            Identifier id = pocketPageId(pageId);
+            requirePocketEditor(player, id);
+            PocketEditorService.setEntry(server, id, player.blockPosition());
+            return AdminPanelRegistry.ActionResult.success("Pocket spawn set to your position");
         }
+        if (actionId.equals("pocket.script.attach")) {
+            Identifier id = pocketPageId(pageId);
+            String script = required(values, "pocket_script");
+            return PocketEditorService.attachScript(server, id, script)
+                    ? AdminPanelRegistry.ActionResult.success("Attached " + script + " to " + id)
+                    : AdminPanelRegistry.ActionResult.success(script + " is already attached");
+        }
+        if (actionId.equals("draft.save")) return saveDraft(player, pocketPageId(pageId), values);
         if (actionId.equals("portal.create")) return createPortal(player, values);
         if (actionId.equals("portal.position.current")) {
             return AdminPanelRegistry.ActionResult.success("Coordinates set to your current position");
@@ -490,8 +798,9 @@ public final class CwpAdminModule {
             Identifier id = formId(values, "portal_id");
             PortalDefinition portal = PortalService.portal(server, id);
             if (portal == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
-            PortalService.update(server, portal.movedTo(player.level().dimension().identifier(), player.position()));
-            return AdminPanelRegistry.ActionResult.success("Moved portal " + id + " to your position");
+            PortalService.setLocation(server, id, "original", player.level().dimension().identifier(),
+                    player.position().add(0, 0.9, 0));
+            return AdminPanelRegistry.ActionResult.success("Set original location for " + id);
         }
         if (actionId.equals("portal.remove")) {
             Identifier id = formId(values, "portal_id");
@@ -508,6 +817,48 @@ public final class CwpAdminModule {
             return AdminPanelRegistry.ActionResult.success("Refreshed stats for all online players");
         }
         String[] parts = actionId.split("\\|", -1);
+        if (parts.length == 2 && parts[0].equals("building.delete")) {
+            Identifier id = Identifier.parse(parts[1]);
+            try {
+                return BuildingService.delete(server, id)
+                        ? AdminPanelRegistry.ActionResult.success("Deleted building " + id, BUILDINGS)
+                        : AdminPanelRegistry.ActionResult.failure("Unknown building " + id);
+            } catch (IOException exception) {
+                return AdminPanelRegistry.ActionResult.failure("Could not delete building: " + exception.getMessage());
+            }
+        }
+        if (parts.length == 3 && parts[0].equals("portal.location.remove")) {
+            Identifier id = Identifier.parse(parts[1]);
+            return PortalService.removeLocation(server, id, parts[2])
+                    ? AdminPanelRegistry.ActionResult.success("Removed location " + parts[2], PORTAL_EDIT + id)
+                    : AdminPanelRegistry.ActionResult.failure("Unknown location " + parts[2]);
+        }
+        if (parts.length == 3 && parts[0].equals("portal.location.teleport")) {
+            return teleportToPortal(player, Identifier.parse(parts[1]), parts[2]);
+        }
+        if (parts.length == 2 && parts[0].equals("portal.location.add")) {
+            Identifier id = Identifier.parse(parts[1]);
+            String name = required(values, "portal_location_name").trim();
+            PortalService.addLocation(server, id, name, player.level().dimension().identifier(),
+                    player.position().add(0, 0.9, 0));
+            return AdminPanelRegistry.ActionResult.success("Added location " + name, PORTAL_EDIT + id);
+        }
+        if (parts.length == 2 && parts[0].equals("pocket.script.remove")) {
+            Identifier id = pocketPageId(pageId);
+            return PocketEditorService.removeScript(server, id, parts[1])
+                    ? AdminPanelRegistry.ActionResult.success("Removed " + parts[1] + " from " + id)
+                    : AdminPanelRegistry.ActionResult.failure("Script is not attached to this pocket");
+        }
+        if (parts.length == 2 && parts[0].equals("pocket.delete")) {
+            Identifier id = Identifier.parse(parts[1]);
+            try {
+                return PocketEditorService.delete(server, id)
+                        ? AdminPanelRegistry.ActionResult.success("Deleted pocket " + id)
+                        : AdminPanelRegistry.ActionResult.failure("Unknown pocket " + id);
+            } catch (IOException exception) {
+                return AdminPanelRegistry.ActionResult.failure("Could not delete pocket: " + exception.getMessage());
+            }
+        }
         if (parts.length == 2 && parts[0].equals("mob.template.edit")) {
             MobTemplate template = MobForge.TEMPLATES.get(parts[1]).orElse(null);
             if (template == null) return AdminPanelRegistry.ActionResult.failure("Unknown mob template " + parts[1]);
@@ -517,8 +868,7 @@ public final class CwpAdminModule {
         if (parts.length == 2 && parts[0].equals("mob.script.edit")) {
             MobScript script = MobForge.SCRIPTS.get(parts[1]).orElse(null);
             if (script == null) return AdminPanelRegistry.ActionResult.failure("Unknown MobForge script " + parts[1]);
-            return MobForgeNetworking.openScript(player, script) ? AdminPanelRegistry.ActionResult.silentSuccess()
-                    : AdminPanelRegistry.ActionResult.failure("MobForge script editor is unavailable on this client");
+            return AdminPanelRegistry.ActionResult.success("", MOB_SCRIPT_EDIT + script.id());
         }
         if (parts.length == 2 && parts[0].equals("mob.script.run")) {
             MobScript script = MobForge.SCRIPTS.get(parts[1]).orElse(null);
@@ -547,6 +897,21 @@ public final class CwpAdminModule {
         if (parts.length == 2 && parts[0].equals("portal.autosave")) {
             return patchPortal(player, Identifier.parse(parts[1]), values);
         }
+        if (parts.length == 2 && parts[0].equals("pocket.autosave")) {
+            Identifier id = pocketPageId(pageId);
+            if (!id.equals(Identifier.parse(parts[1]))) {
+                return AdminPanelRegistry.ActionResult.failure("Pocket editor changed");
+            }
+            BlockPos current = PocketEditorService.entry(server, id);
+            int x = values.containsKey("pocket_spawn_x")
+                    ? Integer.parseInt(required(values, "pocket_spawn_x")) : current.getX();
+            int y = values.containsKey("pocket_spawn_y")
+                    ? Integer.parseInt(required(values, "pocket_spawn_y")) : current.getY();
+            int z = values.containsKey("pocket_spawn_z")
+                    ? Integer.parseInt(required(values, "pocket_spawn_z")) : current.getZ();
+            PocketEditorService.setEntry(server, id, new BlockPos(x, y, z));
+            return AdminPanelRegistry.ActionResult.success("Pocket spawn updated");
+        }
         if (parts.length == 2 && parts[0].equals("portal.save")) {
             return updatePortal(player, Identifier.parse(parts[1]), values);
         }
@@ -554,8 +919,9 @@ public final class CwpAdminModule {
             Identifier id = Identifier.parse(parts[1]);
             PortalDefinition portal = PortalService.portal(server, id);
             if (portal == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
-            PortalService.update(server, portal.movedTo(player.level().dimension().identifier(), player.position()));
-            return AdminPanelRegistry.ActionResult.success("Set " + id + " to your current position");
+            PortalService.setLocation(server, id, "original", player.level().dimension().identifier(),
+                    player.position().add(0, 0.9, 0));
+            return AdminPanelRegistry.ActionResult.success("Set original location for " + id);
         }
         if (parts.length == 2 && parts[0].equals("portal.teleport")) {
             return teleportToPortal(player, Identifier.parse(parts[1]));
@@ -618,39 +984,54 @@ public final class CwpAdminModule {
         }
     }
 
-    // Capture the selected workshop draft with its explicitly selected in-bounds spawn anchor.
-    private static AdminPanelRegistry.ActionResult saveDraft(ServerPlayer player, Map<String, String> values) {
-        requireWorkshop(player);
-        AreaSelectionService.Selection selection = AreaSelectionService.requireComplete(player);
-        if (selection.anchor() == null) throw new IllegalStateException("Set the pocket spawn before saving");
-        Identifier id = formId(values, "template_id");
-        PortalTemplateService.TemplateInfo template = PortalTemplateService.capture(player.level().getServer(),
-                (net.minecraft.server.level.ServerLevel) player.level(), id, selection.first(), selection.second(),
-                selection.anchor(), player.getName().getString());
+    // Capture all built chunks with an automatically chosen supported entry point.
+    private static AdminPanelRegistry.ActionResult saveDraft(ServerPlayer player, Identifier id,
+                                                             Map<String, String> values) {
+        requirePocketEditor(player, id);
+        BlockPos preferred = values.containsKey("pocket_spawn_x") && values.containsKey("pocket_spawn_y")
+                && values.containsKey("pocket_spawn_z")
+                ? new BlockPos(Integer.parseInt(required(values, "pocket_spawn_x")),
+                        Integer.parseInt(required(values, "pocket_spawn_y")),
+                        Integer.parseInt(required(values, "pocket_spawn_z")))
+                : PocketEditorService.entry(player.level().getServer(), id);
+        PortalTemplateService.TemplateInfo template = PortalTemplateService.captureAll(player.level().getServer(),
+                (net.minecraft.server.level.ServerLevel) player.level(), id, preferred,
+                player.getName().getString());
         AreaSelectionService.clear(player);
-        return AdminPanelRegistry.ActionResult.success("Saved draft " + id + " · " + template.volume() + " blocks");
+        return AdminPanelRegistry.ActionResult.success("Saved pocket " + id + " · " + template.volume() + " blocks",
+                POCKETS);
     }
 
-    // Create a directly linked portal at the administrator's exact current position from panel fields.
+    // Create a reusable portal definition without a placement.
     private static AdminPanelRegistry.ActionResult createPortal(ServerPlayer player, Map<String, String> values) {
         MinecraftServer server = player.level().getServer();
         Identifier id = formId(values, "portal_id");
-        Identifier template = formId(values, "portal_template");
+        Identifier template = portalLink(values);
+        PortalDefinition.Mode access = PortalDefinition.Mode.parse(required(values, "portal_access_mode"));
         PortalDefinition portal = new PortalDefinition(id, player.level().dimension().identifier(),
                 PortalDefinition.Shape.parse(required(values, "portal_shape")),
                 parsePortalPlane(required(values, "portal_plane")),
-                finiteDouble(values, "portal_x"), finiteDouble(values, "portal_y"), finiteDouble(values, "portal_z"),
+                0.0, 64.0, 0.0,
                 positiveDouble(values, "portal_width"),
                 positiveDouble(values, "portal_height"), template,
-                Math.multiplyExact(positiveLong(values, "portal_lifetime"), 60L),
+                Math.multiplyExact(nonNegativeLong(values, "portal_lifetime"), 60L),
                 PortalDefinition.PortalColor.parse(required(values, "portal_color")).rgb(),
                 required(values, "portal_name"), values.getOrDefault("portal_description", "").trim(),
                 parseDifficulty(required(values, "portal_difficulty")),
                 PortalDefinition.EntryPolicy.parse(required(values, "portal_entry_policy")),
-                PortalDefinition.Schedule.always()).withAdmission(new PortalDefinition.Admission(
-                PortalDefinition.Mode.parse(required(values, "portal_access_mode")),
-                boundedGroupSize(values, "portal_max_players")));
-        PortalService.create(server, portal);
+                PortalDefinition.Schedule.always());
+        portal = portal.withAdmission(new PortalDefinition.Admission(
+                access, access == PortalDefinition.Mode.PRIVATE
+                        ? boundedGroupSize(values, "portal_max_players") : 4,
+                parseYesNo(required(values, "portal_allow_building")), PortalDefinition.Destination.POCKET));
+        portal = portal.withEnvironment(portalEnvironment(values));
+        portal = portal.withBaseActive(parseYesNo(required(values, "portal_base_active")));
+        portal = portal.withRaidMode(parseYesNo(required(values, "portal_raid_mode")));
+        portal = portal.withKeepInventory(portal.isExit() || portal.isCoordinates()
+                || parseYesNo(required(values, "portal_keep_inventory")));
+        portal = portal.withShowOtherPlayers(parseYesNo(values.getOrDefault("portal_show_players", "Yes")));
+        if (portal.isCoordinates()) portal = portal.withCoordinateTarget(coordinateTarget(values));
+        PortalService.createUnplaced(server, portal);
         return AdminPanelRegistry.ActionResult.success("Created portal " + id, PORTALS);
     }
 
@@ -660,20 +1041,30 @@ public final class CwpAdminModule {
         MinecraftServer server = player.level().getServer();
         PortalDefinition current = PortalService.portal(server, id);
         if (current == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
+        PortalDefinition.Mode access = PortalDefinition.Mode.parse(required(values, "portal_access_mode"));
         PortalDefinition updated = new PortalDefinition(id, current.dimension(),
                 PortalDefinition.Shape.parse(required(values, "portal_shape")),
                 parsePortalPlane(required(values, "portal_plane")),
                 finiteDouble(values, "portal_x"), finiteDouble(values, "portal_y"),
                 finiteDouble(values, "portal_z"), positiveDouble(values, "portal_width"),
-                positiveDouble(values, "portal_height"), formId(values, "portal_template"),
-                Math.multiplyExact(positiveLong(values, "portal_lifetime"), 60L),
+                positiveDouble(values, "portal_height"), portalLink(values),
+                Math.multiplyExact(nonNegativeLong(values, "portal_lifetime"), 60L),
                 PortalDefinition.PortalColor.parse(required(values, "portal_color")).rgb(),
                 required(values, "portal_name"), values.getOrDefault("portal_description", "").trim(),
                 parseDifficulty(required(values, "portal_difficulty")),
-                PortalDefinition.EntryPolicy.parse(required(values, "portal_entry_policy")), current.schedule())
-                .withAdmission(new PortalDefinition.Admission(
-                        PortalDefinition.Mode.parse(required(values, "portal_access_mode")),
-                        boundedGroupSize(values, "portal_max_players")));
+                PortalDefinition.EntryPolicy.parse(required(values, "portal_entry_policy")), current.schedule());
+        updated = updated.withAdmission(new PortalDefinition.Admission(
+                access, access == PortalDefinition.Mode.PRIVATE
+                        ? boundedGroupSize(values, "portal_max_players") : current.admission().maxPlayers(),
+                parseYesNo(required(values, "portal_allow_building")), PortalDefinition.Destination.POCKET));
+        updated = updated.withEnvironment(portalEnvironment(values));
+        updated = updated.withBaseActive(parseYesNo(required(values, "portal_base_active")));
+        updated = updated.withRaidMode(parseYesNo(required(values, "portal_raid_mode")));
+        updated = updated.withKeepInventory(updated.isExit() || updated.isCoordinates()
+                || parseYesNo(required(values, "portal_keep_inventory")));
+        updated = updated.withShowOtherPlayers(values.containsKey("portal_show_players")
+                ? parseYesNo(required(values, "portal_show_players")) : current.showOtherPlayers());
+        if (updated.isCoordinates()) updated = updated.withCoordinateTarget(coordinateTarget(values));
         PortalService.update(server, updated);
         return AdminPanelRegistry.ActionResult.success("Saved portal edits for " + id);
     }
@@ -685,6 +1076,9 @@ public final class CwpAdminModule {
         PortalDefinition current = PortalService.portal(server, id);
         if (current == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
         PortalDefinition.Schedule schedule = patchSchedule(current.schedule(), values);
+        PortalDefinition.Mode access = values.containsKey("portal_access_mode")
+                ? PortalDefinition.Mode.parse(required(values, "portal_access_mode"))
+                : current.admission().mode();
         PortalDefinition updated = new PortalDefinition(id, current.dimension(),
                 values.containsKey("portal_shape")
                         ? PortalDefinition.Shape.parse(required(values, "portal_shape")) : current.shape(),
@@ -695,9 +1089,9 @@ public final class CwpAdminModule {
                 values.containsKey("portal_z") ? finiteDouble(values, "portal_z") : current.centerZ(),
                 values.containsKey("portal_width") ? positiveDouble(values, "portal_width") : current.width(),
                 values.containsKey("portal_height") ? positiveDouble(values, "portal_height") : current.height(),
-                values.containsKey("portal_template") ? formId(values, "portal_template") : current.templateId(),
+                values.containsKey("portal_template") ? portalLink(values) : current.templateId(),
                 values.containsKey("portal_lifetime")
-                        ? Math.multiplyExact(positiveLong(values, "portal_lifetime"), 60L)
+                        ? Math.multiplyExact(nonNegativeLong(values, "portal_lifetime"), 60L)
                         : current.lifetimeSeconds(),
                 values.containsKey("portal_color")
                         ? PortalDefinition.PortalColor.parse(required(values, "portal_color")).rgb()
@@ -709,15 +1103,65 @@ public final class CwpAdminModule {
                         ? parseDifficulty(required(values, "portal_difficulty")) : current.difficulty(),
                 values.containsKey("portal_entry_policy")
                         ? PortalDefinition.EntryPolicy.parse(required(values, "portal_entry_policy"))
-                        : current.entryPolicy(), schedule).withAdmission(new PortalDefinition.Admission(
-                        values.containsKey("portal_access_mode")
-                                ? PortalDefinition.Mode.parse(required(values, "portal_access_mode"))
-                                : current.admission().mode(),
-                        values.containsKey("portal_max_players")
-                                ? boundedGroupSize(values, "portal_max_players")
-                                : current.admission().maxPlayers()));
+                        : current.entryPolicy(), schedule);
+        updated = updated.withAdmission(new PortalDefinition.Admission(
+                access, access == PortalDefinition.Mode.PRIVATE && values.containsKey("portal_max_players")
+                        ? boundedGroupSize(values, "portal_max_players") : current.admission().maxPlayers(),
+                values.containsKey("portal_allow_building")
+                        ? parseYesNo(required(values, "portal_allow_building")) : current.allowBuilding(),
+                PortalDefinition.Destination.POCKET, current.environment(), current.coordinateTarget(),
+                values.containsKey("portal_base_active")
+                        ? parseYesNo(required(values, "portal_base_active")) : current.baseActive(),
+                values.containsKey("portal_raid_mode")
+                        ? parseYesNo(required(values, "portal_raid_mode")) : current.raidMode()));
+        updated = updated.withKeepInventory(updated.isExit() || updated.isCoordinates()
+                || (values.containsKey("portal_keep_inventory")
+                ? parseYesNo(required(values, "portal_keep_inventory")) : current.keepInventory()));
+        updated = updated.withShowOtherPlayers(values.containsKey("portal_show_players")
+                ? parseYesNo(required(values, "portal_show_players")) : current.showOtherPlayers());
+        PortalDefinition.Environment environment = current.environment();
+        updated = updated.withEnvironment(new PortalDefinition.Environment(
+                values.containsKey("portal_daytime")
+                        ? PortalDefinition.Daytime.parse(required(values, "portal_daytime")) : environment.daytime(),
+                values.containsKey("portal_day_night_cycle")
+                        ? parseYesNo(required(values, "portal_day_night_cycle")) : environment.dayNightCycle(),
+                values.containsKey("portal_weather")
+                        ? PortalDefinition.Weather.parse(required(values, "portal_weather")) : environment.weather(),
+                values.containsKey("portal_weather_cycle")
+                        ? parseYesNo(required(values, "portal_weather_cycle")) : environment.weatherCycle()));
+        if (updated.isCoordinates() || values.containsKey("portal_target_x")
+                || values.containsKey("portal_target_y") || values.containsKey("portal_target_z")) {
+            PortalDefinition.CoordinateTarget base = current.coordinateTarget().orElseGet(() ->
+                    defaultCoordinateTarget(current.centerX(), current.centerY(), current.centerZ(), current.plane()));
+            updated = updated.withCoordinateTarget(new PortalDefinition.CoordinateTarget(
+                    values.containsKey("portal_target_x") ? finiteDouble(values, "portal_target_x") : base.x(),
+                    values.containsKey("portal_target_y") ? finiteDouble(values, "portal_target_y") : base.y(),
+                    values.containsKey("portal_target_z") ? finiteDouble(values, "portal_target_z") : base.z()));
+        }
         PortalService.update(server, updated);
         return AdminPanelRegistry.ActionResult.silentSuccess();
+    }
+
+    private static PortalDefinition.Environment portalEnvironment(Map<String, String> values) {
+        return new PortalDefinition.Environment(
+                PortalDefinition.Daytime.parse(required(values, "portal_daytime")),
+                parseYesNo(required(values, "portal_day_night_cycle")),
+                PortalDefinition.Weather.parse(required(values, "portal_weather")),
+                parseYesNo(required(values, "portal_weather_cycle")));
+    }
+
+    private static PortalDefinition.CoordinateTarget coordinateTarget(Map<String, String> values) {
+        return new PortalDefinition.CoordinateTarget(finiteDouble(values, "portal_target_x"),
+                finiteDouble(values, "portal_target_y"), finiteDouble(values, "portal_target_z"));
+    }
+
+    private static PortalDefinition.CoordinateTarget defaultCoordinateTarget(double x, double y, double z,
+                                                                            PortalDefinition.Plane plane) {
+        return switch (plane) {
+            case XY -> new PortalDefinition.CoordinateTarget(x, y, z + 3.0);
+            case XZ -> new PortalDefinition.CoordinateTarget(x, y + 3.0, z);
+            case YZ -> new PortalDefinition.CoordinateTarget(x + 3.0, y, z);
+        };
     }
 
     private static int boundedGroupSize(Map<String, String> values, String key) {
@@ -730,17 +1174,18 @@ public final class CwpAdminModule {
     private static PortalDefinition.Schedule patchSchedule(PortalDefinition.Schedule current,
                                                             Map<String, String> values) {
         PortalDefinition.Schedule result = current;
-        if (values.containsKey("period_minutes") || values.containsKey("open_minutes")) {
+        if (current.periodSeconds() > 0L &&
+                (values.containsKey("period_minutes") || values.containsKey("open_minutes"))) {
             long period = values.containsKey("period_minutes")
                     ? Math.multiplyExact(positiveLong(values, "period_minutes"), 60L)
                     : current.periodSeconds() > 0L ? current.periodSeconds() : 14_400L;
             long open = values.containsKey("open_minutes")
                     ? Math.multiplyExact(positiveLong(values, "open_minutes"), 60L)
                     : current.openSeconds() > 0L ? current.openSeconds() : Math.min(1_800L, period);
-            result = result.withPeriodic(period, open, Instant.now());
+            result = result.withPeriodicValues(period, open);
         }
-        if (values.containsKey("calendar_zone") || values.containsKey("calendar_days")
-                || values.containsKey("calendar_start") || values.containsKey("calendar_end")) {
+        if (current.calendarEnabled() && (values.containsKey("calendar_zone") || values.containsKey("calendar_days")
+                || values.containsKey("calendar_start") || values.containsKey("calendar_end"))) {
             Set<DayOfWeek> days = values.containsKey("calendar_days")
                     ? parseDays(required(values, "calendar_days")) : current.weekdays();
             LocalTime start = values.containsKey("calendar_start")
@@ -762,11 +1207,16 @@ public final class CwpAdminModule {
         PortalDefinition portal = PortalService.portal(server, id);
         if (portal == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
         PortalDefinition.Schedule schedule = portal.schedule();
-        if (actionId.equals("portal.periodic")) {
+        if (actionId.equals("portal.periodic.add")) {
+            schedule = schedule.withPeriodic(14_400L, 1_800L, Instant.now());
+        } else if (actionId.equals("portal.periodic")) {
             schedule = schedule.withPeriodic(Math.multiplyExact(positiveLong(values, "period_minutes"), 60L),
                     Math.multiplyExact(positiveLong(values, "open_minutes"), 60L), Instant.now());
         } else if (actionId.equals("portal.periodic.clear")) {
             schedule = schedule.withoutPeriodic();
+        } else if (actionId.equals("portal.calendar.add")) {
+            schedule = schedule.withCalendar(Set.of(DayOfWeek.values()), LocalTime.of(9, 0),
+                    LocalTime.of(17, 0), ZoneId.of("UTC"));
         } else if (actionId.equals("portal.calendar")) {
             schedule = schedule.withCalendar(parseDays(required(values, "calendar_days")),
                     LocalTime.parse(required(values, "calendar_start")),
@@ -781,18 +1231,27 @@ public final class CwpAdminModule {
         return AdminPanelRegistry.ActionResult.success("Updated schedule for " + id);
     }
 
-    // Move an administrator beside a portal's source surface without activating its travel prompt.
+    // Move an administrator beside one saved portal location.
     private static AdminPanelRegistry.ActionResult teleportToPortal(ServerPlayer player, Identifier id) {
+        String name = PortalService.locations(player.level().getServer(), id).keySet().stream()
+                .sorted().findFirst().orElse(null);
+        if (name == null) return AdminPanelRegistry.ActionResult.failure("Portal has no locations: " + id);
+        return teleportToPortal(player, id, name);
+    }
+
+    private static AdminPanelRegistry.ActionResult teleportToPortal(ServerPlayer player, Identifier id, String name) {
         MinecraftServer server = player.level().getServer();
         PortalDefinition portal = PortalService.portal(server, id);
         if (portal == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
-        ServerLevel destination = server.getLevel(ResourceKey.create(Registries.DIMENSION, portal.dimension()));
+        PortalService.PortalPlacement location = PortalService.locations(server, id).get(name);
+        if (location == null) return AdminPanelRegistry.ActionResult.failure("Unknown location " + name);
+        ServerLevel destination = server.getLevel(ResourceKey.create(Registries.DIMENSION, location.dimension()));
         if (destination == null) {
-            return AdminPanelRegistry.ActionResult.failure("Portal dimension is unavailable: " + portal.dimension());
+            return AdminPanelRegistry.ActionResult.failure("Portal dimension is unavailable: " + location.dimension());
         }
-        double x = portal.centerX();
-        double y = portal.centerY();
-        double z = portal.centerZ();
+        double x = location.x();
+        double y = location.y();
+        double z = location.z();
         switch (portal.plane()) {
             case XY -> z += 2.0;
             case YZ -> x += 2.0;
@@ -817,6 +1276,13 @@ public final class CwpAdminModule {
                 : AdminPanelRegistry.AdminField.select("portal_template", "Links to", value, templates);
     }
 
+    private static Identifier portalLink(Map<String, String> values) {
+        String value = required(values, "portal_template");
+        if (value.equalsIgnoreCase("Exit")) return PortalDefinition.EXIT_TEMPLATE;
+        if (value.equalsIgnoreCase("Coordinates")) return PortalDefinition.COORDINATES_TEMPLATE;
+        return Identifier.parse(value);
+    }
+
     // Convert a persisted portal orientation into the editor's readable dropdown label.
     private static String planeLabel(PortalDefinition.Plane plane) {
         return switch (plane) {
@@ -831,6 +1297,7 @@ public final class CwpAdminModule {
         return switch (policy) {
             case REPEATABLE -> "Repeatable";
             case ONCE_PER_INSTANCE -> "Once per instance";
+            case ONCE_PER_ATTEMPT -> "Once per attempt";
             case ONCE_EVER -> "Once ever";
         };
     }
@@ -845,10 +1312,35 @@ public final class CwpAdminModule {
         return value == Math.rint(value) ? Long.toString((long) value) : Double.toString(value);
     }
 
-    // Require draft operations to run inside CWP's isolated workshop dimension.
-    private static void requireWorkshop(ServerPlayer player) {
-        if (!player.level().dimension().identifier().equals(PortalService.WORKSHOP_DIMENSION)) {
-            throw new IllegalStateException("Enter the template workshop first");
+    private static Identifier pocketPageId(String pageId) {
+        if (!pageId.startsWith(POCKET_EDIT)) throw new IllegalArgumentException("Open a pocket editor first");
+        Identifier id = Identifier.tryParse(pageId.substring(POCKET_EDIT.length()));
+        if (id == null) throw new IllegalArgumentException("Invalid pocket ID");
+        return id;
+    }
+
+    private static ScriptRoute scriptRoute(String pageId) {
+        if (pageId.startsWith(MOB_SCRIPT_EDIT)) {
+            String scriptId = pageId.substring(MOB_SCRIPT_EDIT.length());
+            return scriptId.isBlank() || scriptId.contains("/") ? null
+                    : new ScriptRoute(null, scriptId, MOB_SCRIPTS);
+        }
+        if (!pageId.startsWith(POCKET_EDIT)) return null;
+        int segment = pageId.indexOf(SCRIPT_SEGMENT, POCKET_EDIT.length());
+        if (segment < 0) return null;
+        Identifier pocketId = Identifier.tryParse(pageId.substring(POCKET_EDIT.length(), segment));
+        String scriptId = pageId.substring(segment + SCRIPT_SEGMENT.length());
+        return pocketId == null || scriptId.isBlank() || scriptId.contains("/") ? null
+                : new ScriptRoute(pocketId, scriptId, POCKET_EDIT + pocketId);
+    }
+
+    private record ScriptRoute(Identifier pocketId, String scriptId, String backPage) { }
+
+    // Bind edits to the selected pocket's dedicated build dimension.
+    private static void requirePocketEditor(ServerPlayer player, Identifier id) {
+        Identifier dimension = PocketEditorService.dimension(player.level().getServer(), id);
+        if (dimension == null || !player.level().dimension().identifier().equals(dimension)) {
+            throw new IllegalStateException("Enter this pocket's build dimension first");
         }
     }
 
@@ -870,6 +1362,12 @@ public final class CwpAdminModule {
         int difficulty = Integer.parseInt(value.split("\\s+", 2)[0]);
         if (difficulty < 1 || difficulty > 5) throw new IllegalArgumentException("Difficulty must be 1 to 5");
         return difficulty;
+    }
+
+    private static boolean parseYesNo(String value) {
+        if (value.equalsIgnoreCase("Yes")) return true;
+        if (value.equalsIgnoreCase("No")) return false;
+        throw new IllegalArgumentException("Choose Yes or No");
     }
 
     // Parse a strictly positive decimal form value.
@@ -914,7 +1412,8 @@ public final class CwpAdminModule {
 
     // Return stable template ID completions for draft and portal-link fields.
     private static List<String> templateSuggestions(MinecraftServer server) {
-        return PortalTemplateService.templates(server).stream().map(template -> template.id().toString()).toList();
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of("Exit", "Coordinates"),
+                PortalTemplateService.templates(server).stream().map(template -> template.id().toString())).toList();
     }
 
     // Parse comma-separated full or abbreviated weekday names from the calendar editor.

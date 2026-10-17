@@ -2,6 +2,7 @@ package ekuzo.crazyworldprogression.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -13,12 +14,12 @@ import ekuzo.crazyworldprogression.portals.PortalNetworking;
 import ekuzo.crazyworldprogression.portals.PortalRegistry;
 import ekuzo.crazyworldprogression.portals.PortalService;
 import ekuzo.crazyworldprogression.portals.PortalTemplateService;
+import ekuzo.crazyworldprogression.portals.PocketEditorService;
+import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
-import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
@@ -70,7 +71,7 @@ public final class PortalCommands {
                 .then(Commands.literal("remove").then(portalIdArgument().executes(PortalCommands::remove)))
                 .then(Commands.literal("move").then(portalIdArgument()
                         .then(Commands.literal("here").executes(PortalCommands::moveHere))))
-                .then(Commands.literal("link").then(portalIdArgument().then(templateIdArgument()
+                .then(Commands.literal("link").then(portalIdArgument().then(linkTargetArgument()
                         .executes(PortalCommands::link))))
                 .then(Commands.literal("color").then(portalIdArgument()
                         .then(colorArgument().executes(PortalCommands::color))))
@@ -87,21 +88,27 @@ public final class PortalCommands {
                         .then(Commands.literal("private").then(Commands.argument("max_players",
                                 IntegerArgumentType.integer(1, 100))
                                 .executes(context -> setAccess(context, true))))))
+                .then(Commands.literal("building").then(portalIdArgument()
+                        .then(Commands.argument("allowed", BoolArgumentType.bool())
+                                .executes(PortalCommands::building))))
+                .then(Commands.literal("exits").then(Commands.literal("create")
+                        .then(Commands.argument("portal_id", StringArgumentType.word())
+                                .executes(PortalCommands::createExit))))
                 .then(Commands.literal("difficulty").then(portalIdArgument()
                         .then(Commands.argument("skulls", IntegerArgumentType.integer(1, 5))
                                 .executes(PortalCommands::difficulty))))
                 .then(Commands.literal("lifetime").then(portalIdArgument()
-                        .then(Commands.argument("minutes", IntegerArgumentType.integer(1, 43_200))
+                        .then(Commands.argument("minutes", IntegerArgumentType.integer(0, 43_200))
                                 .executes(PortalCommands::lifetime))))
                 .then(scheduleBranch())
-                .then(workshopBranch())
+                .then(pocketBranch())
                 .then(templateBranch())
                 .then(instanceBranch());
     }
 
     // Build portal creation syntax centered on the executing source.
     private static LiteralArgumentBuilder<CommandSourceStack> createBranch() {
-        var lifetime = Commands.argument("lifetime_minutes", IntegerArgumentType.integer(1, 43_200))
+        var lifetime = Commands.argument("lifetime_minutes", IntegerArgumentType.integer(0, 43_200))
                 .executes(PortalCommands::create)
                 .then(colorArgument().executes(PortalCommands::createWithColor));
         var height = Commands.argument("height", DoubleArgumentType.doubleArg(0.5, 256.0)).then(lifetime);
@@ -139,17 +146,20 @@ public final class PortalCommands {
                 .executes(PortalCommands::templateList)
                 .then(Commands.literal("list").executes(PortalCommands::templateList))
                 .then(Commands.literal("capture").then(Commands.argument("template_id", StringArgumentType.word())
-                        .then(Commands.argument("from", BlockPosArgument.blockPos())
-                                .then(Commands.argument("to", BlockPosArgument.blockPos())
-                                        .then(Commands.argument("spawn", BlockPosArgument.blockPos())
-                                                .executes(PortalCommands::capture))))));
+                        .executes(PortalCommands::capture)));
     }
 
-    // Build entry and return commands for CWP's persistent template-authoring void dimension.
-    private static LiteralArgumentBuilder<CommandSourceStack> workshopBranch() {
-        return Commands.literal("workshop")
-                .then(Commands.literal("enter").executes(PortalCommands::enterWorkshop))
-                .then(Commands.literal("leave").executes(PortalCommands::leaveWorkshop));
+    // Build per-pocket authoring commands without exposing a shared workshop.
+    private static LiteralArgumentBuilder<CommandSourceStack> pocketBranch() {
+        return Commands.literal("pockets")
+                .then(Commands.literal("create").then(templateIdArgument().executes(PortalCommands::createPocket)))
+                .then(Commands.literal("enter").then(templateIdArgument().executes(PortalCommands::enterPocket)))
+                .then(Commands.literal("spawn").then(templateIdArgument()
+                        .then(Commands.argument("x", IntegerArgumentType.integer())
+                                .then(Commands.argument("y", IntegerArgumentType.integer())
+                                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                .executes(PortalCommands::setPocketSpawn))))))
+                .then(Commands.literal("leave").executes(PortalCommands::leavePocket));
     }
 
     // Build active slot diagnostics and forced expiry commands.
@@ -171,7 +181,7 @@ public final class PortalCommands {
         int portals = PortalService.portals(context.getSource().getServer()).size();
         int instances = PortalService.activeInstances(context.getSource().getServer()).size();
         context.getSource().sendSuccess(() -> Component.literal("CWP portals: " + templates + " templates, "
-                + portals + " placed portals, " + instances + "/" + PortalRegistry.instanceSlots().size()
+                + portals + " portal definitions, " + instances + "/" + PortalRegistry.instanceSlots().size()
                 + " active instance slots").withStyle(ChatFormatting.AQUA), false);
         return portals;
     }
@@ -193,16 +203,19 @@ public final class PortalCommands {
         if (portal == null) return 0;
         PortalDefinition.Schedule schedule = portal.schedule();
         context.getSource().sendSuccess(() -> Component.literal("Portal " + portal.id() + " -> "
-                + portal.templateId() + " · " + portal.effectiveDisplayName()).withStyle(ChatFormatting.GOLD), false);
-        context.getSource().sendSuccess(() -> Component.literal("Dimension " + portal.dimension() + ", center "
-                + portal.centerX() + " " + portal.centerY() + " " + portal.centerZ() + ", "
+                + (portal.isExit() ? "Exit" : portal.templateId()) + " · " + portal.effectiveDisplayName())
+                .withStyle(ChatFormatting.GOLD), false);
+        context.getSource().sendSuccess(() -> Component.literal("Locations "
+                + PortalService.locations(context.getSource().getServer(), portal.id()) + ", "
                 + portal.shape().serializedName() + " " + portal.width() + "x" + portal.height() + " on "
                 + portal.plane().serializedName() + ", color "
                 + PortalDefinition.PortalColor.displayName(portal.colorRgb()) + " (#"
                 + String.format("%06X", portal.colorRgb()) + ")").withStyle(ChatFormatting.GRAY), false);
-        context.getSource().sendSuccess(() -> Component.literal("Lifetime " + portal.lifetimeSeconds()
-                + "s; calendar " + schedule.weekdays() + " " + schedule.start() + "-" + schedule.end() + " "
-                + schedule.timezone() + "; periodic " + (schedule.periodSeconds() == 0L ? "off"
+        context.getSource().sendSuccess(() -> Component.literal("Lifetime "
+                + (portal.lifetimeSeconds() == 0L ? "no expiry" : portal.lifetimeSeconds() + "s")
+                + "; calendar " + (schedule.calendarEnabled() ? schedule.weekdays() + " " + schedule.start()
+                + "-" + schedule.end() + " " + schedule.timezone() : "off")
+                + "; periodic " + (schedule.periodSeconds() == 0L ? "off"
                 : schedule.openSeconds() + "s every " + schedule.periodSeconds() + "s"))
                 .withStyle(ChatFormatting.GRAY), false);
         context.getSource().sendSuccess(() -> Component.literal("Description: "
@@ -287,9 +300,52 @@ public final class PortalCommands {
         if (portal == null) return 0;
         int max = privateMode ? IntegerArgumentType.getInteger(context, "max_players")
                 : portal.admission().maxPlayers();
-        PortalService.update(context.getSource().getServer(), portal.withAdmission(new PortalDefinition.Admission(
-                privateMode ? PortalDefinition.Mode.PRIVATE : PortalDefinition.Mode.PUBLIC, max)));
-        return success(context, "Set " + portal.id() + " to " + (privateMode ? "private, max " + max : "public"));
+        try {
+            PortalService.update(context.getSource().getServer(), portal.withAdmission(portal.admission().withAccess(
+                    privateMode ? PortalDefinition.Mode.PRIVATE : PortalDefinition.Mode.PUBLIC, max)));
+            return success(context, "Set " + portal.id() + " to " + (privateMode ? "private, max " + max : "public"));
+        } catch (RuntimeException exception) {
+            return failure(context, exception);
+        }
+    }
+
+    private static int building(CommandContext<CommandSourceStack> context) {
+        PortalDefinition portal = requirePortal(context);
+        if (portal == null) return 0;
+        boolean allowed = BoolArgumentType.getBool(context, "allowed");
+        PortalService.update(context.getSource().getServer(), portal.withAllowBuilding(allowed));
+        return success(context, "Building in " + portal.id() + " instances: " + allowed);
+    }
+
+    private static int createExit(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) return 0;
+        Identifier pocket = PocketEditorService.pocketForDimension(context.getSource().getServer(),
+                player.level().dimension().identifier());
+        if (pocket == null) return failure(context, new IllegalArgumentException("Enter a pocket editor first"));
+        Identifier id = Identifier.parse(StringArgumentType.getString(context, "portal_id"));
+        PortalDefinition exit = new PortalDefinition(id, player.level().dimension().identifier(),
+                PortalDefinition.Shape.RECTANGLE, PortalDefinition.Plane.XY,
+                player.getX(), player.getY() + 0.9, player.getZ(), 4, 6,
+                PortalDefinition.EXIT_TEMPLATE, 5_400L, PortalDefinition.DEFAULT_COLOR_RGB,
+                "Exit", "Return to the main world", 1, PortalDefinition.EntryPolicy.REPEATABLE,
+                PortalDefinition.Schedule.always());
+        PortalService.create(context.getSource().getServer(), exit);
+        return success(context, "Created exit portal " + id + " in " + pocket);
+    }
+
+    private static int setPocketSpawn(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) return 0;
+        Identifier id = identifierArgument(context, "template_id");
+        if (!player.level().dimension().identifier().equals(PocketEditorService.dimension(
+                context.getSource().getServer(), id))) {
+            return failure(context, new IllegalArgumentException("Enter that pocket editor first"));
+        }
+        BlockPos position = new BlockPos(IntegerArgumentType.getInteger(context, "x"),
+                IntegerArgumentType.getInteger(context, "y"), IntegerArgumentType.getInteger(context, "z"));
+        PocketEditorService.setEntry(context.getSource().getServer(), id, position);
+        return success(context, "Preferred pocket spawn set to " + position.toShortString());
     }
 
     private static int groupScreen(CommandContext<CommandSourceStack> context) {
@@ -356,9 +412,9 @@ public final class PortalCommands {
         PortalDefinition portal = requirePortal(context);
         if (portal == null) return 0;
         try {
-            PortalService.update(context.getSource().getServer(), portal.movedTo(
-                    context.getSource().getLevel().dimension().identifier(), context.getSource().getPosition()));
-            return success(context, "Moved portal " + portal.id());
+            PortalService.setLocation(context.getSource().getServer(), portal.id(), "original",
+                    context.getSource().getLevel().dimension().identifier(), context.getSource().getPosition());
+            return success(context, "Set original location for " + portal.id());
         } catch (RuntimeException exception) {
             return failure(context, exception);
         }
@@ -369,7 +425,7 @@ public final class PortalCommands {
         PortalDefinition portal = requirePortal(context);
         if (portal == null) return 0;
         try {
-            Identifier template = identifierArgument(context, "template_id");
+            Identifier template = linkArgument(context);
             PortalService.update(context.getSource().getServer(), portal.withTemplate(template));
             return success(context, "Linked portal " + portal.id() + " to " + template);
         } catch (RuntimeException exception) {
@@ -382,8 +438,12 @@ public final class PortalCommands {
         PortalDefinition portal = requirePortal(context);
         if (portal == null) return 0;
         long seconds = IntegerArgumentType.getInteger(context, "minutes") * 60L;
-        PortalService.update(context.getSource().getServer(), portal.withLifetime(seconds));
-        return success(context, "Set portal " + portal.id() + " lifetime to " + seconds + " seconds");
+        try {
+            PortalService.update(context.getSource().getServer(), portal.withLifetime(seconds));
+            return success(context, "Set portal " + portal.id() + " lifetime to " + seconds + " seconds");
+        } catch (RuntimeException exception) {
+            return failure(context, exception);
+        }
     }
 
     // Set a repeating entry window anchored at command execution time.
@@ -434,15 +494,13 @@ public final class PortalCommands {
         return success(context, "Cleared calendar gate for portal " + portal.id());
     }
 
-    // Capture a loaded cuboid and its relative entry point into CWP world template storage.
+    // Capture every built block in the player's current pocket editor dimension.
     private static int capture(CommandContext<CommandSourceStack> context) {
         try {
             Identifier id = identifierArgument(context, "template_id");
-            BlockPos from = BlockPosArgument.getLoadedBlockPos(context, "from");
-            BlockPos to = BlockPosArgument.getLoadedBlockPos(context, "to");
-            BlockPos spawn = BlockPosArgument.getLoadedBlockPos(context, "spawn");
-            PortalTemplateService.TemplateInfo template = PortalTemplateService.capture(
-                    context.getSource().getServer(), context.getSource().getLevel(), id, from, to, spawn,
+            var player = context.getSource().getPlayerOrException();
+            PortalTemplateService.TemplateInfo template = PortalTemplateService.captureAll(
+                    context.getSource().getServer(), context.getSource().getLevel(), id, player.blockPosition(),
                     context.getSource().getTextName());
             return success(context, "Captured template " + id + " (" + template.sizeX() + "x"
                     + template.sizeY() + "x" + template.sizeZ() + ", " + template.volume() + " blocks)");
@@ -451,21 +509,31 @@ public final class PortalCommands {
         }
     }
 
-    // Teleport one game master into the dedicated persistent template-authoring dimension.
-    private static int enterWorkshop(CommandContext<CommandSourceStack> context) {
+    private static int createPocket(CommandContext<CommandSourceStack> context) {
         try {
-            PortalService.enterWorkshop(context.getSource().getPlayerOrException());
+            var id = identifierArgument(context, "template_id");
+            ekuzo.crazyworldprogression.portals.PocketEditorService.create(context.getSource().getServer(), id);
+            context.getSource().sendSuccess(() -> Component.literal("Created pocket " + id), true);
             return 1;
         } catch (Exception exception) {
             return failure(context, exception);
         }
     }
 
-    // Return one game master from the template workshop.
-    private static int leaveWorkshop(CommandContext<CommandSourceStack> context) {
+    private static int enterPocket(CommandContext<CommandSourceStack> context) {
         try {
-            if (!PortalService.leaveWorkshop(context.getSource().getPlayerOrException())) {
-                context.getSource().sendFailure(Component.literal("You are not inside the CWP portal workshop"));
+            PortalService.enterPocketEditor(context.getSource().getPlayerOrException(),
+                    identifierArgument(context, "template_id"));
+            return 1;
+        } catch (Exception exception) {
+            return failure(context, exception);
+        }
+    }
+
+    private static int leavePocket(CommandContext<CommandSourceStack> context) {
+        try {
+            if (!PortalService.leavePocketEditor(context.getSource().getPlayerOrException())) {
+                context.getSource().sendFailure(Component.literal("You are not inside a pocket editor"));
                 return 0;
             }
             return 1;
@@ -489,8 +557,9 @@ public final class PortalCommands {
     private static int instanceList(CommandContext<CommandSourceStack> context) {
         List<PortalService.ActiveInstance> instances = PortalService.activeInstances(context.getSource().getServer());
         instances.forEach(instance -> context.getSource().sendSuccess(() -> Component.literal(instance.portalId()
-                + " -> " + instance.templateId() + " in " + instance.slotDimension() + ", expires "
-                + instance.expires()).withStyle(ChatFormatting.GRAY), false));
+                + " -> " + instance.templateId() + " in " + instance.slotDimension() + ", "
+                + (instance.expires().toEpochMilli() == Long.MAX_VALUE ? "no automatic expiry"
+                : "expires " + instance.expires())).withStyle(ChatFormatting.GRAY), false));
         return instances.size();
     }
 
@@ -541,6 +610,19 @@ public final class PortalCommands {
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                         PortalTemplateService.templates(context.getSource().getServer()).stream()
                                 .map(template -> template.id().toString()).toList(), builder));
+    }
+
+    private static Identifier linkArgument(CommandContext<CommandSourceStack> context) {
+        String value = StringArgumentType.getString(context, "template_id");
+        return value.equalsIgnoreCase("Exit") ? PortalDefinition.EXIT_TEMPLATE : Identifier.parse(value);
+    }
+
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> linkTargetArgument() {
+        return Commands.argument("template_id", StringArgumentType.word())
+                .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                        java.util.stream.Stream.concat(java.util.stream.Stream.of("Exit"),
+                                PortalTemplateService.templates(context.getSource().getServer()).stream()
+                                        .map(template -> template.id().toString())).toList(), builder));
     }
 
     // Create a named portal-color argument with all built-in presets as suggestions.

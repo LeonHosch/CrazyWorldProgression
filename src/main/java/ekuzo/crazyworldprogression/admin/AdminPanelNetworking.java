@@ -16,11 +16,14 @@ import net.minecraft.server.level.ServerPlayer;
 import java.util.List;
 import java.util.Comparator;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.UUID;
 
 /** Secure request/action transport for CWP's generic, server-authoritative admin panel. */
 public final class AdminPanelNetworking {
     private static final Gson GSON = new Gson();
     private static final String EMPTY_SELECTION = "";
+    private static final Map<UUID, PanelLocation> LAST_LOCATION = new HashMap<>();
 
     // Prevent construction of the static network bridge.
     private AdminPanelNetworking() {
@@ -37,7 +40,8 @@ public final class AdminPanelNetworking {
     public static void registerServerReceivers() {
         ServerPlayNetworking.registerGlobalReceiver(RequestPanelPayload.TYPE, (payload, context) -> {
             if (isAdministrator(context.player())) {
-                send(context.player(), payload.moduleId(), payload.pageId(), "", false);
+                if ("@last".equals(payload.moduleId())) open(context.player());
+                else send(context.player(), payload.moduleId(), payload.pageId(), "", false);
             }
         });
         ServerPlayNetworking.registerGlobalReceiver(ExecuteActionPayload.TYPE, (payload, context) -> {
@@ -70,7 +74,16 @@ public final class AdminPanelNetworking {
     // Open the module dashboard for an authorized player.
     public static boolean open(ServerPlayer player) {
         if (!isAdministrator(player)) return false;
-        send(player, EMPTY_SELECTION, EMPTY_SELECTION, "", false);
+        PanelLocation last = LAST_LOCATION.getOrDefault(player.getUUID(),
+                new PanelLocation(EMPTY_SELECTION, EMPTY_SELECTION));
+        send(player, last.moduleId(), last.pageId(), "", false);
+        return true;
+    }
+
+    /** Open a specific page for server-side command shortcuts. */
+    public static boolean openPage(ServerPlayer player, Identifier moduleId, String pageId) {
+        if (!isAdministrator(player) || AdminPanelRegistry.module(moduleId) == null) return false;
+        send(player, moduleId.toString(), pageId, "", false);
         return true;
     }
 
@@ -103,6 +116,8 @@ public final class AdminPanelNetworking {
                 page = module.pages().create(player, pageId);
             }
         }
+        LAST_LOCATION.put(player.getUUID(), new PanelLocation(selectedModule,
+                page == null ? EMPTY_SELECTION : page.id()));
         ServerPlayNetworking.send(player, new PanelSnapshotPayload(GSON.toJson(
                 new PanelSnapshot(modules, selectedModule, page, notice, error))));
     }
@@ -119,6 +134,9 @@ public final class AdminPanelNetworking {
     /** Complete screen state, refreshed after navigation and every action. */
     public record PanelSnapshot(List<ModuleSnapshot> modules, String selectedModule,
                                 AdminPanelRegistry.AdminPage page, String notice, boolean error) {
+    }
+
+    private record PanelLocation(String moduleId, String pageId) {
     }
 
     /** Client request for the dashboard or a particular module page. */

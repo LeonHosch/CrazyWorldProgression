@@ -53,7 +53,7 @@ public final class MobForge {
 				MobForgeEvents.damaged(new RegisteredMobHandle(entity), damageTaken);
 		});
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
-			if (entity.level() instanceof net.minecraft.server.level.ServerLevel level) SCRIPT_EXECUTOR.entityDied(level, entity.getUUID());
+			if (entity.level() instanceof net.minecraft.server.level.ServerLevel level) SCRIPT_EXECUTOR.entityDied(level, entity);
 			if (MobForgeEntityData.definition(entity).flatMap(MOBS::get).isPresent())
 				MobForgeEvents.killed(new RegisteredMobHandle(entity), source.getEntity());
 		});

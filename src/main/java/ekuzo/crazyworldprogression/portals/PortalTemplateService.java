@@ -2,17 +2,25 @@ package ekuzo.crazyworldprogression.portals;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.storage.LevelResource;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 
@@ -24,9 +32,20 @@ public final class PortalTemplateService {
     private PortalTemplateService() {
     }
 
-    // Capture an inclusive cuboid and relative player-entry position into world-generated structure storage.
-    public static TemplateInfo capture(MinecraftServer server, ServerLevel source, Identifier id,
+    /** Capture every built block in this pocket's discovered chunks, without corner selection. */
+    public static TemplateInfo captureAll(MinecraftServer server, ServerLevel source, Identifier id,
+                                          BlockPos preferredSpawn, String author) {
+        PocketEditorService.BuildScan build = PocketEditorService.scanBuild(server, source, id, preferredSpawn);
+        return capture(server, source, id, build.first(), build.last(), build.spawn(), author);
+    }
+
+    // Persist the automatically discovered build and its supported entry block.
+    private static TemplateInfo capture(MinecraftServer server, ServerLevel source, Identifier id,
                                        BlockPos first, BlockPos second, BlockPos spawn, String author) {
+        Identifier editor = PocketEditorService.dimension(server, id);
+        if (editor == null || !editor.equals(source.dimension().identifier())) {
+            throw new IllegalArgumentException("Create this pocket and enter its build dimension before capture");
+        }
         BlockPos minimum = new BlockPos(Math.min(first.getX(), second.getX()), Math.min(first.getY(), second.getY()),
                 Math.min(first.getZ(), second.getZ()));
         BlockPos maximum = new BlockPos(Math.max(first.getX(), second.getX()), Math.max(first.getY(), second.getY()),
@@ -38,14 +57,11 @@ public final class PortalTemplateService {
             throw new IllegalArgumentException("Template contains " + volume + " blocks; maximum is "
                     + MAX_TEMPLATE_VOLUME);
         }
-        if (spawn.getX() < minimum.getX() || spawn.getX() > maximum.getX()
-                || spawn.getY() < minimum.getY() || spawn.getY() > maximum.getY()
-                || spawn.getZ() < minimum.getZ() || spawn.getZ() > maximum.getZ()) {
-            throw new IllegalArgumentException("Template spawn must be inside the captured cuboid");
-        }
         StructureTemplate structure = server.getStructureManager().getOrCreate(id);
         structure.setAuthor(author);
-        structure.fillFromWorld(source, minimum, size, true, List.of());
+        // Pocket templates contain builds. Capturing loose item entities would replay dropped
+        // doors and other pickups every time a new instance is reconstructed.
+        structure.fillFromWorld(source, minimum, size, false, List.of());
         if (!server.getStructureManager().save(id)) {
             throw new IllegalStateException("Minecraft could not save structure template " + id);
         }
@@ -53,6 +69,10 @@ public final class PortalTemplateService {
                 size.getX(), size.getY(), size.getZ(), spawn.getX() - minimum.getX(),
                 spawn.getY() - minimum.getY(), spawn.getZ() - minimum.getZ(), author);
         PortalTemplateData.get(server).put(metadata);
+        PocketEditorService.setEntry(server, id, spawn);
+        PocketEditorService.setCaptureOrigin(server, id, minimum);
+        PortalService.refreshProjectedPortals(server);
+        PocketEditorService.clearAutoSave(server, id);
         return view(metadata);
     }
 
@@ -69,6 +89,26 @@ public final class PortalTemplateService {
         return metadata == null ? null : view(metadata);
     }
 
+    // Remove an unused captured pocket from template metadata and structure storage.
+    public static boolean delete(MinecraftServer server, Identifier id) throws IOException {
+        if (PortalService.portals(server).stream().anyMatch(portal ->
+                !portal.isExit() && portal.templateId().equals(id))
+                || PortalService.activeInstances(server).stream().anyMatch(instance -> instance.templateId().equals(id))) {
+            throw new IllegalStateException("Remove linked portals and active instances before deleting this pocket");
+        }
+        if (PortalTemplateData.get(server).values().get(id.toString()) == null) return false;
+        Path generated = server.getWorldPath(LevelResource.GENERATED_DIR).toAbsolutePath().normalize();
+        Path structure = generated.resolve(id.getNamespace()).resolve("structure")
+                .resolve(id.getPath() + ".nbt").normalize();
+        if (!structure.startsWith(generated)) throw new IOException("Unsafe pocket structure path");
+        Files.deleteIfExists(structure);
+        Files.deleteIfExists(generated.resolve(id.getNamespace()).resolve("structure")
+                .resolve(id.getPath() + ".snbt").normalize());
+        server.getStructureManager().remove(id);
+        PortalTemplateData.get(server).remove(id);
+        return true;
+    }
+
     // Place one captured structure into an empty registered instance slot.
     static void reconstruct(MinecraftServer server, ServerLevel destination, Identifier id, BlockPos origin) {
         PortalTemplateData.PortalTemplate metadata = requireMetadata(server, id);
@@ -78,10 +118,34 @@ public final class PortalTemplateService {
                 || structure.getSize().getZ() != metadata.sizeZ()) {
             throw new IllegalStateException("Template metadata size no longer matches structure NBT for " + id);
         }
-        StructurePlaceSettings settings = new StructurePlaceSettings().setIgnoreEntities(false).setFinalizeEntities(true);
-        if (!structure.placeInWorld(destination, origin, origin, settings, destination.getRandom(), 3)) {
+        // The captured build already contains complete block states and their supports. Minecraft's
+        // default structure finalization runs neighbor-shape updates across the whole template,
+        // which can break attached blocks and drop items while reconstruction is still in progress.
+        StructurePlaceSettings settings = new StructurePlaceSettings().setKnownShape(true)
+                .setIgnoreEntities(true);
+        // UPDATE_KNOWN_SHAPE also skips Level.setBlock's implicit shape updates. UPDATE_CLIENTS
+        // alone still runs them and can break doors or buttons before the template is complete.
+        int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
+        if (!structure.placeInWorld(destination, origin, origin, settings, destination.getRandom(), flags)) {
             throw new IllegalStateException("Could not reconstruct portal template " + id);
         }
+        // Older slot chunks were generated with the void biome, which suppresses rain entirely.
+        // Recolor the occupied chunks before players enter; new chunks use plains in the dimension JSON.
+        var plains = server.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
+        var sampler = destination.getChunkSource().randomState().sampler();
+        for (int chunkX = origin.getX() >> 4; chunkX <= (origin.getX() + metadata.sizeX() - 1) >> 4; chunkX++) {
+            for (int chunkZ = origin.getZ() >> 4; chunkZ <= (origin.getZ() + metadata.sizeZ() - 1) >> 4; chunkZ++) {
+                var chunk = destination.getChunk(chunkX, chunkZ);
+                chunk.fillBiomesFromNoise((x, y, z, climate) -> plains, sampler);
+                chunk.markUnsaved();
+            }
+        }
+        // Remove stale pickups left in a reused slot or created by a failed placement.
+        AABB bounds = new AABB(origin.getX(), origin.getY(), origin.getZ(),
+                origin.getX() + metadata.sizeX(), origin.getY() + metadata.sizeY(),
+                origin.getZ() + metadata.sizeZ());
+        destination.getEntities((Entity) null, bounds, entity -> entity instanceof ItemEntity)
+                .forEach(Entity::discard);
     }
 
     // Remove non-player entities belonging to an expired instance before block cleanup begins.
@@ -108,7 +172,8 @@ public final class PortalTemplateService {
             int z = (int) (withinLayer / instance.sizeX());
             int x = (int) (withinLayer % instance.sizeX());
             cursor.set(instance.originX() + x, instance.originY() + y, instance.originZ() + z);
-            if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(), 2);
+            if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(),
+                    Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS);
         }
         return end >= volume ? -1L : end;
     }

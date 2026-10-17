@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
+import java.util.Optional;
 
 /** Persistent placed portal definitions and temporary instance-slot leases. */
 final class PortalData extends SavedData {
@@ -21,10 +22,13 @@ final class PortalData extends SavedData {
             Codec.unboundedMap(Codec.STRING, StoredInstance.CODEC);
     private static final Codec<Map<String, List<String>>> ENTRIES_CODEC =
             Codec.unboundedMap(Codec.STRING, Codec.STRING.listOf());
+    private static final Codec<Map<String, Map<String, PortalLocation>>> LOCATIONS_CODEC =
+            Codec.unboundedMap(Codec.STRING, Codec.unboundedMap(Codec.STRING, PortalLocation.CODEC));
     static final Codec<PortalData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             PORTALS_CODEC.optionalFieldOf("portals", Map.of()).forGetter(data -> data.portals),
             INSTANCES_CODEC.optionalFieldOf("instances", Map.of()).forGetter(data -> data.instances),
-            ENTRIES_CODEC.optionalFieldOf("player_entries", Map.of()).forGetter(data -> data.playerEntries)
+            ENTRIES_CODEC.optionalFieldOf("player_entries", Map.of()).forGetter(data -> data.playerEntries),
+            LOCATIONS_CODEC.optionalFieldOf("locations").forGetter(data -> Optional.of(data.locations))
     ).apply(instance, PortalData::new));
     static final SavedDataType<PortalData> TYPE = new SavedDataType<>(
             CrazyWorldProgression.id("portals"), PortalData::new, CODEC, null);
@@ -32,6 +36,7 @@ final class PortalData extends SavedData {
     private final Map<String, PortalDefinition> portals = new LinkedHashMap<>();
     private final Map<String, StoredInstance> instances = new LinkedHashMap<>();
     private final Map<String, List<String>> playerEntries = new LinkedHashMap<>();
+    private final Map<String, Map<String, PortalLocation>> locations = new LinkedHashMap<>();
 
     // Create empty portal and instance state for a new world.
     PortalData() {
@@ -39,8 +44,17 @@ final class PortalData extends SavedData {
 
     // Copy decoded maps into deterministic mutable storage.
     private PortalData(Map<String, PortalDefinition> portals, Map<String, StoredInstance> instances,
-                       Map<String, List<String>> playerEntries) {
+                       Map<String, List<String>> playerEntries,
+                       Optional<Map<String, Map<String, PortalLocation>>> locations) {
         this.portals.putAll(portals);
+        if (locations.isPresent()) {
+            locations.get().forEach((id, placements) -> this.locations.put(id, new LinkedHashMap<>(placements)));
+        } else {
+            // Old worlds stored the sole placement inside each definition.
+            portals.forEach((id, portal) -> this.locations.put(id, new LinkedHashMap<>(Map.of(
+                    "original", new PortalLocation(portal.dimension(), portal.centerX(),
+                            portal.centerY(), portal.centerZ())))));
+        }
         // Older saves keyed leases by portal ID. Normalize to the unique slot key.
         instances.values().forEach(instance -> this.instances.put(instance.slotDimension().toString(), instance));
         playerEntries.forEach((portal, players) -> this.playerEntries.put(portal, new java.util.ArrayList<>(players)));
@@ -54,6 +68,23 @@ final class PortalData extends SavedData {
     // Return an immutable snapshot of placed portals.
     Map<String, PortalDefinition> portals() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(portals));
+    }
+
+    Map<String, PortalLocation> locations(Identifier portalId) {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(
+                locations.getOrDefault(portalId.toString(), Map.of())));
+    }
+
+    void putLocation(Identifier portalId, String name, PortalLocation location) {
+        locations.computeIfAbsent(portalId.toString(), ignored -> new LinkedHashMap<>()).put(name, location);
+        setDirty();
+    }
+
+    boolean removeLocation(Identifier portalId, String name) {
+        Map<String, PortalLocation> placements = locations.get(portalId.toString());
+        if (placements == null || placements.remove(name) == null) return false;
+        setDirty();
+        return true;
     }
 
     // Return an immutable snapshot of active instance leases.
@@ -70,9 +101,24 @@ final class PortalData extends SavedData {
     // Remove one portal definition.
     boolean removePortal(Identifier id) {
         if (portals.remove(id.toString()) == null) return false;
+        locations.remove(id.toString());
         playerEntries.remove(id.toString());
         setDirty();
         return true;
+    }
+
+    record PortalLocation(Identifier dimension, double x, double y, double z) {
+        static final Codec<PortalLocation> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Identifier.CODEC.fieldOf("dimension").forGetter(PortalLocation::dimension),
+                Codec.DOUBLE.fieldOf("x").forGetter(PortalLocation::x),
+                Codec.DOUBLE.fieldOf("y").forGetter(PortalLocation::y),
+                Codec.DOUBLE.fieldOf("z").forGetter(PortalLocation::z)
+        ).apply(instance, PortalLocation::new));
+
+        PortalLocation {
+            if (dimension == null || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z))
+                throw new IllegalArgumentException("Invalid portal location");
+        }
     }
 
     // Return whether one player already consumed this portal's configured entry allowance.
@@ -111,7 +157,7 @@ final class PortalData extends SavedData {
     record StoredInstance(Identifier portalId, Identifier templateId, Identifier slotDimension,
                           long createdEpochMillis, long expiresEpochMillis,
                           int originX, int originY, int originZ, int sizeX, int sizeY, int sizeZ,
-                          List<String> admittedPlayers) {
+                          List<String> admittedPlayers, List<String> visitors) {
         static final Codec<StoredInstance> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Identifier.CODEC.fieldOf("portal").forGetter(StoredInstance::portalId),
                 Identifier.CODEC.fieldOf("template").forGetter(StoredInstance::templateId),
@@ -125,24 +171,42 @@ final class PortalData extends SavedData {
                 Codec.INT.fieldOf("size_y").forGetter(StoredInstance::sizeY),
                 Codec.INT.fieldOf("size_z").forGetter(StoredInstance::sizeZ),
                 Codec.STRING.listOf().optionalFieldOf("admitted_players", List.of())
-                        .forGetter(StoredInstance::admittedPlayers)
+                        .forGetter(StoredInstance::admittedPlayers),
+                Codec.STRING.listOf().optionalFieldOf("visitors", List.of()).forGetter(StoredInstance::visitors)
         ).apply(instance, StoredInstance::new));
 
         // Reject incomplete leases that cannot be safely cleaned later.
         StoredInstance {
             if (portalId == null || templateId == null || slotDimension == null
-                    || admittedPlayers == null || expiresEpochMillis <= createdEpochMillis
+                    || admittedPlayers == null || visitors == null || expiresEpochMillis <= createdEpochMillis
                     || sizeX < 1 || sizeY < 1 || sizeZ < 1) {
                 throw new IllegalArgumentException("Invalid temporary portal instance");
             }
             admittedPlayers = List.copyOf(admittedPlayers);
+            visitors = List.copyOf(visitors);
+        }
+
+        StoredInstance(Identifier portalId, Identifier templateId, Identifier slotDimension,
+                       long createdEpochMillis, long expiresEpochMillis,
+                       int originX, int originY, int originZ, int sizeX, int sizeY, int sizeZ,
+                       List<String> admittedPlayers) {
+            this(portalId, templateId, slotDimension, createdEpochMillis, expiresEpochMillis,
+                    originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, List.of());
+        }
+
+        StoredInstance withVisitor(java.util.UUID playerId) {
+            if (visitors.contains(playerId.toString())) return this;
+            var updated = new java.util.ArrayList<>(visitors);
+            updated.add(playerId.toString());
+            return new StoredInstance(portalId, templateId, slotDimension, createdEpochMillis,
+                    expiresEpochMillis, originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, updated);
         }
 
         // Return a copy whose shortened deadline survives a restart during forced batched cleanup.
         StoredInstance expiringAt(long epochMillis) {
             return new StoredInstance(portalId, templateId, slotDimension, createdEpochMillis,
                     Math.max(createdEpochMillis + 1L, epochMillis), originX, originY, originZ,
-                    sizeX, sizeY, sizeZ, admittedPlayers);
+                    sizeX, sizeY, sizeZ, admittedPlayers, visitors);
         }
     }
 }

@@ -8,6 +8,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -22,6 +23,10 @@ import org.lwjgl.glfw.GLFW;
 
 /** Responsive generic administration screen whose content and controls are supplied by server modules. */
 public final class AdminPanelScreen extends Screen {
+    private static final int PANEL_GUI_SCALE = 3;
+    private static String lastModule = "";
+    private static String lastPage = "";
+    private static int lastScroll;
     private static final int MAX_PANEL_WIDTH = 900;
     private static final int PANEL_MARGIN = 18;
     private static final int HEADER_HEIGHT = 58;
@@ -48,12 +53,17 @@ public final class AdminPanelScreen extends Screen {
     private String expandedSelect;
     private SelectAnchor selectAnchor;
     private long autoSaveAtMillis;
+    private float panelRenderScale = 1.0F;
 
     // Create a panel that returns to the screen from which the command opened it.
     public AdminPanelScreen(Screen parent, AdminPanelNetworking.PanelSnapshot snapshot) {
         super(Component.literal("CWP Administration"));
         this.parent = parent;
         this.snapshot = snapshot;
+        if (snapshot.selectedModule().equals(lastModule) && pageId(snapshot).equals(lastPage)) {
+            scroll = lastScroll;
+        }
+        seedFormValues();
     }
 
     // Apply authoritative refreshed state after navigation or a completed action.
@@ -63,20 +73,29 @@ public final class AdminPanelScreen extends Screen {
                 || !pageId(this.snapshot).equals(pageId(snapshot));
         this.snapshot = snapshot;
         boolean successfulAction = snapshot.notice() != null && !snapshot.notice().isBlank() && !snapshot.error();
-        if (changedPage || successfulAction) {
+        if (changedPage) {
             scroll = 0;
             formValues.clear();
             pendingAutoValues.clear();
             autoSaveAtMillis = 0L;
             expandedSelect = null;
         }
+        if (changedPage) seedFormValues();
         pendingDangerousAction = null;
+        if (!changedPage && snapshot.page() != null
+                && snapshot.page().layout() == AdminPanelRegistry.PageLayout.EDITOR
+                && !snapshot.page().autoAction().isBlank()) return;
+        if (successfulAction) {
+            formValues.clear();
+            seedFormValues();
+        }
         rebuildWidgets();
     }
 
     // Lay out responsive module, navigation, row-action, refresh, and close buttons.
     @Override
     protected void init() {
+        updatePanelScale();
         editBoxes.clear();
         fieldDefinitions.clear();
         selectAnchor = null;
@@ -232,6 +251,68 @@ public final class AdminPanelScreen extends Screen {
         }
     }
 
+    // Initialize fields on the entire page, including editor rows below the visible scroll area.
+    private void seedFormValues() {
+        if (snapshot == null || snapshot.page() == null) return;
+        for (AdminPanelRegistry.AdminEntry entry : snapshot.page().entries()) {
+            for (AdminPanelRegistry.AdminField field : entry.fields()) {
+                formValues.putIfAbsent(field.id(), field.initialValue());
+            }
+        }
+    }
+
+    // Dropdown options take priority over inputs in rows beneath the opened menu.
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        event = panelMouseEvent(event);
+        if (selectAnchor != null && event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            int count = selectAnchor.field().suggestions().size();
+            int totalHeight = count * 20;
+            int y = selectAnchor.y() + 20;
+            if (y + totalHeight > top + panelHeight - FOOTER_HEIGHT) y = selectAnchor.y() - totalHeight;
+            if (event.x() >= selectAnchor.x() && event.x() < selectAnchor.x() + selectAnchor.width()
+                    && event.y() >= y && event.y() < y + totalHeight) {
+                int index = ((int) event.y() - y) / 20;
+                String option = selectAnchor.field().suggestions().get(index);
+                formValues.put(selectAnchor.field().id(), option);
+                queueAutoSave(selectAnchor.field().id(), option, true);
+                expandedSelect = null;
+                rebuildWidgets();
+                return true;
+            }
+        }
+        return super.mouseClicked(event, doubleClick);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        return super.mouseReleased(panelMouseEvent(event));
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        return super.mouseDragged(panelMouseEvent(event), dragX / panelRenderScale, dragY / panelRenderScale);
+    }
+
+    private MouseButtonEvent panelMouseEvent(MouseButtonEvent event) {
+        return new MouseButtonEvent(event.x() / panelRenderScale, event.y() / panelRenderScale,
+                event.buttonInfo());
+    }
+
+    private void updatePanelScale() {
+        var window = minecraft.getWindow();
+        int panelScale = window.calculateScale(PANEL_GUI_SCALE, false);
+        panelRenderScale = (float) panelScale / window.getGuiScale();
+        width = (int) Math.ceil(window.getWidth() / (double) panelScale);
+        height = (int) Math.ceil(window.getHeight() / (double) panelScale);
+    }
+
+    @Override
+    public void resize(int width, int height) {
+        updatePanelScale();
+        super.resize(this.width, this.height);
+    }
+
     // Place an entry's compact controls from right to left while preserving room for its text.
     private void addActionButtons(AdminPanelRegistry.AdminEntry entry, int y, int right, boolean compact) {
         if (compact && entry.actions().size() == 1 && entry.actions().getFirst().wide()) {
@@ -311,6 +392,8 @@ public final class AdminPanelScreen extends Screen {
     // Render the dark modular shell, current headings, status notice, cards, and scroll indicator.
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        graphics.pose().pushMatrix();
+        graphics.pose().scale(panelRenderScale, panelRenderScale);
         graphics.fill(0, 0, width, height, 0xB0000000);
         graphics.fill(left, top, left + panelWidth, top + panelHeight, 0xF012151B);
         graphics.fill(left, top, left + 4, top + panelHeight, 0xFF7C5CDA);
@@ -325,8 +408,10 @@ public final class AdminPanelScreen extends Screen {
             graphics.text(font, Component.literal(trim(snapshot.notice(), panelWidth - 190)), left + 14,
                     top + panelHeight - 21, snapshot.error() ? 0xFFFF6B6B : 0xFF72D69C, false);
         }
-        super.extractRenderState(graphics, mouseX, mouseY, delta);
+        super.extractRenderState(graphics, (int) (mouseX / panelRenderScale),
+                (int) (mouseY / panelRenderScale), delta);
         if (isDashboard()) renderModuleIcons(graphics);
+        graphics.pose().popMatrix();
     }
 
     // Render descriptions beneath dashboard module buttons.
@@ -460,10 +545,17 @@ public final class AdminPanelScreen extends Screen {
             graphics.fill(left + 18, placement.y(), left + panelWidth - 18,
                     placement.y() + placement.height(), 0x99191E26);
             if (entry.fields().isEmpty()) {
-                graphics.text(font, Component.literal(editorRowName(entry.title())), left + 25,
+                if (entry.preview() != null && entry.preview().kind().equals("item"))
+                    graphics.item(icon(entry.title().equals("Item preview")
+                                    ? formValues.getOrDefault("target", entry.preview().shape())
+                                    : entry.preview().shape()), left + 25, placement.y() + 3);
+                graphics.text(font, Component.literal(editorRowName(entry.title())),
+                        left + (entry.preview() == null ? 25 : 46),
                         placement.y() + 8, 0xFFF0F1F3, false);
                 continue;
             }
+            if (entry.preview() != null && entry.preview().kind().equals("item"))
+                graphics.item(icon(entry.preview().shape()), left + panelWidth - 44, placement.y() + 13);
             int actionWidth = actionWidth(entry);
             int available = Math.max(100, panelWidth - 48 - actionWidth);
             int fieldWidth = Math.max(72,
@@ -493,6 +585,11 @@ public final class AdminPanelScreen extends Screen {
         String previousSection = "";
         for (int index = scroll; index < entries.size(); index++) {
             AdminPanelRegistry.AdminEntry entry = entries.get(index);
+            if (entry.fields().stream().anyMatch(field -> field.id().equals("portal_target_x"))
+                    && !"Coordinates".equalsIgnoreCase(formValues.getOrDefault("portal_template", ""))) continue;
+            if (entry.fields().stream().anyMatch(field -> field.id().equals("portal_keep_inventory"))
+                    && ("Coordinates".equalsIgnoreCase(formValues.getOrDefault("portal_template", ""))
+                    || "Exit".equalsIgnoreCase(formValues.getOrDefault("portal_template", "")))) continue;
             String section = editorSection(entry);
             boolean changedSection = placements.isEmpty() || !section.equals(previousSection);
             int sectionY = -1;
@@ -526,6 +623,8 @@ public final class AdminPanelScreen extends Screen {
     // Scroll status cards while leaving navigation and footer controls fixed.
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        mouseX /= panelRenderScale;
+        mouseY /= panelRenderScale;
         if (!isDashboard() && snapshot.page().layout() == AdminPanelRegistry.PageLayout.EDITOR) {
             List<EditorPlacement> placements = editorPlacements();
             int previous = scroll;
@@ -575,7 +674,11 @@ public final class AdminPanelScreen extends Screen {
     // Return to the opening screen rather than forcing the player back to gameplay.
     @Override
     public void onClose() {
+        if (!pendingAutoValues.isEmpty()) AdminPanelClient.ignoreNextClosedPanelSnapshot();
         flushAutoSave();
+        lastModule = snapshot.selectedModule();
+        lastPage = pageId(snapshot);
+        lastScroll = scroll;
         minecraft.gui.setScreen(parent);
     }
 
@@ -631,10 +734,14 @@ public final class AdminPanelScreen extends Screen {
     }
 
     // Draw one compact colored shape preview from server-neutral portal metadata.
-    private static void renderPreview(GuiGraphicsExtractor graphics, AdminPanelRegistry.EntryPreview preview,
+    private void renderPreview(GuiGraphicsExtractor graphics, AdminPanelRegistry.EntryPreview preview,
                                       int x, int y, int width, int height) {
         graphics.fill(x, y, x + width, y + height, 0xFF0D1015);
         graphics.fill(x + 2, y + 2, x + width - 2, y + height - 2, 0xFF2A303A);
+        if (preview.kind().equals("item")) {
+            graphics.item(icon(preview.shape()), x + (width - 16) / 2, y + (height - 16) / 2);
+            return;
+        }
         int color = 0xFF000000 | preview.colorRgb() & 0x00FFFFFF;
         int centerX = x + width / 2;
         int top = y + 8;

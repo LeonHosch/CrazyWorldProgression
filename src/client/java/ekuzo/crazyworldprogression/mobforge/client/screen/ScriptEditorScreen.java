@@ -78,7 +78,8 @@ public final class ScriptEditorScreen extends Screen {
 		addRenderableWidget(Button.builder(Component.literal("+ Spawn"), b -> addSpawn()).bounds(6, footerTop - 25, small, 20).build());
 		addRenderableWidget(Button.builder(Component.literal("+ More"), b -> minecraft.setScreenAndShow(
 				new RegistryPickerScreen(minecraft, this, "Add script step", List.of("Sleep", "Spawn entity",
-						"Wait until", "Mob cast", "Set phase", "Trigger event"), "", this::addStep)))
+						"Wait until", "Mob cast", "Set phase", "Trigger event", "Reward currency", "Reward item",
+						"Reward loot table"), "", this::addStep)))
 				.bounds(10 + small, footerTop - 25, small, 20).build());
 
 		int contentX = SIDEBAR_WIDTH + 8; int contentWidth = Math.max(120, width - contentX - 8);
@@ -155,6 +156,30 @@ public final class ScriptEditorScreen extends Screen {
 					() -> step.event, value -> step.event = value));
 			return blocks;
 		}
+		if (step.type == StepType.REWARD_CURRENCY) {
+			section(blocks, "Reward every pocket player");
+			row(blocks, compact, text("Currency ID", "Namespaced player-scoped currency ID.",
+					() -> step.rewardId, value -> step.rewardId = value),
+					text("Amount", "Positive amount per player.",
+							() -> step.rewardCount, value -> step.rewardCount = value));
+			return blocks;
+		}
+		if (step.type == StepType.REWARD_ITEM) {
+			section(blocks, "Give item to every pocket player");
+			row(blocks, compact, text("Item ID", "Namespaced item ID.",
+					() -> step.rewardId, value -> step.rewardId = value),
+					text("Count", "1 to 2304 items per player.",
+							() -> step.rewardCount, value -> step.rewardCount = value));
+			return blocks;
+		}
+		if (step.type == StepType.REWARD_LOOT) {
+			section(blocks, "Roll loot for every pocket player");
+			row(blocks, compact, text("Loot table ID", "Namespaced chest loot table ID.",
+					() -> step.rewardId, value -> step.rewardId = value),
+					text("Rolls", "1 to 32 separate rolls per player.",
+							() -> step.rewardCount, value -> step.rewardCount = value));
+			return blocks;
+		}
 		section(blocks, "Spawn wave");
 		row(blocks, compact, new FormItem("Mob template", "Select a loaded MobForge template.", FieldType.TEMPLATE, List.of(), () -> step.template, value -> step.template = value, null),
 				text("Count", "Number of entities spawned by this step.", () -> step.count, value -> step.count = value));
@@ -209,6 +234,9 @@ public final class ScriptEditorScreen extends Screen {
 			case "Mob cast" -> StepType.MOB_CAST;
 			case "Set phase" -> StepType.SET_PHASE;
 			case "Trigger event" -> StepType.TRIGGER;
+			case "Reward currency" -> StepType.REWARD_CURRENCY;
+			case "Reward item" -> StepType.REWARD_ITEM;
+			case "Reward loot table" -> StepType.REWARD_LOOT;
 			default -> throw new IllegalArgumentException("Unknown script step: " + label);
 		};
 		StepDraft draft = new StepDraft();
@@ -307,7 +335,7 @@ public final class ScriptEditorScreen extends Screen {
 	private String truncate(String value, int width) { if (font.width(value) <= width) return value; return font.plainSubstrByWidth(value, Math.max(1, width - font.width("…"))) + "…"; }
 	private static String decimal(double value) { return String.format(java.util.Locale.ROOT, "%.2f", value); }
 	private enum FieldType { TEXT, TEMPLATE, ENTITY, ABILITY, BOOLEAN, CHOICE }
-	private enum StepType { SPAWN, SLEEP, SPAWN_ENTITY, WAIT_UNTIL, MOB_CAST, SET_PHASE, TRIGGER }
+	private enum StepType { SPAWN, SLEEP, SPAWN_ENTITY, WAIT_UNTIL, MOB_CAST, SET_PHASE, TRIGGER, REWARD_CURRENCY, REWARD_ITEM, REWARD_LOOT }
 	private interface FormBlock { }
 	private record SectionBlock(String title) implements FormBlock { }
 	private record FieldBlock(List<FormItem> fields) implements FormBlock { }
@@ -322,6 +350,7 @@ public final class ScriptEditorScreen extends Screen {
 		private Map<String, Object> aiSettings = Map.of();
 		private String entityId = "", anchor = "origin", saveAs = "", condition = "", timeout = "5m";
 		private String mob = "", ability = "", phase = "", event = "";
+		private String rewardId = "", rewardCount = "1";
 		static StepDraft from(MobScript.Step step) {
 			StepDraft draft = new StepDraft();
 			if (step instanceof MobScript.SleepStep value) {
@@ -354,6 +383,15 @@ public final class ScriptEditorScreen extends Screen {
 				draft.type = StepType.SET_PHASE; draft.mob = value.mob(); draft.phase = value.phase();
 			} else if (step instanceof MobScript.TriggerStep value) {
 				draft.type = StepType.TRIGGER; draft.event = value.event().toString();
+			} else if (step instanceof MobScript.RewardCurrencyStep value) {
+				draft.type = StepType.REWARD_CURRENCY; draft.rewardId = value.currency().toString();
+				draft.rewardCount = Long.toString(value.amount());
+			} else if (step instanceof MobScript.RewardItemStep value) {
+				draft.type = StepType.REWARD_ITEM; draft.rewardId = value.item().toString();
+				draft.rewardCount = Integer.toString(value.count());
+			} else if (step instanceof MobScript.RewardLootStep value) {
+				draft.type = StepType.REWARD_LOOT; draft.rewardId = value.lootTable().toString();
+				draft.rewardCount = Integer.toString(value.rolls());
 			} else throw new IllegalArgumentException("Unsupported script step: " + step.getClass().getSimpleName());
 			return draft;
 		}
@@ -366,6 +404,9 @@ public final class ScriptEditorScreen extends Screen {
 			case MOB_CAST -> "Cast " + ability;
 			case SET_PHASE -> "Phase " + phase;
 			case TRIGGER -> "Event " + event;
+			case REWARD_CURRENCY -> "Currency " + rewardId;
+			case REWARD_ITEM -> "Item " + rewardId;
+			case REWARD_LOOT -> "Loot " + rewardId;
 		}; }
 		MobScript.Step build() {
 			return switch (type) {
@@ -375,6 +416,9 @@ public final class ScriptEditorScreen extends Screen {
 				case MOB_CAST -> new MobScript.MobCastStep(mob.trim(), namespaced(ability));
 				case SET_PHASE -> new MobScript.SetPhaseStep(mob.trim(), phase.trim());
 				case TRIGGER -> new MobScript.TriggerStep(namespaced(event));
+				case REWARD_CURRENCY -> new MobScript.RewardCurrencyStep(namespaced(rewardId), Long.parseLong(rewardCount));
+				case REWARD_ITEM -> new MobScript.RewardItemStep(namespaced(rewardId), Integer.parseInt(rewardCount));
+				case REWARD_LOOT -> new MobScript.RewardLootStep(namespaced(rewardId), Integer.parseInt(rewardCount));
 				case SPAWN -> {
 					MobTemplate.Ai ai = null;
 					if (!"template_default".equals(aiMode)) {

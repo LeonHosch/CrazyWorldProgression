@@ -1,4 +1,6 @@
 {
+  "key.category.crazy-world-progression.admin": "Crazy World Progression",
+  "key.crazy-world-progression.open_admin": "Open admin panel (Ctrl+Shift+A)",
   "screen.crazy-world-progression.skill_trees.title": "Skill Trees",
   "screen.crazy-world-progression.skill_trees.free": "Free",
   "screen.crazy-world-progression.skill_trees.status.already_unlocked": "Already unlocked",

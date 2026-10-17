@@ -5,6 +5,7 @@ import ekuzo.crazyworldprogression.mobforge.template.MobTemplate;
 import ekuzo.crazyworldprogression.mobforge.template.MobTemplateYaml;
 import ekuzo.crazyworldprogression.mobforge.script.MobScript;
 import ekuzo.crazyworldprogression.mobforge.script.MobScriptYaml;
+import ekuzo.crazyworldprogression.portals.PocketEditorService;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.chat.Component;
@@ -90,7 +91,9 @@ public final class MobForgeNetworking {
 		if (!authorized(player)) { player.sendSystemMessage(Component.literal("You do not have permission to edit MobForge scripts.")); return; }
 		try {
 			MobForge.SCRIPT_EXECUTOR.cancel(payload.id());
-			player.sendSystemMessage(Component.literal(MobForge.SCRIPTS.delete(payload.id()) ? "Deleted MobForge script " + payload.id() + "." : "Script was not found."));
+			boolean deleted = MobForge.SCRIPTS.delete(payload.id());
+			if (deleted) PocketEditorService.detachScriptEverywhere(player.level().getServer(), payload.id());
+			player.sendSystemMessage(Component.literal(deleted ? "Deleted MobForge script " + payload.id() + "." : "Script was not found."));
 		} catch (Exception exception) { player.sendSystemMessage(Component.literal("MobForge script delete failed: " + exception.getMessage())); }
 	}
 }

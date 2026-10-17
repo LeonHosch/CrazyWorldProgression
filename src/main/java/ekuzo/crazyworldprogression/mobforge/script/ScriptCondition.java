@@ -5,20 +5,147 @@ import ekuzo.crazyworldprogression.api.mobforge.ScriptEntityHandle;
 
 import java.util.Map;
 import java.util.regex.Pattern;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import ekuzo.crazyworldprogression.mobforge.entity.MobForgeEntityData;
+import ekuzo.crazyworldprogression.mobforge.MobForge;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.Mob;
 
 /** Deliberately small, capability-based condition grammar; no expression evaluation or reflection. */
 public final class ScriptCondition {
     private static final Pattern CONDITION = Pattern.compile("\\$\\{([a-z][a-z0-9_]*)\\.(dead|health_percent|phase)(?:\\s*(<=|>=|==|!=|<|>)\\s*([a-z0-9_./-]+))?}");
+    private static final Pattern SENSOR = Pattern.compile("\\$\\{(var|box|box_triggers|kills|portal|redstone)\\.([a-z0-9_:/.-]+)(?:\\s*(<=|>=|==|!=|<|>)\\s*(true|false|-?[0-9]+))?}");
+    private static final Pattern FUNCTION = Pattern.compile("(kills|portal_used|players_in|box_triggers|powered|var|dead|health_percent|phase)\\(\\s*['\"]([a-z0-9_:/.-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(['\"]?[a-z0-9_./-]+['\"]?))?");
+    private static final Pattern POWER_POSITION = Pattern.compile("powered\\(\\s*(-?[0-9]+)\\s*,\\s*(-?[0-9]+)\\s*,\\s*(-?[0-9]+)\\s*\\)(?:\\s*(==|!=)\\s*(true|false))?");
     private ScriptCondition() { }
     public static String reference(String expression) {
         if (expression == null || !expression.matches("\\$\\{[a-z][a-z0-9_]*}"))
             throw new IllegalArgumentException("Expected script handle like ${guardian}: " + expression);
         return expression.substring(2, expression.length() - 1);
     }
-    public static String referencedHandle(String expression) { return parse(expression).group(1); }
-    public static void validate(String expression) { parse(expression); }
+    public static String referencedHandle(String expression) {
+        String normalized = normalize(expression);
+        var match = CONDITION.matcher(normalized);
+        return match.matches() ? match.group(1) : null;
+    }
+    public static void validate(String expression) {
+        String atom = unwrap(expression == null ? "" : expression.trim());
+        int or = operator(atom, " or ");
+        if (or >= 0) { validate(atom.substring(0, or)); validate(atom.substring(or + 4)); return; }
+        int and = operator(atom, " and ");
+        if (and >= 0) { validate(atom.substring(0, and)); validate(atom.substring(and + 5)); return; }
+        if (atom.startsWith("not ")) { validate(atom.substring(4)); return; }
+        if (POWER_POSITION.matcher(atom).matches()) return;
+        atom = normalize(atom);
+        if (SENSOR.matcher(atom).matches()) return;
+        parse(atom);
+    }
+    public record Box(MobScript.Position min, MobScript.Position max, String mode, String mobId,
+                      String playerVariable, String countVariable) {
+        public Box(MobScript.Position min, MobScript.Position max) { this(min, max, "players", "", "", ""); }
+        public Box(MobScript.Position min, MobScript.Position max, String mode, String mobId) {
+            this(min, max, mode, mobId, "", "");
+        }
+        public Box(MobScript.Position min, MobScript.Position max, String mode, String mobId, String playerVariable) {
+            this(min, max, mode, mobId, playerVariable, "");
+        }
+        public Box {
+            if (min == null || max == null || min.x() > max.x() || min.y() > max.y() || min.z() > max.z())
+                throw new IllegalArgumentException("Event box corners must be ordered min to max");
+        }
+        public boolean contains(net.minecraft.world.phys.Vec3 point) {
+            return new AABB(min.x(), min.y(), min.z(), max.x() + 1, max.y() + 1, max.z() + 1).contains(point);
+        }
+        public long count(ServerLevel level) {
+            if (mode.equals("players")) return level.players().stream()
+                    .filter(player -> !player.isSpectator() && contains(player.position())).count();
+            AABB bounds = new AABB(min.x(), min.y(), min.z(), max.x() + 1, max.y() + 1, max.z() + 1);
+            return level.getEntitiesOfClass(Mob.class, bounds, mob ->
+                    MobForgeEntityData.template(mob).filter(template -> mobId.equals(template)
+                            || mobId.equals(MobForge.id(template).toString())).isPresent()
+                            || MobForgeEntityData.definition(mob).map(Identifier::toString)
+                                    .filter(mobId::equals).isPresent()
+                            || BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).toString().equals(mobId)).size();
+        }
+    }
+    public record Context(ServerLevel level, Map<String, Long> variables, Map<String, Box> boxes,
+                          Map<String, BlockPos> redstone, Map<String, Long> kills,
+                          Map<Identifier, Long> portalUses, Map<String, Long> boxTriggers) {
+        public Context(ServerLevel level, Map<String, Long> variables, Map<String, Box> boxes,
+                       Map<String, BlockPos> redstone, Map<String, Long> kills,
+                       Map<Identifier, Long> portalUses) {
+            this(level, variables, boxes, redstone, kills, portalUses, Map.of());
+        }
+    }
+    /** Bare kill and portal expressions are occurrence streams for event watchers. */
+    public static Long eventCounter(String expression, Context context) {
+        var sensor = SENSOR.matcher(normalize(expression));
+        if (!sensor.matches() || sensor.group(3) != null) return null;
+        return switch (sensor.group(1)) {
+            case "kills" -> context.kills().getOrDefault(sensor.group(2), 0L);
+            case "portal" -> context.portalUses().getOrDefault(Identifier.parse(sensor.group(2)), 0L);
+            case "box_triggers" -> context.boxTriggers().getOrDefault(sensor.group(2), 0L);
+            default -> null;
+        };
+    }
+    public static boolean evaluate(String expression, Map<String, ScriptEntityHandle> handles, Context context) {
+        String atom = unwrap(expression.trim());
+        int or = operator(atom, " or ");
+        if (or >= 0) return evaluate(atom.substring(0, or), handles, context)
+                || evaluate(atom.substring(or + 4), handles, context);
+        int and = operator(atom, " and ");
+        if (and >= 0) return evaluate(atom.substring(0, and), handles, context)
+                && evaluate(atom.substring(and + 5), handles, context);
+        if (atom.startsWith("not ")) return !evaluate(atom.substring(4), handles, context);
+        var position = POWER_POSITION.matcher(atom);
+        if (position.matches()) {
+            BlockPos pos = new BlockPos(Integer.parseInt(position.group(1)), Integer.parseInt(position.group(2)), Integer.parseInt(position.group(3)));
+            boolean powered = powered(context.level(), pos);
+            return position.group(4) == null ? powered : position.group(4).equals("==") == (powered == Boolean.parseBoolean(position.group(5)));
+        }
+        atom = normalize(atom);
+        var sensor = SENSOR.matcher(atom);
+        if (!sensor.matches()) return evaluate(atom, handles);
+        String kind = sensor.group(1), name = sensor.group(2);
+        long actual = switch (kind) {
+            case "var" -> context.variables().getOrDefault(name, 0L);
+            case "kills" -> context.kills().getOrDefault(name, 0L);
+            case "portal" -> context.portalUses().getOrDefault(Identifier.parse(name), 0L);
+            case "box_triggers" -> context.boxTriggers().getOrDefault(name, 0L);
+            case "redstone" -> {
+                BlockPos pos = context.redstone().get(name);
+                if (pos == null) throw new IllegalArgumentException("Unknown redstone sensor " + name);
+                yield powered(context.level(), pos) ? 1L : 0L;
+            }
+            case "box" -> {
+                Box box = context.boxes().get(name);
+                if (box == null) throw new IllegalArgumentException("Unknown event box " + name);
+                yield box.count(context.level());
+            }
+            default -> throw new IllegalArgumentException("Unknown sensor " + kind);
+        };
+        if (sensor.group(3) == null) return actual != 0L;
+        long expected = switch (sensor.group(4)) {
+            case "true" -> 1L;
+            case "false" -> 0L;
+            default -> Long.parseLong(sensor.group(4));
+        };
+        return switch (sensor.group(3)) {
+            case "<" -> actual < expected;
+            case "<=" -> actual <= expected;
+            case ">" -> actual > expected;
+            case ">=" -> actual >= expected;
+            case "==" -> actual == expected;
+            case "!=" -> actual != expected;
+            default -> throw new IllegalArgumentException("Unknown comparison");
+        };
+    }
     public static boolean evaluate(String expression, Map<String, ScriptEntityHandle> handles) {
-        var match = parse(expression);
+        var match = parse(normalize(expression));
         ScriptEntityHandle handle = handles.get(match.group(1));
         if (handle == null) throw new IllegalArgumentException("Unknown script handle " + match.group(1));
         String field = match.group(2), op = match.group(3), expected = match.group(4);
@@ -55,5 +182,60 @@ public final class ScriptCondition {
             catch (NumberFormatException exception) { throw new IllegalArgumentException("health_percent threshold must be between 0 and 1"); }
         }
         return match;
+    }
+
+    private static boolean powered(ServerLevel level, BlockPos pos) {
+        var state = level.getBlockState(pos);
+        return level.hasNeighborSignal(pos)
+                || state.hasProperty(BlockStateProperties.POWERED) && state.getValue(BlockStateProperties.POWERED)
+                || state.hasProperty(BlockStateProperties.POWER) && state.getValue(BlockStateProperties.POWER) > 0;
+    }
+
+    private static String normalize(String expression) {
+        if (expression == null) return "";
+        String atom = expression.trim();
+        var match = FUNCTION.matcher(atom);
+        if (!match.matches()) return atom;
+        String prefix = switch (match.group(1)) {
+            case "portal_used" -> "portal";
+            case "players_in" -> "box";
+            case "box_triggers" -> "box_triggers";
+            case "powered" -> "redstone";
+            case "dead", "health_percent", "phase" -> null;
+            default -> match.group(1);
+        };
+        String suffix = match.group(3) == null ? "" : " " + match.group(3) + " " + match.group(4).replace("\"", "").replace("'", "");
+        return "${" + (prefix == null ? match.group(2) + "." + match.group(1) : prefix + "." + match.group(2)) + suffix + "}";
+    }
+
+    private static int operator(String expression, String operator) {
+        char quote = 0; int depth = 0;
+        for (int i = 0; i <= expression.length() - operator.length(); i++) {
+            char c = expression.charAt(i);
+            if (quote != 0) { if (c == quote) quote = 0; continue; }
+            if (c == '\'' || c == '"') { quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            if (depth == 0 && expression.startsWith(operator, i)) return i;
+        }
+        return -1;
+    }
+
+    private static String unwrap(String expression) {
+        String result = expression;
+        while (result.startsWith("(") && result.endsWith(")")) {
+            int depth = 0; boolean whole = true; char quote = 0;
+            for (int i = 0; i < result.length(); i++) {
+                char c = result.charAt(i);
+                if (quote != 0) { if (c == quote) quote = 0; continue; }
+                if (c == '\'' || c == '"') { quote = c; continue; }
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                if (depth == 0 && i < result.length() - 1) { whole = false; break; }
+            }
+            if (!whole || depth != 0) break;
+            result = result.substring(1, result.length() - 1).trim();
+        }
+        return result;
     }
 }

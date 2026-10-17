@@ -29,7 +29,7 @@ All block work (instance building, wipe rebuilds, script building pastes and rem
 
 ## Instance building
 
-Pockets have no size limit. A new dungeon or public instance is placed over several ticks within instance creation's share of the budget; several builds take turns so they progress together. Rebuilding the pocket after a wipe uses the same queue. Players who enter meanwhile see "Your instance is being prepared… N%" on the action bar and are brought in when the build is finished. Pocket scripts start only after the build.
+Pockets have no size limit. A new dungeon or public instance is placed over several ticks within instance creation's share of the budget; several builds take turns so they progress together. Instance builds, wipe rebuilds and instance deletion write straight into chunk sections like world generation ([FastBlockWriter](../src/main/java/ekuzo/crazyworldprogression/portals/FastBlockWriter.java)): no neighbour updates or per-block change packets, lighting is queued for the light thread only where light properties change, and heightmaps are rebuilt once per chunk when the build finishes. Players already in those chunks (wipe rebuilds) then receive the finished chunks. Script building pastes still use the normal block placement because players are usually standing next to them. Rebuilding the pocket after a wipe uses the same queue. Players who enter meanwhile see "Your instance is being prepared… N%" on the action bar and are brought in when the build is finished. Pocket scripts start only after the build.
 
 Capturing a pocket (saving it from the pocket editor) still happens in one step, so saving a very large pocket can pause the server briefly.
 

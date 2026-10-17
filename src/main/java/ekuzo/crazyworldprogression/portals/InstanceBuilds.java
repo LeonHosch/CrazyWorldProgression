@@ -37,10 +37,19 @@ public final class InstanceBuilds {
         final BlockPos origin;
         final List<StructureTemplate.StructureBlockInfo> blocks;
         final Runnable done;
+        /** Instance builds write straight into chunk sections, like world generation. */
+        final FastBlockWriter writer;
         int next;
 
         Job(ServerLevel level, BlockPos origin, List<StructureTemplate.StructureBlockInfo> blocks, Runnable done) {
             this.level = level; this.origin = origin; this.blocks = blocks; this.done = done;
+            this.writer = new FastBlockWriter(level);
+        }
+
+        void placeNext() {
+            StructureTemplate.StructureBlockInfo info = blocks.get(next++);
+            writer.place(origin.getX() + info.pos().getX(), origin.getY() + info.pos().getY(),
+                    origin.getZ() + info.pos().getZ(), info.state(), info.nbt());
         }
     }
 
@@ -90,7 +99,7 @@ public final class InstanceBuilds {
                     if (job.next >= job.blocks.size()) continue;
                     int end = Math.min(job.blocks.size(), job.next + TURN);
                     try {
-                        while (job.next < end && slice.more(done++)) placeOne(job.level, job.origin, job.blocks.get(job.next++));
+                        while (job.next < end && slice.more(done++)) job.placeNext();
                     } catch (RuntimeException exception) {
                         CrazyWorldProgression.LOGGER.error("Building instance {} failed", entry.getKey(), exception);
                         job.next = job.blocks.size();
@@ -105,6 +114,7 @@ public final class InstanceBuilds {
             Job job = jobs.remove(key);
             if (job == null) continue;
             try {
+                job.writer.finish();
                 job.done.run();
             } catch (RuntimeException exception) {
                 CrazyWorldProgression.LOGGER.error("Finishing instance {} failed", key, exception);

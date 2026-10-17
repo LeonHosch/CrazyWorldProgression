@@ -222,12 +222,18 @@ public final class PortalTemplateService {
         entities.forEach(Entity::discard);
     }
 
+    private static final java.util.Map<String, FastBlockWriter> CLEAR_WRITERS = new java.util.HashMap<>();
+
     // Clear a bounded linear slice and return the next index, or minus one when the template volume is empty.
     static long clearBatch(ServerLevel level, PortalData.StoredInstance instance, long startIndex) {
         long volume = (long) instance.sizeX() * instance.sizeY() * instance.sizeZ();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         long layerSize = (long) instance.sizeX() * instance.sizeZ();
         long index = startIndex;
+        // Nobody is inside an instance being deleted, so it is cleared straight in the chunk sections.
+        String key = instance.slotDimension() + "|" + instance.createdEpochMillis();
+        FastBlockWriter writer = CLEAR_WRITERS.computeIfAbsent(key, ignored -> new FastBlockWriter(level));
+        net.minecraft.world.level.block.state.BlockState air = Blocks.AIR.defaultBlockState();
         // Instance deletion has the lowest priority of all block work.
         try (TickBudget.Slice slice = TickBudget.start(level.getServer(), TickBudget.Priority.CLEANUP)) {
             int done = 0;
@@ -236,13 +242,14 @@ public final class PortalTemplateService {
                 long withinLayer = index % layerSize;
                 int z = (int) (withinLayer / instance.sizeX());
                 int x = (int) (withinLayer % instance.sizeX());
-                cursor.set(instance.originX() + x, instance.originY() + y, instance.originZ() + z);
-                if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(),
-                        Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS);
+                writer.place(instance.originX() + x, instance.originY() + y, instance.originZ() + z, air, null);
                 index++;
             }
         }
-        return index >= volume ? -1L : index;
+        if (index < volume) return index;
+        CLEAR_WRITERS.remove(key);
+        writer.finish();
+        return -1L;
     }
 
     // Resolve internal metadata or fail before any instance mutation begins.

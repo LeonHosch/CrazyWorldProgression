@@ -64,6 +64,7 @@ public final class PortalService {
         InstanceEntityLeases.initialize();
         InstanceBuilds.initialize();
         ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
+        StressPocket.initialize();
         Parties.initialize();
         EncounterBanner.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {

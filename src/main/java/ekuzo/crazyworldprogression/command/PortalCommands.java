@@ -162,7 +162,24 @@ public final class PortalCommands {
                                 .then(Commands.argument("y", IntegerArgumentType.integer())
                                         .then(Commands.argument("z", IntegerArgumentType.integer())
                                                 .executes(PortalCommands::setPocketSpawn))))))
-                .then(Commands.literal("leave").executes(PortalCommands::leavePocket));
+                .then(Commands.literal("leave").executes(PortalCommands::leavePocket))
+                .then(Commands.literal("stresstest").then(templateIdArgument()
+                        .then(Commands.argument("size_x", IntegerArgumentType.integer(16, 4096))
+                                .then(Commands.argument("size_y", IntegerArgumentType.integer(6, 384))
+                                        .then(Commands.argument("size_z", IntegerArgumentType.integer(16, 4096))
+                                                .executes(PortalCommands::stressPocket))))));
+    }
+
+    // Generate and save a large test pocket to try instance building with.
+    private static int stressPocket(CommandContext<CommandSourceStack> context) {
+        try {
+            ekuzo.crazyworldprogression.portals.StressPocket.start(context.getSource().getPlayerOrException(),
+                    identifierArgument(context, "template_id"), IntegerArgumentType.getInteger(context, "size_x"),
+                    IntegerArgumentType.getInteger(context, "size_y"), IntegerArgumentType.getInteger(context, "size_z"));
+            return 1;
+        } catch (Exception exception) {
+            return failure(context, exception);
+        }
     }
 
     // Build active slot diagnostics and forced expiry commands.

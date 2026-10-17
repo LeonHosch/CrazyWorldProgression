@@ -841,8 +841,15 @@ public final class PortalService {
                 continue;
             }
             long since = emptySince.computeIfAbsent(instance.slotDimension(), ignored -> (long) server.getTickCount());
-            if (graceOver(since, server.getTickCount())) expireInstance(server, instance.slotDimension());
+            boolean scriptsFinished = !ekuzo.crazyworldprogression.mobforge.MobForge.SCRIPT_EXECUTOR
+                    .hasPocketRuns(instanceId(instance));
+            if (releaseEmpty(scriptsFinished, since, server.getTickCount())) expireInstance(server, instance.slotDimension());
         }
+    }
+
+    /** An empty instance whose scripts are all finished is released at once; otherwise after the grace period. */
+    static boolean releaseEmpty(boolean scriptsFinished, long emptySinceTick, long nowTick) {
+        return scriptsFinished || graceOver(emptySinceTick, nowTick);
     }
 
     /** An empty private instance is released once its rejoin grace period has passed. */

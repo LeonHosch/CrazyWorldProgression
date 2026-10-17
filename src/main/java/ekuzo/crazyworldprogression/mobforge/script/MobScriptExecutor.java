@@ -113,6 +113,14 @@ public final class MobScriptExecutor {
 		if (!ticking) { active.keySet().removeAll(canceled); canceled.clear(); }
 		return count;
 	}
+	/** True while any script of this pocket instance is still running or about to start. */
+	public boolean hasPocketRuns(UUID pocketInstanceId) {
+		if (pocketInstanceId == null) return false;
+		for (ActiveRun run : active.values())
+			if (pocketInstanceId.equals(run.pocketInstanceId) && !canceled.contains(run.id)) return true;
+		for (ActiveRun run : pending.values()) if (pocketInstanceId.equals(run.pocketInstanceId)) return true;
+		return false;
+	}
 	/** Drop per-run encounter state without interrupting any following script steps. */
 	public void clearPocketState(UUID pocketInstanceId) {
 		if (pocketInstanceId == null) return;

@@ -36,7 +36,7 @@ Administrators can list the individual leases with `/cwp portals instances list`
 - `/leave` takes you out of the instance you are in, back to where you entered it.
 - `/partyleave` (party leader only) takes everyone out and ends the instance. The party leader is the group leader at the time of travel.
 - During an encounter of a raid whose portal does not keep inventory, `/leave` and `/partyleave` are unavailable until the encounter ends or wipes.
-- Everyone in the party that started a private instance can come back while it is running: walk into its portal again, or log back in if you logged out inside. An empty private instance waits 5 minutes for its party before it is released. A raid also stays open while any party member is dead or waiting to respawn.
+- Everyone in the party that started a private instance can come back while it is running: walk into its portal again, or log back in if you logged out inside. An empty dungeon waits 5 minutes for its party before it is released, unless its scripts have completely finished: then it closes as soon as the last player leaves. A raid also stays open while any party member is dead or waiting to respawn.
 - Inside any running private instance (raid or not), `/party invite <player>` invites someone into it when a slot is free (the portal's max players). The invite lasts 5 minutes. To join, the invited player must go to that instance's entrance portal: walking into it joins, and the **[Join]** link (`/party accept <player>`) only works within 8 blocks of it. Outside an instance, `/party invite` and `/party accept` form a group before travel, the same as `/portal group invite` and `/portal group accept`.
 
 ## Raid checkpoints

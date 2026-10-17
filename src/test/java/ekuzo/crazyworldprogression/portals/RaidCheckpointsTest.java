@@ -59,4 +59,10 @@ class RaidCheckpointsTest {
         assertFalse(PortalService.leaveBlocked(true, false, false));
         assertFalse(PortalService.leaveBlocked(false, true, false));
     }
+
+    @Test void finishedInstancesCloseAsSoonAsEveryoneLeaves() {
+        assertTrue(PortalService.releaseEmpty(true, 100L, 100L));
+        assertFalse(PortalService.releaseEmpty(false, 100L, 100L));
+        assertTrue(PortalService.releaseEmpty(false, 100L, 100L + PortalService.REJOIN_GRACE_TICKS));
+    }
 }

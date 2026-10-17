@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 
 /** Captures, persists, queries, places, and clears CWP-owned dimension templates. */
@@ -152,12 +153,36 @@ public final class PortalTemplateService {
     static void discardEntities(ServerLevel level, PortalData.StoredInstance instance) {
         BlockPos minimum = new BlockPos(instance.originX(), instance.originY(), instance.originZ());
         BlockPos maximum = minimum.offset(instance.sizeX() - 1, instance.sizeY() - 1, instance.sizeZ() - 1);
-        AABB bounds = new AABB(minimum.getX(), minimum.getY(), minimum.getZ(),
-                maximum.getX() + 1.0, maximum.getY() + 1.0, maximum.getZ() + 1.0);
-        level.getEntities((Entity) null, bounds, entity -> !(entity instanceof Player)).forEach(Entity::discard);
+        // The whole slot dimension belongs to the instance, so boats that drifted outside the build go too.
+        discardAllEntities(level);
         BoundingBox tickBounds = BoundingBox.fromCorners(minimum, maximum);
         level.getBlockTicks().clearArea(tickBounds);
         level.getFluidTicks().clearArea(tickBounds);
+    }
+
+    /**
+     * Discard every loaded non-player entity in an instance slot. Entities in unloaded chunks are caught by
+     * InstanceEntityLeases when their chunk loads again. Templates are placed without entities, so nothing
+     * the build needs is lost.
+     */
+    public static void discardAllEntities(ServerLevel level) {
+        discardEntities(level, false);
+    }
+
+    /** Like discardAllEntities, but keeps dropped items and experience so players can pick up their death drops. */
+    public static void discardEntitiesExceptDrops(ServerLevel level) {
+        discardEntities(level, true);
+    }
+
+    private static void discardEntities(ServerLevel level, boolean keepDrops) {
+        List<Entity> entities = new ArrayList<>();
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof Player) continue;
+            if (keepDrops && (entity instanceof ItemEntity
+                    || entity instanceof net.minecraft.world.entity.ExperienceOrb)) continue;
+            entities.add(entity);
+        }
+        entities.forEach(Entity::discard);
     }
 
     // Clear a bounded linear slice and return the next index, or minus one when the template volume is empty.

@@ -55,6 +55,7 @@ public final class PortalService {
     // Register server lifecycle restoration and lightweight portal enforcement ticks.
     public static void initialize() {
         RaidService.initialize();
+        InstanceEntityLeases.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             rebuildIndex(server);
             expireDueInstances(server, Instant.now().toEpochMilli());
@@ -249,6 +250,12 @@ public final class PortalService {
     static void refreshProjectedPortals(MinecraftServer server) {
         rebuildIndex(server);
         PortalNetworking.broadcast(server);
+    }
+
+    /** True while the player is inside a live portal instance (not a pocket editor). */
+    public static boolean inInstance(ServerPlayer player) {
+        return PortalData.get(player.level().getServer()).instances()
+                .containsKey(player.level().dimension().identifier().toString());
     }
 
     public static boolean canBuild(ServerPlayer player) {
@@ -728,6 +735,7 @@ public final class PortalService {
             throw new IllegalStateException("template height does not fit the instance dimension");
         }
         BuildingService.clearInstance(destination);
+        PortalTemplateService.discardAllEntities(destination);
         PortalTemplateService.reconstruct(server, destination, template.id(), origin);
         long created = Instant.now().toEpochMilli();
         PortalData.StoredInstance instance = new PortalData.StoredInstance(portal.id(), template.id(), slot,

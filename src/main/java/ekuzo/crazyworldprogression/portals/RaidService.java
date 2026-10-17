@@ -3,7 +3,6 @@ package ekuzo.crazyworldprogression.portals;
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.buildings.BuildingService;
 import ekuzo.crazyworldprogression.api.mobforge.MobForgeApi;
-import ekuzo.crazyworldprogression.mobforge.entity.MobForgeEntityData;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
@@ -152,14 +151,25 @@ public final class RaidService {
     private static void onDeath(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         Identifier slot = player.level().dimension().identifier();
-        if (!inEncounter(server, slot)) return;
+        if (!isRaid(server, slot)) return;
         PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot.toString());
         if (instance == null || !instance.admittedPlayers().contains(player.getUUID().toString())) return;
         RaidData data = RaidData.get(server);
         RaidData.Attempt before = data.get(slot.toString());
         if (before == null) before = RaidData.Attempt.first();
+        String playerId = player.getUUID().toString();
+        if (!inEncounter(server, slot)) {
+            // Before the encounter starts, any death (void, fall, /kill) just respawns at the raid's rally point.
+            List<String> pending = new ArrayList<>(before.pendingRespawn());
+            if (!pending.contains(playerId)) pending.add(playerId);
+            Map<String, String> modes = new HashMap<>(before.originalModes());
+            modes.putIfAbsent(playerId, player.gameMode.getGameModeForPlayer().getName());
+            data.put(slot.toString(), new RaidData.Attempt(before.number(), before.deaths(), before.spentRevives(),
+                    before.portalEntries(), pending, modes, before.encounterActive()));
+            return;
+        }
         Map<String, RaidData.Spot> deaths = new HashMap<>(before.deaths());
-        deaths.put(player.getUUID().toString(), new RaidData.Spot(player.getX(), player.getY(), player.getZ()));
+        deaths.put(playerId, deathSpot(player, instance));
         Map<String, String> modes = new HashMap<>(before.originalModes());
         modes.putIfAbsent(player.getUUID().toString(), player.gameMode.getGameModeForPlayer().getName());
         RaidData.Attempt after = new RaidData.Attempt(before.number(), deaths, before.spentRevives(),
@@ -167,6 +177,17 @@ public final class RaidService {
         data.put(slot.toString(), after);
         if (allDown(server, instance, after)) wipe(server, instance, after);
         else spawnMarker(player, after.deaths().get(player.getUUID().toString()));
+    }
+
+    /** Where the revive marker goes: the death position, or the rally point when the player fell out of the world. */
+    static RaidData.Spot deathSpot(ServerPlayer player, PortalData.StoredInstance instance) {
+        if (player.getY() >= player.level().getMinY()) return new RaidData.Spot(player.getX(), player.getY(), player.getZ());
+        PortalTemplateService.TemplateInfo template = PortalTemplateService.template(player.level().getServer(),
+                instance.templateId());
+        if (template == null) return new RaidData.Spot(instance.originX() + 0.5, instance.originY() + 1.0,
+                instance.originZ() + 0.5);
+        return new RaidData.Spot(instance.originX() + template.spawnX() + 0.5, instance.originY() + template.spawnY(),
+                instance.originZ() + template.spawnZ() + 0.5);
     }
 
     private static boolean allDown(MinecraftServer server, PortalData.StoredInstance instance, RaidData.Attempt attempt) {
@@ -306,13 +327,10 @@ public final class RaidService {
         ServerLevel level = level(server, instance.slotDimension());
         if (level == null) return;
         BuildingService.clearInstance(level);
+        // Boats, minecarts and MobForge mobs go; dropped items stay so players keep their death drops.
+        PortalTemplateService.discardEntitiesExceptDrops(level);
         PortalTemplateService.reconstruct(server, level, instance.templateId(),
                 new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()));
-        List<Entity> entities = new ArrayList<>();
-        for (Entity entity : level.getAllEntities()) entities.add(entity);
-        for (Entity entity : entities) {
-            if (MobForgeEntityData.pocket(entity).filter(instanceId::equals).isPresent()) entity.discard();
-        }
         PortalService.resetRuntimeLocations(server, instance.slotDimension());
         PocketEditorService.startScripts(server, instance.templateId(), level,
                 new net.minecraft.core.BlockPos(instance.originX(), instance.originY(), instance.originZ()), instanceId);

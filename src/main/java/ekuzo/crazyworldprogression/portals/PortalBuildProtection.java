@@ -13,6 +13,13 @@ import net.minecraft.world.item.FlintAndSteelItem;
 import net.minecraft.world.item.HoeItem;
 import net.minecraft.world.item.ShovelItem;
 import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.ArmorStandItem;
+import net.minecraft.world.item.BoatItem;
+import net.minecraft.world.item.EndCrystalItem;
+import net.minecraft.world.item.HangingEntityItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.LeadItem;
+import net.minecraft.world.item.MinecartItem;
 import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
@@ -27,6 +34,16 @@ public final class PortalBuildProtection {
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, entity) ->
                 !(player instanceof ServerPlayer serverPlayer) || PortalService.canBuild(serverPlayer));
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
+            if (player instanceof ServerPlayer serverPlayer && PortalService.inInstance(serverPlayer)
+                    && placesEntity(player.getItemInHand(hand).getItem())) {
+                boolean opensBlock = !player.isShiftKeyDown()
+                        && level.getBlockState(hit.getBlockPos()).getMenuProvider(level, hit.getBlockPos()) != null;
+                if (!opensBlock) {
+                    serverPlayer.sendOverlayMessage(net.minecraft.network.chat.Component.literal(
+                            "You cannot place that inside an instance."));
+                    return InteractionResult.FAIL;
+                }
+            }
             if (!(player instanceof ServerPlayer serverPlayer) || PortalService.canBuild(serverPlayer)) {
                 return InteractionResult.PASS;
             }
@@ -43,9 +60,25 @@ public final class PortalBuildProtection {
                     || block instanceof LeverBlock)) return InteractionResult.PASS;
             return InteractionResult.FAIL;
         });
-        UseItemCallback.EVENT.register((player, level, hand) ->
-                player instanceof ServerPlayer serverPlayer && !PortalService.canBuild(serverPlayer)
-                        && player.getItemInHand(hand).getItem() instanceof BucketItem
-                        ? InteractionResult.FAIL : InteractionResult.PASS);
+        UseItemCallback.EVENT.register((player, level, hand) -> {
+            if (!(player instanceof ServerPlayer serverPlayer)) return InteractionResult.PASS;
+            Item item = player.getItemInHand(hand).getItem();
+            if (PortalService.inInstance(serverPlayer) && placesEntity(item)) {
+                serverPlayer.sendOverlayMessage(net.minecraft.network.chat.Component.literal(
+                        "You cannot place that inside an instance."));
+                return InteractionResult.FAIL;
+            }
+            return !PortalService.canBuild(serverPlayer) && item instanceof BucketItem
+                    ? InteractionResult.FAIL : InteractionResult.PASS;
+        });
+    }
+
+    /**
+     * Items whose use spawns a persistent entity. Blocked for players in every portal instance, even when
+     * the portal allows building; dispensers do not go through these player callbacks and keep working.
+     */
+    static boolean placesEntity(Item item) {
+        return item instanceof BoatItem || item instanceof MinecartItem || item instanceof ArmorStandItem
+                || item instanceof HangingEntityItem || item instanceof EndCrystalItem || item instanceof LeadItem;
     }
 }

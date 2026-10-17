@@ -236,6 +236,8 @@ public final class PortalTemplateService {
         entities.forEach(Entity::discard);
     }
 
+    /** Chunk columns loaded ahead of clearing. */
+    private static final int PREFETCH = 16;
     private static final java.util.Map<String, FastBlockWriter> CLEAR_WRITERS = new java.util.HashMap<>();
 
     /**
@@ -260,11 +262,19 @@ public final class PortalTemplateService {
         // Instance deletion has the lowest priority of all block work.
         long sliceStart = System.nanoTime();
         try (TickBudget.Slice slice = TickBudget.start(level.getServer(), TickBudget.Priority.CLEANUP)) {
+            boolean first = true;
             while (index < units && slice.hasTime()) {
                 long column = index / sectionsY;
                 int sectionY = firstSectionY + (int) (index % sectionsY);
                 int chunkX = firstChunkX + (int) (column % columnsX);
                 int chunkZ = firstChunkZ + (int) (column / columnsX);
+                // Chunks ahead are loaded in the background; loading them here would stall the tick.
+                if (first || index % sectionsY == 0) {
+                    for (long ahead = column; ahead < Math.min((long) columnsX * columnsZ, column + PREFETCH); ahead++)
+                        writer.prefetch(firstChunkX + (int) (ahead % columnsX), firstChunkZ + (int) (ahead / columnsX));
+                    first = false;
+                }
+                if (!writer.ready(chunkX, chunkZ)) break;
                 index++;
                 LevelChunk chunk = writer.chunk(chunkX, chunkZ);
                 int sectionIndex = chunk.getSectionIndexFromSectionY(sectionY);
@@ -309,9 +319,17 @@ public final class PortalTemplateService {
         long index = startIndex;
         long sliceStart = System.nanoTime();
         try (TickBudget.Slice slice = TickBudget.start(level.getServer(), TickBudget.Priority.CLEANUP)) {
+            boolean first = true;
             while (index < units && slice.hasTime()) {
-                long packed = columns[(int) (index / sections)];
+                int column = (int) (index / sections);
+                long packed = columns[column];
                 int sectionIndex = (int) (index % sections);
+                if (first || sectionIndex == 0) {
+                    for (int ahead = column; ahead < Math.min(columns.length, column + PREFETCH); ahead++)
+                        writer.prefetch(ChunkPos.getX(columns[ahead]), ChunkPos.getZ(columns[ahead]));
+                    first = false;
+                }
+                if (!writer.ready(ChunkPos.getX(packed), ChunkPos.getZ(packed))) break;
                 index++;
                 LevelChunk chunk = writer.chunk(ChunkPos.getX(packed), ChunkPos.getZ(packed));
                 LevelChunkSection section = chunk.getSection(sectionIndex);

@@ -76,6 +76,16 @@ final class FastBlockWriter {
                 new TicketType(100L, TicketType.FLAG_LOADING));
     }
 
+    /** Asks the chunk system to load a chunk in the background (off the server thread) and keep it loaded. */
+    void prefetch(int cx, int cz) {
+        if (ticket != null) level.getChunkSource().addTicketWithRadius(ticket, new ChunkPos(cx, cz), 0);
+    }
+
+    /** True when the chunk is loaded, so working on it does not load it from disk on the server thread. */
+    boolean ready(int cx, int cz) {
+        return ticket == null || level.getChunkSource().getChunkNow(cx, cz) != null;
+    }
+
     /** The chunk at these chunk coordinates, loaded, held by a ticket and marked for saving. */
     LevelChunk chunk(int cx, int cz) {
         int tick = level.getServer().getTickCount();

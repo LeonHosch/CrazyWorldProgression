@@ -145,7 +145,6 @@ public final class RaidService {
         else if (fellOut) point = LAST_SAFE.computeIfAbsent(server, ignored -> new HashMap<>())
                 .getOrDefault(player.getUUID(), rallyPoint(server, instance));
         else point = player.position();
-        if (Boolean.FALSE.equals(PortalService.keepInventoryOverride(player))) player.getInventory().dropAll();
         player.clearFire();
         player.setAirSupply(player.getMaxAirSupply());
         player.removeAllEffects();
@@ -269,6 +268,10 @@ public final class RaidService {
         UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
             if (!(player instanceof ServerPlayer reviver) || !(world instanceof ServerLevel)
                     || !(entity instanceof ArmorStand)) return InteractionResult.PASS;
+            if (RaidSnapshots.isOrb(entity)) {
+                RaidSnapshots.claim(reviver, entity);
+                return InteractionResult.SUCCESS;
+            }
             String tag = entity.entityTags().stream().filter(value -> value.startsWith(MARKER)).findFirst().orElse(null);
             if (tag == null) return InteractionResult.PASS;
             try { revive(reviver, UUID.fromString(tag.substring(MARKER.length())), entity); }
@@ -335,6 +338,7 @@ public final class RaidService {
     }
 
     static void remove(MinecraftServer server, Identifier slot) {
+        RaidSnapshots.instanceEnded(server, slot.toString());
         java.util.Map<String, Long> pendingWipes = PENDING_WIPES.get(server);
         if (pendingWipes != null) pendingWipes.remove(slot.toString());
         ServerLevel instanceLevel = level(server, slot);
@@ -574,6 +578,13 @@ public final class RaidService {
         clearEffects(level);
         clearMarkers(level);
         resetEncounter(server, instance);
+        PortalDefinition portal = PortalService.portal(server, instance.portalId());
+        if (portal != null && !portal.keepInventory()) {
+            for (Map.Entry<String, RaidData.Spot> down : before.deaths().entrySet()) {
+                ServerPlayer player = server.getPlayerList().getPlayer(UUID.fromString(down.getKey()));
+                if (player != null && player.level() == level) RaidSnapshots.wipe(player, level, down.getValue());
+            }
+        }
         List<String> pending = new ArrayList<>();
         for (String id : before.deaths().keySet()) {
             ServerPlayer player = server.getPlayerList().getPlayer(UUID.fromString(id));

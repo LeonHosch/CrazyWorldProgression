@@ -90,5 +90,11 @@
   "message.crazy-world-progression.raid.down_encounter": "Du bist am Boden. Ein Teammitglied kann dich an deiner Markierung wiederbeleben.",
   "message.crazy-world-progression.raid.revive_in": "Wiederbelebung in %s s möglich",
   "message.crazy-world-progression.raid.revive_now": "Fliege in deinen Wiederbelebungspunkt, um aufzustehen",
-  "message.crazy-world-progression.raid.revived": "Du bist wieder auf den Beinen."
+  "message.crazy-world-progression.raid.revived": "Du bist wieder auf den Beinen.",
+  "message.crazy-world-progression.raid.orb_created": "Dein Inventar wurde in einer Kugel bei X %s, Y %s, Z %s gespeichert. Rechtsklicke sie, um es zurückzubekommen.",
+  "message.crazy-world-progression.raid.orb_destroyed": "Deine vorherige Inventarkugel wurde durch diesen Wipe zerstört.",
+  "message.crazy-world-progression.raid.orb_claimed": "Du hast dein Inventar zurück.",
+  "message.crazy-world-progression.raid.orb_partial": "Dein Inventar und dein Postmeister sind voll. Der Rest bleibt in der Kugel.",
+  "message.crazy-world-progression.raid.orb_postmaster": "Gegenstände, die im Weg waren, sind jetzt in deinem Postmeister (/postmaster).",
+  "message.crazy-world-progression.raid.orb_not_yours": "Diese Inventarkugel gehört jemand anderem."
 }

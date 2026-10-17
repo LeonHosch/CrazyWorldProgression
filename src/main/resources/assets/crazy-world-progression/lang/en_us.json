@@ -90,5 +90,11 @@
   "message.crazy-world-progression.raid.down_encounter": "You are down. A teammate can revive you at your marker.",
   "message.crazy-world-progression.raid.revive_in": "You can revive in %s s",
   "message.crazy-world-progression.raid.revive_now": "Fly into your revive point to revive",
-  "message.crazy-world-progression.raid.revived": "You got back up."
+  "message.crazy-world-progression.raid.revived": "You got back up.",
+  "message.crazy-world-progression.raid.orb_created": "Your inventory was stored in an orb at X %s, Y %s, Z %s. Right-click it to get it back.",
+  "message.crazy-world-progression.raid.orb_destroyed": "Your previous inventory orb was destroyed by this wipe.",
+  "message.crazy-world-progression.raid.orb_claimed": "You got your inventory back.",
+  "message.crazy-world-progression.raid.orb_partial": "Your inventory and postmaster are full. The rest stays in the orb.",
+  "message.crazy-world-progression.raid.orb_postmaster": "Items that were in the way went to your postmaster (/postmaster).",
+  "message.crazy-world-progression.raid.orb_not_yours": "This inventory orb belongs to someone else."
 }

@@ -179,7 +179,8 @@ public final class PortalTemplateService {
         for (Entity entity : level.getAllEntities()) {
             if (entity instanceof Player) continue;
             if (keepDrops && (entity instanceof ItemEntity
-                    || entity instanceof net.minecraft.world.entity.ExperienceOrb)) continue;
+                    || entity instanceof net.minecraft.world.entity.ExperienceOrb
+                    || RaidSnapshots.isOrb(entity))) continue;
             entities.add(entity);
         }
         entities.forEach(Entity::discard);

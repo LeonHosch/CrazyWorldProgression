@@ -71,7 +71,7 @@ public final class BuildingPreviewNetworking {
             MobScript script = MobForge.SCRIPTS.get(scriptId).orElse(null);
             if (script == null) continue;
             for (MobScript.Step step : script.steps()) {
-                if (!(step instanceof MobScript.BuildingStep building) || !building.action().equals("spawn")) continue;
+                if (!(step instanceof MobScript.BuildingStep building) || !building.action().equals("add")) continue;
                 BuildingService.BuildingInfo info = BuildingService.building(server, building.buildId());
                 if (info == null) continue;
                 var template = server.getStructureManager().get(Identifier.fromNamespaceAndPath(

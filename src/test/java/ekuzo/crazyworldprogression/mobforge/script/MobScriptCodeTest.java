@@ -164,4 +164,37 @@ class MobScriptCodeTest {
         assertEquals("entered", ((MobScript.EventBoxStep) script.steps().get(3)).playerVariable());
         assertEquals("inside", ((MobScript.EventBoxStep) script.steps().get(3)).countVariable());
     }
+
+    @Test void renamedStepsParseAndOldNamesStillLoad() {
+        MobScript current = code.decode("""
+                script renamed
+                eventbox(name="start", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2})
+                wait(condition="players_in('start') >= 1", timeout="5m")
+                portal(portal="cwp:gate", action="add", location="arena", position={"x":1,"y":64,"z":1})
+                portal(portal="cwp:gate", action="delete", location="arena")
+                portal(portal="cwp:gate", action="delete")
+                building(build_id="cwp:bridge", action="add", location={"x":5,"y":64,"z":5})
+                building(build_id="cwp:bridge", action="delete", location={"x":5,"y":64,"z":5})
+                """);
+        MobScript legacy = code.decode("""
+                script renamed
+                event_box(name="start", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2})
+                wait_until(condition="players_in('start') >= 1", timeout="5m")
+                portal_location(portal="cwp:gate", action="add", location="arena", position={"x":1,"y":64,"z":1})
+                portal_location(portal="cwp:gate", action="remove", location="arena")
+                portal_location(portal="cwp:gate", action="clear")
+                building(build_id="cwp:bridge", action="spawn", location={"x":5,"y":64,"z":5})
+                building(build_id="cwp:bridge", action="despawn", location={"x":5,"y":64,"z":5})
+                """);
+        assertEquals(current, legacy);
+        var deleteAll = (MobScript.PortalLocationStep) current.steps().get(4);
+        assertTrue(deleteAll.deletesAll());
+        assertFalse(((MobScript.PortalLocationStep) current.steps().get(3)).deletesAll());
+        assertEquals("add", ((MobScript.BuildingStep) current.steps().get(5)).action());
+        String written = code.encode(legacy);
+        assertTrue(written.contains("eventbox(") && written.contains("wait(") && written.contains("portal("), written);
+        assertFalse(written.contains("event_box") || written.contains("wait_until") || written.contains("portal_location")
+                || written.contains("spawn") || written.contains("remove") || written.contains("clear"), written);
+        assertEquals(current, code.decode(written));
+    }
 }

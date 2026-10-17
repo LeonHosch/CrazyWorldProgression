@@ -215,7 +215,7 @@ public final class MobScriptExecutor {
 			} else if (step instanceof MobScript.WaitUntilStep wait) {
 				if (run.waitStartedAt < 0) run.waitStartedAt = clock;
 				if (!ScriptCondition.evaluate(wait.condition(), run.handles, context)) {
-					if (clock - run.waitStartedAt >= wait.timeoutTicks()) throw new IllegalStateException("wait_until timed out: " + wait.condition());
+					if (clock - run.waitStartedAt >= wait.timeoutTicks()) throw new IllegalStateException("wait timed out: " + wait.condition());
 					return false;
 				}
 				run.waitStartedAt = -1;
@@ -297,13 +297,14 @@ public final class MobScriptExecutor {
 			} else if (step instanceof MobScript.PortalLocationStep portal) {
 				run.step++;
 				PortalService.changeLocation(run.level.getServer(), run.level.dimension().identifier(),
-						portal.portalId(), portal.action(), portal.locationId(),
+						portal.portalId(), portal.action().equals("add") ? "add" : portal.deletesAll() ? "clear" : "remove",
+						portal.locationId(),
 						new Vec3(portal.position().x(), portal.position().y(), portal.position().z()),
 						portal.target() == null ? null : new Vec3(portal.target().x(), portal.target().y(), portal.target().z()));
 			} else if (step instanceof MobScript.BuildingStep building) {
 				BlockPos origin = BlockPos.containing(building.location().x(), building.location().y(),
 						building.location().z());
-				if (building.action().equals("spawn")) {
+				if (building.action().equals("add")) {
 					BuildingService.spawn(run.level, building.buildId(), origin);
 					run.step++;
 				} else {

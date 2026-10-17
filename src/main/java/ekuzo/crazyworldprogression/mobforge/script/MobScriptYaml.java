@@ -38,6 +38,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("spawn_mobs")) return spawnMobs(map(step.get("spawn_mobs"), field + ".spawn_mobs"), field);
 		if (step.containsKey("sleep")) return new MobScript.SleepStep(duration(step.get("sleep"), field + ".sleep"));
 		if (step.containsKey("spawn_entity")) return spawnEntity(map(step.get("spawn_entity"), field + ".spawn_entity"), field);
+		if (step.containsKey("wait")) return waitUntil(map(step.get("wait"), field + ".wait"), field);
 		if (step.containsKey("wait_until")) return waitUntil(map(step.get("wait_until"), field + ".wait_until"), field);
 		if (step.containsKey("mob_cast")) return cast(map(step.get("mob_cast"), field + ".mob_cast"), field);
 		if (step.containsKey("set_phase")) return setPhase(map(step.get("set_phase"), field + ".set_phase"), field);
@@ -49,6 +50,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("achievement")) return achievement(map(step.get("achievement"), field + ".achievement"), field);
 		if (step.containsKey("variable")) return variable(map(step.get("variable"), field + ".variable"), field);
 		if (step.containsKey("event")) return event(map(step.get("event"), field + ".event"), field);
+		if (step.containsKey("eventbox")) return eventBox(map(step.get("eventbox"), field + ".eventbox"), field);
 		if (step.containsKey("event_box")) return eventBox(map(step.get("event_box"), field + ".event_box"), field);
 		if (step.containsKey("redstone_sensor")) return redstone(map(step.get("redstone_sensor"), field + ".redstone_sensor"), field);
 		if (step.containsKey("if")) return new MobScript.IfStep(condition(step.get("if"), field + ".if"));
@@ -56,6 +58,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("end_if")) return new MobScript.EndIfStep();
 		if (step.containsKey("loop")) return loop(map(step.get("loop"), field + ".loop"), field);
 		if (step.containsKey("end_loop")) return new MobScript.EndLoopStep();
+		if (step.containsKey("portal")) return portalLocation(map(step.get("portal"), field + ".portal"), field);
 		if (step.containsKey("portal_location")) return portalLocation(map(step.get("portal_location"), field + ".portal_location"), field);
 		if (step.containsKey("building")) return building(map(step.get("building"), field + ".building"), field);
 		if (step.containsKey("particles")) return particles(map(step.get("particles"), field + ".particles"), field);
@@ -71,7 +74,7 @@ public final class MobScriptYaml {
 			case "spawn_mobs" -> spawnMobs(step, field);
 			case "sleep" -> new MobScript.SleepStep(duration(step.get("duration"), field + ".duration"));
 			case "spawn_entity" -> spawnEntity(step, field);
-			case "wait_until" -> waitUntil(step, field);
+			case "wait", "wait_until" -> waitUntil(step, field);
 			case "mob_cast" -> cast(step, field);
 			case "set_phase" -> setPhase(step, field);
 			case "trigger" -> trigger(step, field);
@@ -82,14 +85,14 @@ public final class MobScriptYaml {
 			case "achievement" -> achievement(step, field);
 			case "variable" -> variable(step, field);
 			case "event" -> event(step, field);
-			case "event_box" -> eventBox(step, field);
+			case "eventbox", "event_box" -> eventBox(step, field);
 			case "redstone_sensor" -> redstone(step, field);
 			case "if" -> new MobScript.IfStep(condition(step.get("condition"), field + ".condition"));
 			case "else" -> new MobScript.ElseStep();
 			case "end_if" -> new MobScript.EndIfStep();
 			case "loop" -> loop(step, field);
 			case "end_loop" -> new MobScript.EndLoopStep();
-			case "portal_location" -> portalLocation(step, field);
+			case "portal", "portal_location" -> portalLocation(step, field);
 			case "building" -> building(step, field);
 			case "particles" -> particles(step, field);
 			case "explosion" -> explosion(step, field);
@@ -160,9 +163,13 @@ public final class MobScriptYaml {
 	}
 	private MobScript.Step portalLocation(Map<String, Object> value, String field) {
 		String action = string(value.get("action"), field + ".action");
-		if (!List.of("add", "remove", "clear").contains(action)) throw new IllegalArgumentException("Portal action must be add, remove, or clear");
-		String location = string(value.getOrDefault("location", "main"), field + ".location");
-		if (!location.matches("[a-z][a-z0-9_]*")) throw new IllegalArgumentException("Invalid portal location name");
+		if (!List.of("add", "delete", "remove", "clear").contains(action))
+			throw new IllegalArgumentException("Portal action must be add or delete");
+		// delete without a location deletes every location; the deprecated remove kept the "main" default.
+		String location = action.equals("clear") || action.equals("delete") && !value.containsKey("location") ? ""
+				: string(value.getOrDefault("location", "main"), field + ".location");
+		if (!location.matches("[a-z][a-z0-9_]*") && !(location.isEmpty() && !action.equals("add")))
+			throw new IllegalArgumentException("Invalid portal location name");
 		MobScript.Position position = action.equals("add")
 				? position(map(value.get("position"), field + ".position"), field + ".position") : new MobScript.Position(0, 0, 0);
 		MobScript.Position target = value.containsKey("target")
@@ -172,8 +179,8 @@ public final class MobScriptYaml {
 	}
 	private MobScript.Step building(Map<String, Object> value, String field) {
 		String action = string(value.get("action"), field + ".action");
-		if (!List.of("spawn", "despawn").contains(action))
-			throw new IllegalArgumentException("Building action must be spawn or despawn");
+		if (!List.of("add", "delete", "spawn", "despawn").contains(action))
+			throw new IllegalArgumentException("Building action must be add or delete");
 		return new MobScript.BuildingStep(namespaced(value.get("build_id"), field + ".build_id"), action,
 				position(map(value.get("location"), field + ".location"), field + ".location"));
 	}
@@ -313,7 +320,7 @@ public final class MobScriptYaml {
 				steps.add(Map.of("spawn_mobs", body));
 			}
 			else if (step instanceof MobScript.SpawnEntityStep spawn) steps.add(Map.of("spawn_entity", Map.of("id", spawn.id().toString(), "at", spawn.at(), "save_as", spawn.saveAs())));
-			else if (step instanceof MobScript.WaitUntilStep wait) steps.add(Map.of("wait_until", Map.of("condition", wait.condition(), "timeout", formatDuration(wait.timeoutTicks()))));
+			else if (step instanceof MobScript.WaitUntilStep wait) steps.add(Map.of("wait", Map.of("condition", wait.condition(), "timeout", formatDuration(wait.timeoutTicks()))));
 			else if (step instanceof MobScript.MobCastStep cast) steps.add(Map.of("mob_cast", Map.of("mob", cast.mob(), "ability", cast.ability().toString())));
 			else if (step instanceof MobScript.SetPhaseStep phase) steps.add(Map.of("set_phase", Map.of("mob", phase.mob(), "phase", phase.phase())));
 			else if (step instanceof MobScript.TriggerStep trigger) steps.add(Map.of("trigger", Map.of("event", trigger.event().toString())));
@@ -332,7 +339,7 @@ public final class MobScriptYaml {
 				if (box.mode().equals("mobs")) body.put("mob_id", box.mobId());
 				if (!box.playerVariable().isEmpty()) body.put("player_variable", box.playerVariable());
 				if (!box.countVariable().isEmpty()) body.put("count_variable", box.countVariable());
-				steps.add(Map.of("event_box", body));
+				steps.add(Map.of("eventbox", body));
 			}
 			else if (step instanceof MobScript.RedstoneStep sensor) steps.add(Map.of("redstone_sensor", Map.of("name", sensor.name(), "position", position(sensor.position().x(), sensor.position().y(), sensor.position().z()))));
 			else if (step instanceof MobScript.IfStep test) steps.add(Map.of("if", test.condition()));
@@ -342,10 +349,11 @@ public final class MobScriptYaml {
 			else if (step instanceof MobScript.EndLoopStep) steps.add(Map.of("end_loop", true));
 			else if (step instanceof MobScript.PortalLocationStep portal) {
 				Map<String, Object> body = new LinkedHashMap<>();
-				body.put("portal", portal.portalId().toString()); body.put("action", portal.action()); body.put("location", portal.locationId());
+				body.put("portal", portal.portalId().toString()); body.put("action", portal.action());
+				if (!portal.deletesAll()) body.put("location", portal.locationId());
 				if (portal.action().equals("add")) body.put("position", position(portal.position().x(), portal.position().y(), portal.position().z()));
 				if (portal.target() != null) body.put("target", position(portal.target().x(), portal.target().y(), portal.target().z()));
-				steps.add(Map.of("portal_location", body));
+				steps.add(Map.of("portal", body));
 			}
 			else if (step instanceof MobScript.BuildingStep building) steps.add(Map.of("building",
 					Map.of("build_id", building.buildId().toString(), "action", building.action(),

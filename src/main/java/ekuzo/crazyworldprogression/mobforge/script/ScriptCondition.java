@@ -170,7 +170,7 @@ public final class ScriptCondition {
         };
     }
     private static java.util.regex.Matcher parse(String expression) {
-        if (expression == null) throw new IllegalArgumentException("wait_until condition is required");
+        if (expression == null) throw new IllegalArgumentException("wait condition is required");
         var match = CONDITION.matcher(expression.trim());
         if (!match.matches()) throw new IllegalArgumentException("Unsupported condition: " + expression);
         String field = match.group(2), op = match.group(3);

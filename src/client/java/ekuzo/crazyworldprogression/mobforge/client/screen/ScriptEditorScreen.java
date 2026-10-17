@@ -78,7 +78,7 @@ public final class ScriptEditorScreen extends Screen {
 		addRenderableWidget(Button.builder(Component.literal("+ Spawn"), b -> addSpawn()).bounds(6, footerTop - 25, small, 20).build());
 		addRenderableWidget(Button.builder(Component.literal("+ More"), b -> minecraft.setScreenAndShow(
 				new RegistryPickerScreen(minecraft, this, "Add script step", List.of("Sleep", "Spawn entity",
-						"Wait until", "Mob cast", "Set phase", "Trigger event", "Reward currency", "Reward item",
+						"Wait", "Mob cast", "Set phase", "Trigger event", "Reward currency", "Reward item",
 						"Reward loot table"), "", this::addStep)))
 				.bounds(10 + small, footerTop - 25, small, 20).build());
 
@@ -230,7 +230,7 @@ public final class ScriptEditorScreen extends Screen {
 		StepType type = switch (label) {
 			case "Sleep" -> StepType.SLEEP;
 			case "Spawn entity" -> StepType.SPAWN_ENTITY;
-			case "Wait until" -> StepType.WAIT_UNTIL;
+			case "Wait" -> StepType.WAIT_UNTIL;
 			case "Mob cast" -> StepType.MOB_CAST;
 			case "Set phase" -> StepType.SET_PHASE;
 			case "Trigger event" -> StepType.TRIGGER;

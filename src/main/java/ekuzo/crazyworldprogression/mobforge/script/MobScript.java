@@ -56,17 +56,34 @@ public record MobScript(String id, List<Step> steps) {
 	/** Rechecks condition at the end, with a hard iteration cap. */
 	public record LoopStep(String condition, int maxIterations) implements Step { }
 	public record EndLoopStep() implements Step { }
-	/** Place or remove a named location of an existing portal preset in this instance. */
+	/**
+	 * Add or delete a named location of an existing portal preset in this instance (script step "portal").
+	 * Action is "add" or "delete"; deleting with an empty location deletes every location of the preset.
+	 * Older scripts used "remove" (one location) and "clear" (all); both are mapped to "delete".
+	 */
 	public record PortalLocationStep(Identifier portalId, String action, String locationId, Position position,
 	                                 Position target) implements Step {
+		public PortalLocationStep {
+			if ("clear".equals(action)) { action = "delete"; locationId = ""; }
+			else if ("remove".equals(action)) action = "delete";
+			if (locationId == null) locationId = "";
+		}
 		public PortalLocationStep(Identifier portalId, String action, String locationId, Position position) {
 			this(portalId, action, locationId, position, null);
 		}
+		/** True when this deletes every location of the preset, including its original placement. */
+		public boolean deletesAll() { return action.equals("delete") && locationId.isEmpty(); }
 	}
 	public record RaidCompleteStep() implements Step { }
 	public record EncounterStartStep() implements Step { }
 	public record EncounterEndStep() implements Step { }
-	public record BuildingStep(Identifier buildId, String action, Position location) implements Step { }
+	/** Script step "building": action "add" pastes the saved blocks, "delete" clears them (formerly spawn/despawn). */
+	public record BuildingStep(Identifier buildId, String action, Position location) implements Step {
+		public BuildingStep {
+			if ("spawn".equals(action)) action = "add";
+			else if ("despawn".equals(action)) action = "delete";
+		}
+	}
 	public record ParticleStep(Identifier particleId, Position location, Offset offset, int count, double speed) implements Step { }
 	public record ExplosionStep(Position location, float power) implements Step { }
 	public record SoundStep(Identifier soundId, Position location) implements Step { }

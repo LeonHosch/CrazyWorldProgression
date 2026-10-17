@@ -46,6 +46,6 @@ public class EntityHandle implements ScriptEntityHandle {
         entity().teleportTo(position.x, position.y, position.z);
     }
     @Override public void kill() { entity().kill(level); knownDead = true; }
-    /** Called from the server death event so wait_until can distinguish death from chunk unload. */
+    /** Called from the server death event so wait can distinguish death from chunk unload. */
     public void markDead() { knownDead = true; }
 }

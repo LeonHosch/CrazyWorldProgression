@@ -6,7 +6,7 @@ MobForge scripts are plain UTF-8 `.mfs` files in `config/mobforge/scripts/`. The
 script plate_encounter
 
 # Coordinates in a pocket script are authored in the pocket editor.
-event_box(name="plate", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2})
+eventbox(name="plate", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2})
 variable(name="charge", operation="set", value="0")
 event(condition="portal_used(\"cwp:entrance\")", variable="charge", operation="increment", value="1")
 
@@ -17,7 +17,7 @@ while kills("raid_add") < 6, max_iterations=1000:
         sleep(duration="1s")
 
 if var("charge") >= 1:
-    portal_location(portal="cwp:boss_gate", action="add", location="arena", position={"x":20,"y":64,"z":10})
+    portal(portal="cwp:boss_gate", action="add", location="arena", position={"x":20,"y":64,"z":10})
 ```
 
 ## Layout and execution
@@ -31,7 +31,7 @@ if var("charge") >= 1:
 
 ## Conditions
 
-Use conditions in `if`, `while`, `wait_until`, and `event`. Combine them with `and`, `or`, and `not` (in that precedence order: `not`, then `and`, then `or`). Supported checks are:
+Use conditions in `if`, `while`, `wait`, and `event`. Combine them with `and`, `or`, and `not` (in that precedence order: `not`, then `and`, then `or`). Supported checks are:
 
 | Check | Example | Meaning |
 | --- | --- | --- |
@@ -57,15 +57,15 @@ The in-game admin script editor exposes the same commands as steps. All IDs that
 | `spawn_mobs` | `spawn_mobs(mob_id="minecraft:zombie", location={"x":0,"y":64,"z":0}, offset={"x":2,"y":0,"z":2}, count=3)` | Spawn mobs by entity or MobForge ID at a position. |
 | `sleep` | `sleep(duration="1s")` | Pause; durations accept ticks (`40t`), seconds (`5s`), milliseconds (`500ms`), or minutes (`2m`). |
 | `spawn_entity` | `spawn_entity(id="minecraft:zombie", at="origin", save_as="boss")` | Spawn an entity at an anchor and save a handle. `pocket_spawn` is available in pocket scripts. |
-| `wait_until` | `wait_until(condition="dead(\"boss\")", timeout="5m")` | Poll until true, or cancel this run on timeout. |
+| `wait` | `wait(condition="dead(\"boss\")", timeout="5m")` | Poll until true, or cancel this run on timeout. |
 | `mob_cast` | `mob_cast(mob="${boss}", ability="cwp:slam")` | Ask a MobForge handle to cast an ability. |
 | `set_phase` | `set_phase(mob="${boss}", phase="enraged")` | Change a MobForge mob's phase. |
 | `trigger` | `trigger(event="cwp:plate_ready")` | Emit a script event. |
 | `variable` | `variable(name="charge", operation="increment", value="1")` | Set or increment a run variable. |
 | `event` | `event(condition="kills(\"raid_add\")", variable="charge", operation="increment", value="1")` | Register a watch. A bare `kills` or `portal_used` condition fires for each new occurrence; other conditions fire on false-to-true changes. |
-| `event_box` | `event_box(name="plate", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2}, mode="players", player_variable="entered", count_variable="inside")` | Save every entering player's ID in `entered`, and continuously update the current occupancy in numeric variable `inside`. With `mode="mobs", mob_id="minecraft:zombie"`, the count tracks matching mobs. The maximum block is included. |
-| `portal_location` | `portal_location(portal="cwp:gate", action="add", location="arena", position={"x":20,"y":64,"z":10})` | Spawn a saved portal at this position in a world or instance. Location names distinguish copies of one portal. `remove` and `clear` remove locations. |
-| `building` | `building(build_id="cwp:bridge", action="spawn", location={"x":5,"y":64,"z":5})` | Paste saved blocks with their minimum corner here. `action="despawn"` clears the entire pasted range, including player changes. |
+| `eventbox` | `eventbox(name="plate", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2}, mode="players", player_variable="entered", count_variable="inside")` | Save every entering player's ID in `entered`, and continuously update the current occupancy in numeric variable `inside`. With `mode="mobs", mob_id="minecraft:zombie"`, the count tracks matching mobs. The maximum block is included. |
+| `portal` | `portal(portal="cwp:gate", action="add", location="arena", position={"x":20,"y":64,"z":10})` | Place a copy of a saved portal preset at this position in this world or instance. `location` is the name of this copy: one preset can have several copies with different names, adding the same name again moves that copy, and `action="delete", location="arena"` removes just that copy. `action="delete"` without a location removes every copy of the preset in this instance, including its original placement. Coordinates portals also accept `target={...}`. |
+| `building` | `building(build_id="cwp:bridge", action="add", location={"x":5,"y":64,"z":5})` | Paste saved blocks with their minimum corner here. `action="delete"` clears the entire pasted range, including player changes. |
 | `particles` | `particles(particle_id="minecraft:flame", location={"x":0,"y":65,"z":0}, offset={"x":1,"y":1,"z":1}, count=20, speed=0.1)` | Show a particle effect. Particles that require extra data are unsupported. |
 | `explosion` | `explosion(location={"x":0,"y":65,"z":0}, power=2)` | Create an explosion that damages entities but leaves blocks intact. |
 | `sound` | `sound(sound_id="minecraft:entity.experience_orb.pickup", location={"x":0,"y":65,"z":0})` | Play a sound effect at the location. |
@@ -87,13 +87,13 @@ The keys inside `ai={...}` use the existing MobForge AI fields: `mode`, `combat`
 ```python
 script boss_encounter
 
-event_box(name="start", min={"x":0,"y":64,"z":0}, max={"x":3,"y":67,"z":3})
-wait_until(condition="players_in(\"start\") >= 6", timeout="30m")
+eventbox(name="start", min={"x":0,"y":64,"z":0}, max={"x":3,"y":67,"z":3})
+wait(condition="players_in(\"start\") >= 6", timeout="30m")
 encounter_start()
 spawn(template="raid_add", location={"x":12,"y":64,"z":12}, count=6)
 while kills("raid_add") < 6, max_iterations=36000:
     sleep(duration="1s")
-portal_location(portal="cwp:boss_gate", action="add", location="after_adds", position={"x":25,"y":64,"z":12})
+portal(portal="cwp:boss_gate", action="add", location="after_adds", position={"x":25,"y":64,"z":12})
 encounter_end()
 ```
 
@@ -111,3 +111,7 @@ Scripted portal `add` locations are previewed there in the same purple, using ea
 Use the **MobForge** or **Pocket → Mob scripts** section in `/cwp admin` to add, insert, move, edit, and save steps. The editor saves `.mfs` source and remains useful if you prefer forms to text. To edit as text, modify `config/mobforge/scripts/<id>.mfs` and run `/mobforge reload` to load it. Failed files are logged with their filename; the server keeps other valid scripts.
 
 Existing `.yml` and `.yaml` scripts still load. Saving one from the in-game editor converts it to `.mfs` and removes its old YAML file after the new file is written and validated. Keep a copy before editing an existing script by hand. Mob templates and other CWP configuration files still use their own formats.
+
+## Renamed steps
+
+Older scripts still load, but the editor and saved scripts use the new names: `event_box` is now `eventbox`, `wait_until` is now `wait`, and `portal_location` is now `portal`. Both `portal` and `building` use `action="add"` or `action="delete"`. The old `spawn`/`despawn` (building) and `remove`/`clear` (portal) values are still accepted and are converted to `add`/`delete`.

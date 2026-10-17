@@ -60,7 +60,7 @@ steps:
       id: example:guardian
       at: arena_center
       save_as: guardian
-  - wait_until:
+  - wait:
       condition: '${guardian.health_percent <= 0.5}'
       timeout: 5m
   - mob_cast:
@@ -69,9 +69,9 @@ steps:
   - set_phase:
       mob: '${guardian}'
       phase: enraged
-  - wait_until:
+  - wait:
       condition: '${guardian.phase == enraged}'
-  - wait_until:
+  - wait:
       condition: '${guardian.dead}'
   - trigger:
       event: example:guardian_defeated
@@ -79,9 +79,9 @@ steps:
 
 Conditions support `dead`, `health_percent` comparisons, and phase equality/inequality. They do not evaluate Java code, load classes, run commands, or read files. `spawn_entity` uses the same registry as the public spawn API, so no second script registration is needed. Call `MobForge.SCRIPT_EXECUTOR.run(script, world, anchors, encounterId, pocketInstanceId)` with named `Map<String, Vec3>` anchors; `/mobforge script run` supplies `origin` at the command source. `ScriptSignals.register(listener)` receives named triggers and per-run failures. A run that hits an invalid reference or an unloaded entity is canceled and logged, leaving the server running. Death is tracked separately from chunk unload for handles held by active scripts.
 
-`wait_until` has a 24-hour default timeout and accepts a shorter `timeout` duration. Completed, failed, or canceled runs discard their handles.
+`wait` (formerly `wait_until`) has a 24-hour default timeout and accepts a shorter `timeout` duration. Completed, failed, or canceled runs discard their handles.
 
-The CWP admin panel has a MobForge tab for YAML mob templates and scripts. Its script editor supports Spawn, Sleep, `spawn_entity`, `wait_until`, `mob_cast`, `set_phase`, and `trigger`. Entity and ability pickers use identifiers sent by the server. Server validation reports save errors in the editor and keeps rejected changes unsaved. Java-registered MobDefinitions, ability factories, and behaviors appear as read-only registrations; their implementations remain owned by the registering content mod.
+The CWP admin panel has a MobForge tab for YAML mob templates and scripts. Its script editor supports Spawn, Sleep, `spawn_entity`, `wait`, `mob_cast`, `set_phase`, and `trigger`. Entity and ability pickers use identifiers sent by the server. Server validation reports save errors in the editor and keeps rejected changes unsaved. Java-registered MobDefinitions, ability factories, and behaviors appear as read-only registrations; their implementations remain owned by the registering content mod.
 
 ## Pocket dimensions and encounters
 

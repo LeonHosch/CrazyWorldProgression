@@ -30,9 +30,9 @@ final class AdminScriptEditor {
             "Event box", "Check redstone power", "Spawn portal", "Track counter", "Variable",
             "Particles", "Explosion", "Play sound", "Apply effect", "Remove effect", "Loot pool", "Unlock achievement", "Encounter start", "Encounter end",
             "Spawn building", "Despawn building");
-    private static final List<String> ADVANCED_TYPES = List.of("Spawn wave", "Spawn entity", "Wait until",
+    private static final List<String> ADVANCED_TYPES = List.of("Spawn wave", "Spawn entity", "Wait",
             "Mob cast", "Set phase", "Trigger event", "Reward currency", "Reward item", "Reward loot table",
-            "Watch event", "Portal location", "Raid complete");
+            "Watch event", "Portal", "Raid complete");
     private static final List<String> AI_MODES = List.of("template_default", "vanilla", "target_position",
             "target_player", "nearest_player");
     private static final MobScriptYaml YAML = new MobScriptYaml();
@@ -115,7 +115,7 @@ final class AdminScriptEditor {
                             List.of(field(prefix, step, "anchor", "Anchor"),
                                     field(prefix, step, "save_as", "Save as")), List.of()));
                 }
-                case "Wait until" -> rows.add(row(section, "Condition", "Example: ${guardian.health_percent <= 0.5}.",
+                case "Wait" -> rows.add(row(section, "Condition", "Example: ${guardian.health_percent <= 0.5}.",
                         List.of(field(prefix, step, "condition", "Condition"),
                                 field(prefix, step, "timeout", "Timeout")), List.of()));
                 case "Mob cast" -> rows.add(row(section, "Ability", "Use a handle from an earlier spawn.",
@@ -179,10 +179,10 @@ final class AdminScriptEditor {
                                 : List.of(field(prefix, step, "condition", "Condition")), List.of()));
                 case "Else", "End if", "End loop" -> rows.add(row(section, "Control flow", "Pairs with the nearest open If or Loop.", List.of(), List.of()));
                 case "Raid complete" -> rows.add(row(section, "Encounter complete", "Resets each player's revive charge and once-per-attempt portal use in this raid instance.", List.of(), List.of()));
-                case "Portal location" -> {
-                    rows.add(row(section, "Portal preset placement", "Add or remove a named location; clear removes all locations in this instance.",
+                case "Portal" -> {
+                    rows.add(row(section, "Portal preset placement", "Add or delete a named location. Delete with an empty location name deletes every location of this portal.",
                             List.of(suggested(prefix, step, "portal", "Portal ID", ekuzo.crazyworldprogression.portals.PortalService.portals(player.level().getServer()).stream().map(p -> p.id().toString()).toList()),
-                                    AdminPanelRegistry.AdminField.select(prefix + "action", "Action", step.value("action"), List.of("add", "remove", "clear")),
+                                    AdminPanelRegistry.AdminField.select(prefix + "action", "Action", step.value("action"), List.of("add", "delete")),
                                     field(prefix, step, "location", "Location name")), List.of()));
                     rows.add(row(section, "Placement", "Used by Add; build-space coordinates move with the pocket instance.",
                             List.of(field(prefix, step, "x", "X"), field(prefix, step, "y", "Y"),
@@ -336,7 +336,7 @@ final class AdminScriptEditor {
                     draft.steps.add(end + 1, StepForm.empty("Sleep", player));
                 }
                 case "script.step.here" -> {
-                    if (!List.of("Spawn wave", "Spawn mobs", "Portal location", "Spawn portal",
+                    if (!List.of("Spawn wave", "Spawn mobs", "Portal", "Spawn portal",
                             "Spawn building", "Despawn building", "Check redstone power", "Particles", "Explosion",
                             "Play sound")
                             .contains(draft.steps.get(index).type))
@@ -565,7 +565,7 @@ final class AdminScriptEditor {
                     form.fields.put("entity", "minecraft:zombie"); form.fields.put("anchor", "origin");
                     form.fields.put("save_as", "mob");
                 }
-                case "Wait until" -> {
+                case "Wait" -> {
                     form.fields.put("condition", "${mob.dead}"); form.fields.put("timeout", "5m");
                 }
                 case "Mob cast" -> {
@@ -600,7 +600,7 @@ final class AdminScriptEditor {
                 case "If" -> form.fields.put("condition", "${var.charge >= 3}");
                 case "Else", "End if", "End loop", "Raid complete" -> { }
                 case "While" -> { form.fields.put("condition", "${var.charge < 3}"); form.fields.put("max", "1000"); }
-                case "Portal location" -> {
+                case "Portal" -> {
                     form.fields.put("portal", "cwp:gate"); form.fields.put("action", "add"); form.fields.put("location", "main");
                     form.fields.put("x", player == null ? "0" : Double.toString(player.getX()));
                     form.fields.put("y", player == null ? "64" : Double.toString(player.getY()));
@@ -711,7 +711,7 @@ final class AdminScriptEditor {
                     form.fields.put("powered", value.condition().endsWith("false") ? "unpowered" : "powered");
                     form.fields.put("timeout", MobScriptYaml.formatDuration(value.timeoutTicks()));
                 } else {
-                    form = new StepForm("Wait until"); form.fields.put("condition", value.condition());
+                    form = new StepForm("Wait"); form.fields.put("condition", value.condition());
                     form.fields.put("timeout", MobScriptYaml.formatDuration(value.timeoutTicks()));
                 }
             } else if (step instanceof MobScript.MobCastStep value) {
@@ -780,7 +780,7 @@ final class AdminScriptEditor {
                 form = empty("End loop", null);
             } else if (step instanceof MobScript.PortalLocationStep value) {
                 form = empty(value.action().equals("add") && value.target() == null
-                        ? "Spawn portal" : "Portal location", null);
+                        ? "Spawn portal" : "Portal", null);
                 form.fields.put("portal", value.portalId().toString());
                 form.fields.put("action", value.action()); form.fields.put("location", value.locationId());
                 form.fields.put("x", Double.toString(value.position().x())); form.fields.put("y", Double.toString(value.position().y()));
@@ -792,7 +792,7 @@ final class AdminScriptEditor {
                     form.fields.put("tz", Double.toString(value.target().z()));
                 }
             } else if (step instanceof MobScript.BuildingStep value) {
-                form = empty(value.action().equals("spawn") ? "Spawn building" : "Despawn building", null);
+                form = empty(value.action().equals("add") ? "Spawn building" : "Despawn building", null);
                 form.fields.put("build_id", value.buildId().toString());
                 form.fields.put("x", Double.toString(value.location().x()));
                 form.fields.put("y", Double.toString(value.location().y()));
@@ -851,7 +851,7 @@ final class AdminScriptEditor {
                 case "Sleep" -> new MobScript.SleepStep(MobScriptYaml.parseDuration(value("sleep")));
                 case "Spawn entity" -> new MobScript.SpawnEntityStep(Identifier.parse(value("entity")),
                         value("anchor"), value("save_as"));
-                case "Wait until" -> new MobScript.WaitUntilStep(value("condition"),
+                case "Wait" -> new MobScript.WaitUntilStep(value("condition"),
                         MobScriptYaml.parseDuration(value("timeout")));
                 case "Mob cast" -> new MobScript.MobCastStep(value("mob"), Identifier.parse(value("ability")));
                 case "Set phase" -> new MobScript.SetPhaseStep(value("mob"), value("phase"));
@@ -877,7 +877,7 @@ final class AdminScriptEditor {
                 case "End if" -> new MobScript.EndIfStep();
                 case "While" -> new MobScript.LoopStep(value("condition"), integer("max"));
                 case "End loop" -> new MobScript.EndLoopStep();
-                case "Portal location" -> new MobScript.PortalLocationStep(Identifier.parse(value("portal")),
+                case "Portal" -> new MobScript.PortalLocationStep(Identifier.parse(value("portal")),
                         value("action"), value("location"), new MobScript.Position(number("x"), number("y"), number("z")),
                         value("target_enabled").equals("Yes")
                                 ? new MobScript.Position(number("tx"), number("ty"), number("tz")) : null);
@@ -894,7 +894,7 @@ final class AdminScriptEditor {
                 case "Encounter end" -> new MobScript.EncounterEndStep();
                 case "Spawn building", "Despawn building" -> new MobScript.BuildingStep(
                         Identifier.parse(value("build_id")),
-                        type.equals("Spawn building") ? "spawn" : "despawn",
+                        type.equals("Spawn building") ? "add" : "delete",
                         new MobScript.Position(number("x"), number("y"), number("z")));
                 case "Particles" -> new MobScript.ParticleStep(Identifier.parse(value("particle_id")),
                         new MobScript.Position(number("x"), number("y"), number("z")),

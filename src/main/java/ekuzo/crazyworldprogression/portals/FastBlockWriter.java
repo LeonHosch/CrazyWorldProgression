@@ -127,6 +127,41 @@ final class FastBlockWriter {
             level.updatePOIOnBlockStateChange(cursor.immutable(), old, state);
     }
 
+    /**
+     * Empties a whole section in one step by swapping in a new empty one (keeping its biomes), instead of
+     * removing its blocks one by one. Block entities in it are removed. Light is rechecked where a block's light
+     * differed from air, on the light thread together with the rest of the chunk. Returns false, without
+     * changing anything, when the section holds points of interest (beds, job blocks…); those are cleared
+     * block by block so the POI records stay right.
+     */
+    boolean clearSection(LevelChunk chunk, int sectionIndex) {
+        LevelChunkSection section = chunk.getSection(sectionIndex);
+        if (section.hasOnlyAir()) return true;
+        if (section.maybeHas(PoiTypes::hasPoi)) return false;
+        int sectionY = chunk.getSectionYFromSectionIndex(sectionIndex);
+        int baseX = chunk.getPos().getMinBlockX(), baseY = sectionY << 4, baseZ = chunk.getPos().getMinBlockZ();
+        BlockState air = net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        for (int y = 0; y < 16; y++)
+            for (int z = 0; z < 16; z++)
+                for (int x = 0; x < 16; x++) {
+                    BlockState old = section.getBlockState(x, y, z);
+                    if (old.isAir()) continue;
+                    changed++;
+                    if (LightEngine.hasDifferentLightProperties(old, air)) {
+                        pendingLight.add(BlockPos.asLong(baseX + x, baseY + y, baseZ + z));
+                        lightChecks++;
+                    }
+                }
+        if (section.maybeHas(BlockState::hasBlockEntity)) {
+            for (BlockPos pos : java.util.List.copyOf(chunk.getBlockEntitiesPos()))
+                if (SectionPos.blockToSectionCoord(pos.getY()) == sectionY) chunk.removeBlockEntity(pos);
+        }
+        chunk.getSections()[sectionIndex] = new LevelChunkSection(level.palettedContainerFactory().createForBlockStates(),
+                section.getBiomes());
+        light.updateSectionStatus(SectionPos.of(chunk.getPos(), sectionY), true);
+        return true;
+    }
+
     private void flushLight() {
         if (pendingLight.isEmpty()) return;
         light.checkBlock(new LightBatch(chunkX, chunkZ, pendingLight.toLongArray()));

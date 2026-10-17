@@ -473,16 +473,37 @@ public final class PocketEditorService {
                         .anyMatch(location -> location.dimension().equals(editor)))) {
             throw new IllegalStateException("Remove portals placed inside this pocket before deleting it");
         }
+        Set<Long> workshopChunks = workshopChunks(server, id);
+        Integer slot = PocketEditorData.get(server).pockets().get(id.toString());
         if (PortalTemplateService.template(server, id) != null) PortalTemplateService.delete(server, id);
-        if (editor != null) {
-            ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, editor));
-            if (level != null) {
-                for (var player : List.copyOf(level.players())) PortalService.leavePocketEditor(player);
-            }
+        ServerLevel level = editor == null ? null : server.getLevel(ResourceKey.create(Registries.DIMENSION, editor));
+        if (level != null) {
+            for (var player : List.copyOf(level.players())) PortalService.leavePocketEditor(player);
         }
         PocketEditorData.get(server).remove(id);
+        // Empty the workshop in the background; its slot is free for a new pocket once that is done.
+        if (level != null && slot != null) WorkshopWipes.start(server, slot, level, workshopChunks);
         clearAutoSave(server, id);
         return true;
+    }
+
+    /** Every chunk column of a pocket's workshop that may hold blocks: built chunks, the saved area, the entry. */
+    private static Set<Long> workshopChunks(MinecraftServer server, Identifier id) {
+        PocketEditorData data = PocketEditorData.get(server);
+        Set<Long> chunks = new LinkedHashSet<>(data.builtChunks(id));
+        List<BlockPos> centres = new java.util.ArrayList<>(List.of(ORIGIN));
+        if (data.entry(id) != null) centres.add(data.entry(id));
+        for (BlockPos centre : centres)
+            for (int cx = (centre.getX() >> 4) - 2; cx <= (centre.getX() >> 4) + 2; cx++)
+                for (int cz = (centre.getZ() >> 4) - 2; cz <= (centre.getZ() >> 4) + 2; cz++) chunks.add(ChunkPos.pack(cx, cz));
+        PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
+        BlockPos origin = data.captureOrigin(id);
+        if (template != null && origin != null) {
+            for (int cx = origin.getX() >> 4; cx <= (origin.getX() + template.sizeX() - 1) >> 4; cx++)
+                for (int cz = origin.getZ() >> 4; cz <= (origin.getZ() + template.sizeZ() - 1) >> 4; cz++)
+                    chunks.add(ChunkPos.pack(cx, cz));
+        }
+        return chunks;
     }
 
     public static Identifier slotDimension(int slot) {

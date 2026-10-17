@@ -63,6 +63,7 @@ public final class PortalService {
         RaidService.initialize();
         InstanceEntityLeases.initialize();
         InstanceBuilds.initialize();
+        WorkshopWipes.initialize();
         ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
         StressPocket.initialize();
         Parties.initialize();
@@ -524,6 +525,7 @@ public final class PortalService {
         BuildingService.tickScheduledClears(server);
         InstanceBuilds.tick(server);
         processCleanups(server);
+        WorkshopWipes.tick(server);
         tickPreparing(server);
         restoreVehicleMomentum(server, tick);
         if (tick % 20L == 0L) expireEmptyPrivateInstances(server);

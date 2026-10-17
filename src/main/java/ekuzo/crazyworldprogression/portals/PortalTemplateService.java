@@ -240,8 +240,9 @@ public final class PortalTemplateService {
 
     /**
      * Clears the next part of an instance volume and returns where to continue, or minus one when done. The
-     * volume is worked chunk by chunk, one 16-block section at a time; sections that hold only air are skipped
-     * without looking at their blocks, so mostly empty instances clear quickly.
+     * volume is worked chunk by chunk, one 16-block section at a time: sections that hold only air are skipped,
+     * sections completely inside the volume are swapped for empty ones, and only sections on the edge of the
+     * volume are cleared block by block.
      */
     static long clearBatch(ServerLevel level, PortalData.StoredInstance instance, long startIndex) {
         if (instance.sizeX() <= 0 || instance.sizeY() <= 0 || instance.sizeZ() <= 0) return -1L;
@@ -270,6 +271,10 @@ public final class PortalTemplateService {
                 if (sectionIndex < 0 || sectionIndex >= chunk.getSections().length) continue;
                 LevelChunkSection section = chunk.getSection(sectionIndex);
                 if (section.hasOnlyAir()) continue;
+                boolean whole = minX <= chunkX << 4 && maxX >= (chunkX << 4) + 15 && minZ <= chunkZ << 4
+                        && maxZ >= (chunkZ << 4) + 15 && minY <= sectionY << 4 && maxY >= (sectionY << 4) + 15;
+                // Sections completely inside the volume are swapped for empty ones in one step.
+                if (whole && writer.clearSection(chunk, sectionIndex)) continue;
                 int x0 = Math.max(minX, chunkX << 4), x1 = Math.min(maxX, (chunkX << 4) + 15);
                 int y0 = Math.max(minY, sectionY << 4), y1 = Math.min(maxY, (sectionY << 4) + 15);
                 int z0 = Math.max(minZ, chunkZ << 4), z1 = Math.min(maxZ, (chunkZ << 4) + 15);
@@ -289,6 +294,42 @@ public final class PortalTemplateService {
         writer.finish();
         ekuzo.crazyworldprogression.CrazyWorldProgression.LOGGER.info("Cleared instance {}: {}",
                 instance.slotDimension(), writer.stats());
+        return -1L;
+    }
+
+    /**
+     * Empties whole chunk columns (every section, full height) a slice at a time, the same way as instance
+     * deletion. Returns where to continue, or minus one when done. Used to reset pocket workshops.
+     */
+    static long clearColumns(ServerLevel level, String key, long[] columns, long startIndex) {
+        int sections = level.getSectionsCount();
+        long units = (long) columns.length * sections;
+        FastBlockWriter writer = CLEAR_WRITERS.computeIfAbsent(key, ignored -> new FastBlockWriter(level));
+        net.minecraft.world.level.block.state.BlockState air = Blocks.AIR.defaultBlockState();
+        long index = startIndex;
+        long sliceStart = System.nanoTime();
+        try (TickBudget.Slice slice = TickBudget.start(level.getServer(), TickBudget.Priority.CLEANUP)) {
+            while (index < units && slice.hasTime()) {
+                long packed = columns[(int) (index / sections)];
+                int sectionIndex = (int) (index % sections);
+                index++;
+                LevelChunk chunk = writer.chunk(ChunkPos.getX(packed), ChunkPos.getZ(packed));
+                LevelChunkSection section = chunk.getSection(sectionIndex);
+                if (section.hasOnlyAir() || writer.clearSection(chunk, sectionIndex)) continue;
+                int baseX = ChunkPos.getX(packed) << 4, baseY = chunk.getSectionYFromSectionIndex(sectionIndex) << 4;
+                int baseZ = ChunkPos.getZ(packed) << 4;
+                for (int y = 0; y < 16; y++)
+                    for (int z = 0; z < 16; z++)
+                        for (int x = 0; x < 16; x++)
+                            if (!section.getBlockState(x, y, z).isAir())
+                                writer.place(chunk, section, baseX + x, baseY + y, baseZ + z, air, null);
+            }
+        }
+        writer.worked(System.nanoTime() - sliceStart);
+        if (index < units) return index;
+        CLEAR_WRITERS.remove(key);
+        writer.finish();
+        ekuzo.crazyworldprogression.CrazyWorldProgression.LOGGER.info("Cleared {}: {}", key, writer.stats());
         return -1L;
     }
 

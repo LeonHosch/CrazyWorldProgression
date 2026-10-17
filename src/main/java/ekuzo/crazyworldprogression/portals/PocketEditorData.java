@@ -137,6 +137,15 @@ final class PocketEditorData extends SavedData {
         setDirty();
     }
 
+    /** Lets a reset workshop slot be given to a new pocket. */
+    void freeSlot(int slot) {
+        if (pockets.containsValue(slot) || !usedSlots.contains(slot)) return;
+        var updated = new java.util.ArrayList<>(usedSlots);
+        updated.remove(Integer.valueOf(slot));
+        usedSlots = List.copyOf(updated);
+        setDirty();
+    }
+
     boolean remove(Identifier id) {
         if (pockets.remove(id.toString()) == null) return false;
         entryPoints.remove(id.toString());

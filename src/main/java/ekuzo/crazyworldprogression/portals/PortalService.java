@@ -835,6 +835,12 @@ public final class PortalService {
         return !instance.admittedPlayers().isEmpty() && instance.admittedPlayers().getFirst().equals(playerId.toString());
     }
 
+    /** True inside a running private instance (raid or not), where /party invite adds players. */
+    public static boolean inPrivateInstance(ServerPlayer player) {
+        PortalData.StoredInstance instance = currentInstance(player);
+        return instance != null && !instance.admittedPlayers().isEmpty();
+    }
+
     /** Live instance the player is standing in, or null. */
     public static PortalData.StoredInstance currentInstance(ServerPlayer player) {
         return PortalData.get(player.level().getServer()).instances()

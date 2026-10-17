@@ -6,7 +6,6 @@ import com.mojang.brigadier.context.CommandContext;
 import ekuzo.crazyworldprogression.portals.InstanceInvites;
 import ekuzo.crazyworldprogression.portals.PortalGroups;
 import ekuzo.crazyworldprogression.portals.PortalService;
-import ekuzo.crazyworldprogression.portals.RaidService;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -14,8 +13,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
- * Player party commands: /leave, /partyleave, and /party invite|accept|leave. Inside a running raid,
- * /party invite sends a raid invite; outside, it forms a group before travel (same as /portal group).
+ * Player party commands: /leave, /partyleave, and /party invite|accept|leave. Inside a running private
+ * instance, /party invite lets another player join while a slot is free; outside, it forms a group before
+ * travel (same as /portal group).
  */
 public final class PartyCommands {
     private PartyCommands() { }
@@ -53,8 +53,7 @@ public final class PartyCommands {
         return run(context, () -> {
             ServerPlayer inviter = context.getSource().getPlayerOrException();
             ServerPlayer target = target(context);
-            var instance = PortalService.currentInstance(inviter);
-            if (instance != null && RaidService.isRaidInstance(inviter.level().getServer(), instance))
+            if (PortalService.inPrivateInstance(inviter))
                 InstanceInvites.invite(inviter, target);
             else PortalGroups.invite(inviter, target);
         });

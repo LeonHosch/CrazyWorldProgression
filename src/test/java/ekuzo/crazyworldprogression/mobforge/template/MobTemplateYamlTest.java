@@ -36,6 +36,16 @@ class MobTemplateYamlTest {
 		assertTrue(message.contains("set both as a value and as a multiplier"));
 	}
 
+	@Test void lootPoolRoundTrips() {
+		MobTemplate input = new MobTemplate("boss", "minecraft:zombie", null, Map.of(), Map.of(), null,
+				new MobTemplate.Loot(false, 50, "cwp:boss_rewards"), List.of(), null);
+		String text = yaml.encode(input);
+		assertTrue(text.contains("loot_pool: cwp:boss_rewards"));
+		assertEquals(input, yaml.decode(text));
+		assertNull(yaml.decode(yaml.encode(new MobTemplate("plain", "minecraft:zombie", null, Map.of(), Map.of(),
+				null, null, List.of(), null))).loot().lootPool());
+	}
+
 	@Test void malformedYamlFailsWithoutAffectingOtherFiles() {
 		assertThrows(RuntimeException.class, () -> yaml.decode("id: [unterminated"));
 	}

@@ -54,6 +54,7 @@ public final class MobForge {
 		});
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
 			if (entity.level() instanceof net.minecraft.server.level.ServerLevel level) SCRIPT_EXECUTOR.entityDied(level, entity);
+			rollKillLoot(entity, source);
 			if (MobForgeEntityData.definition(entity).flatMap(MOBS::get).isPresent())
 				MobForgeEvents.killed(new RegisteredMobHandle(entity), source.getEntity());
 		});
@@ -69,6 +70,18 @@ public final class MobForge {
 		ServerTickEvents.END_SERVER_TICK.register(SCRIPT_EXECUTOR::tick);
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> SCRIPT_EXECUTOR.clear());
 		LOGGER.info("MobForge initialized.");
+	}
+
+	/** The player who lands the killing blow (also with a projectile) gets one roll in the mob's loot pool. */
+	private static void rollKillLoot(net.minecraft.world.entity.LivingEntity entity, net.minecraft.world.damagesource.DamageSource source) {
+		var pool = MobForgeEntityData.lootPool(entity).map(Identifier::tryParse).orElse(null);
+		if (pool == null || !(source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
+		try {
+			ekuzo.crazyworldprogression.loot.LootPoolService.roll(player.level().getServer(), player, pool);
+		} catch (RuntimeException exception) {
+			LOGGER.warn("Could not roll loot pool {} for {} killing {}: {}", pool, player.getName().getString(),
+					MobForgeEntityData.template(entity).orElse("a MobForge mob"), exception.getMessage());
+		}
 	}
 
 	public static Identifier id(String path) {

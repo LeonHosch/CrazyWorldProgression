@@ -18,6 +18,7 @@ public final class MobForgeEntityData {
 	private static final String COMBAT = "mobforge.combat.";
 	private static final String NO_LOOT = "mobforge.no_vanilla_loot";
 	private static final String XP = "mobforge.xp.";
+	private static final String LOOT_POOL = "mobforge.loot_pool.";
 	private static final String BURNS_IN_DAYLIGHT = "mobforge.burns_in_daylight.";
 	private static final String SCRIPT = "mobforge.script.";
 	private static final String SCRIPT_RUN = "mobforge.script_run.";
@@ -36,6 +37,7 @@ public final class MobForgeEntityData {
 		setAi(entity, template.ai());
 		if (!template.loot().dropVanillaLoot()) entity.addTag(NO_LOOT);
 		if (template.loot().xp() >= 0) entity.addTag(XP + template.loot().xp());
+		if (template.loot().lootPool() != null) entity.addTag(LOOT_POOL + template.loot().lootPool());
 		entity.addTag(BURNS_IN_DAYLIGHT + template.properties().burnsInDaylight());
 	}
 
@@ -52,6 +54,8 @@ public final class MobForgeEntityData {
 		return entity.entityTags().stream().filter(tag -> tag.startsWith(prefix)).map(tag -> tag.substring(prefix.length())).findFirst();
 	}
 	public static Optional<String> template(Entity entity) { return value(entity, TEMPLATE); }
+	/** The loot pool rolled for the player who kills this mob, set from its template when spawned. */
+	public static Optional<String> lootPool(Entity entity) { return value(entity, LOOT_POOL); }
 	public static Optional<String> aiMode(Entity entity) { return value(entity, AI); }
 	public static Optional<String> player(Entity entity) { return value(entity, PLAYER); }
 	public static double range(Entity entity) { return value(entity, RANGE).map(MobForgeEntityData::safeDouble).orElse(64.0); }

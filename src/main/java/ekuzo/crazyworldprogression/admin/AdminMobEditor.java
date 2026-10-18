@@ -100,6 +100,9 @@ final class AdminMobEditor {
                 List.of(), null));
         rows.add(row("Loot", "Death rewards", "XP -1 keeps the entity's normal amount.",
                 List.of(yesNo("vanilla_loot", "Vanilla loot", v), text("xp", "XP", "-1", v, 16)), List.of(), null));
+        rows.add(row("Loot", "Loot pool", "The player who lands the killing blow gets one roll in this pool. Empty for none.",
+                List.of(new AdminPanelRegistry.AdminField("loot_pool", "Loot pool (type to search)", "none",
+                        v.get("loot_pool"), 128, lootPools(player.level().getServer()))), List.of(), null));
         rows.add(row("AI", "Mode", "Choose what the mob goes for and whether it fights on the way.",
                 List.of(AdminPanelRegistry.AdminField.select("ai_mode", "Mode", v.get("ai_mode"), AI_MODES),
                         yesNo("ai_combat", "Combat", v)), List.of(), null));
@@ -146,6 +149,9 @@ final class AdminMobEditor {
         }
         if (actionId.equals("mob.save")) {
             MobTemplate template = draft.build();
+            String pool = template.loot().lootPool();
+            if (pool != null && ekuzo.crazyworldprogression.loot.LootPoolService.get(player.level().getServer(),
+                    Identifier.parse(pool)) == null) throw new IllegalArgumentException("Unknown loot pool: " + pool);
             if (!draft.originId.isBlank() && !template.id().equals(draft.originId)) {
                 throw new IllegalArgumentException("Use Duplicate to save under a new ID");
             }
@@ -199,6 +205,12 @@ final class AdminMobEditor {
             if (value >= 0) parts.add(attribute.replace('_', ' ') + " " + number(value));
         }
         return parts.isEmpty() ? "" : "Defaults: " + String.join(", ", parts) + ".";
+    }
+
+    private static List<String> lootPools(MinecraftServer server) {
+        var pools = ekuzo.crazyworldprogression.loot.LootPoolService.all(server);
+        return pools.values().stream().filter(pool -> !ekuzo.crazyworldprogression.loot.LootPoolService.nested(pools, pool.id()))
+                .map(pool -> pool.id().toString()).sorted().toList();
     }
 
     private static List<String> entityIds() {
@@ -321,6 +333,7 @@ final class AdminMobEditor {
             fields.put("despawn", DESPAWN.contains(p.despawnBehavior()) ? p.despawnBehavior() : "vanilla");
             fields.put("vanilla_loot", yesNo(template.loot().dropVanillaLoot()));
             fields.put("xp", Integer.toString(template.loot().xp()));
+            fields.put("loot_pool", template.loot().lootPool() == null ? "" : template.loot().lootPool());
             MobTemplate.Ai ai = template.ai();
             fields.put("ai_mode", AI_MODES.contains(ai.mode()) ? ai.mode() : "vanilla");
             fields.put("ai_combat", yesNo(ai.combat()));
@@ -366,7 +379,11 @@ final class AdminMobEditor {
             MobTemplate.Properties p = new MobTemplate.Properties(yes(fields, "persistent"), yes(fields, "burns"),
                     yes(fields, "pickup"), yes(fields, "silent"), yes(fields, "glowing"),
                     yes(fields, "invulnerable"), yes(fields, "gravity"), fields.get("despawn"));
-            MobTemplate.Loot loot = new MobTemplate.Loot(yes(fields, "vanilla_loot"), integer(fields.get("xp"), "XP"));
+            String pool = fields.get("loot_pool").trim();
+            if (!pool.isEmpty() && (Identifier.tryParse(pool) == null || !pool.contains(":")))
+                throw new IllegalArgumentException("Loot pool must be an ID such as cwp:raid_rewards");
+            MobTemplate.Loot loot = new MobTemplate.Loot(yes(fields, "vanilla_loot"), integer(fields.get("xp"), "XP"),
+                    pool.isEmpty() ? null : pool);
             String mode = fields.get("ai_mode");
             MobTemplate.Position target = mode.equals("target_position") ? new MobTemplate.Position(
                     decimal(fields.get("ai_x"), "AI X"), decimal(fields.get("ai_y"), "AI Y"),

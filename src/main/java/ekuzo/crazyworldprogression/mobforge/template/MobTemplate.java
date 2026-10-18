@@ -40,8 +40,13 @@ public record MobTemplate(String id, String entity, String name, Map<String, Dou
 		public static final Properties DEFAULT = new Properties(false, true, false, false, false, false, false, "vanilla");
 	}
 
-	public record Loot(boolean dropVanillaLoot, int xp) {
-		public static final Loot DEFAULT = new Loot(true, -1);
+	/** lootPool: a CWP loot pool rolled for the player who lands the killing blow, or null. */
+	public record Loot(boolean dropVanillaLoot, int xp, String lootPool) {
+		public static final Loot DEFAULT = new Loot(true, -1, null);
+		public Loot {
+			lootPool = lootPool == null || lootPool.isBlank() ? null : lootPool.trim();
+		}
+		public Loot(boolean dropVanillaLoot, int xp) { this(dropVanillaLoot, xp, null); }
 	}
 
 	public record Position(double x, double y, double z) {}

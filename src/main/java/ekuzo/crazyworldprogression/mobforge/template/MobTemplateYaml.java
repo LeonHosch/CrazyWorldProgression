@@ -38,7 +38,8 @@ public final class MobTemplateYaml {
 				bool(properties, "invulnerable", false), bool(properties, "no_gravity", false), string(properties.getOrDefault("despawn_behavior", "vanilla")));
 
 		Map<String, Object> loot = map(map.get("loot"), "loot", true);
-		out.loot = new MobTemplate.Loot(bool(loot, "drop_vanilla_loot", true), integer(loot.getOrDefault("xp", -1), "loot.xp"));
+		out.loot = new MobTemplate.Loot(bool(loot, "drop_vanilla_loot", true), integer(loot.getOrDefault("xp", -1), "loot.xp"),
+				nullableString(loot.get("loot_pool")));
 		Object rawTags = map.get("tags");
 		if (rawTags instanceof List<?> list) out.tags = list.stream().map(MobTemplateYaml::string).toList();
 		else if (rawTags != null) throw new IllegalArgumentException("tags must be a list");
@@ -80,7 +81,10 @@ public final class MobTemplateYaml {
 		properties.put("can_pick_up_loot", p.canPickUpLoot()); properties.put("silent", p.silent()); properties.put("glowing", p.glowing());
 		properties.put("invulnerable", p.invulnerable()); properties.put("no_gravity", p.noGravity()); properties.put("despawn_behavior", p.despawnBehavior());
 		root.put("properties", properties);
-		root.put("loot", Map.of("drop_vanilla_loot", template.loot().dropVanillaLoot(), "xp", template.loot().xp()));
+		Map<String, Object> loot = new LinkedHashMap<>();
+		loot.put("drop_vanilla_loot", template.loot().dropVanillaLoot()); loot.put("xp", template.loot().xp());
+		if (template.loot().lootPool() != null) loot.put("loot_pool", template.loot().lootPool());
+		root.put("loot", loot);
 		if (!template.tags().isEmpty()) root.put("tags", new ArrayList<>(template.tags()));
 		MobTemplate.Ai ai = template.ai();
 		Map<String, Object> aiMap = new LinkedHashMap<>();

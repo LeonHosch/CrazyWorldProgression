@@ -61,6 +61,8 @@ public final class MobTemplateValidator {
 		if (ai.arrivalRadius() < 0 || !Double.isFinite(ai.arrivalRadius())) errors.add("ai.arrival_radius must be finite and non-negative");
 		if (ai.range() <= 0 || !Double.isFinite(ai.range())) errors.add("ai.range must be finite and greater than zero");
 		if (template.loot().xp() < -1) errors.add("loot.xp cannot be less than -1");
+		if (template.loot().lootPool() != null && Identifier.tryParse(template.loot().lootPool()) == null)
+			errors.add("invalid loot.loot_pool: " + template.loot().lootPool());
 		if (!Set.of("vanilla", "never").contains(template.properties().despawnBehavior())) errors.add("properties.despawn_behavior must be vanilla or never");
 		if (template.tags().size() > 64) errors.add("tags cannot contain more than 64 entries");
 		for (String tag : template.tags()) {

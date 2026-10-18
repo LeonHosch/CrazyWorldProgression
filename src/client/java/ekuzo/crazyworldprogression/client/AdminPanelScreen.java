@@ -887,8 +887,13 @@ public final class AdminPanelScreen extends Screen {
         }
         float size = Math.max(1f, Math.min(height / Math.max(0.3f, entity.getBbHeight()),
                 width / Math.max(0.3f, entity.getBbWidth())) * 0.8f);
-        net.minecraft.client.gui.screens.inventory.InventoryScreen.extractEntityInInventoryFollowsMouse(graphics,
-                x, y, x + width, y + height, (int) size, 0.0625f, x + width / 2f, y + height / 2f, entity);
+        try {
+            net.minecraft.client.gui.screens.inventory.InventoryScreen.extractEntityInInventoryFollowsMouse(graphics,
+                    x, y, x + width, y + height, (int) size, 0.0625f, x + width / 2f, y + height / 2f, entity);
+        } catch (RuntimeException exception) {
+            // Some entities cannot be drawn outside the world; show their spawn egg from now on.
+            entityCache.put(entityId, java.util.Optional.empty());
+        }
     }
 
     private final Map<String, java.util.Optional<net.minecraft.world.entity.LivingEntity>> entityCache = new HashMap<>();
@@ -902,8 +907,10 @@ public final class AdminPanelScreen extends Screen {
             try {
                 net.minecraft.world.entity.Entity created = type.create(minecraft.level,
                         net.minecraft.world.entity.EntitySpawnReason.LOAD);
-                return created instanceof net.minecraft.world.entity.LivingEntity living
-                        ? java.util.Optional.of(living) : java.util.Optional.empty();
+                if (!(created instanceof net.minecraft.world.entity.LivingEntity living)) return java.util.Optional.empty();
+                // Renderers read the entity ID; a negative one cannot clash with a real entity.
+                living.setId(-1_000_000 - entityCache.size());
+                return java.util.Optional.of(living);
             } catch (RuntimeException exception) {
                 return java.util.Optional.empty();
             }

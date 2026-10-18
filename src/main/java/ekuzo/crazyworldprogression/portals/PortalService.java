@@ -37,6 +37,7 @@ import java.util.WeakHashMap;
 public final class PortalService {
     private static final double TRIGGER_THICKNESS = 0.85;
     private static final double GROUP_ENTRY_DISTANCE = 20.0;
+    private static final double COORDINATE_CONFIRM_DISTANCE = 48.0;
     private static final long PROMPT_LIFETIME_TICKS = 600L;
     private static final long COORDINATE_TRAVEL_COOLDOWN_TICKS = 20L;
     private static final BlockPos INSTANCE_CENTER = new BlockPos(0, 64, 0);
@@ -313,11 +314,18 @@ public final class PortalService {
                 && !portal.isCoordinates()
                 && portal.admission().mode() == PortalDefinition.Mode.PRIVATE
                 && playerInstance(server, portal.id(), player.getUUID()) == null;
-        if (portal == null
-                || !portal.dimension().equals(player.level().dimension().identifier())
-                || !(groupRisk ? portal.isNear(center, GROUP_ENTRY_DISTANCE) : portal.bounds(4.0).contains(center))
-                || !isOpen(portal) || !canPlayerEnter(server, player, portal)) {
+        // A fast vehicle (a boat on ice) is well past a coordinate portal by the time the answer arrives, so those
+        // only need to be near it; the contact itself was already checked when the prompt was sent.
+        boolean near = portal != null && (groupRisk ? portal.isNear(center, GROUP_ENTRY_DISTANCE)
+                : portal.isCoordinates() ? portal.isNear(center, COORDINATE_CONFIRM_DISTANCE)
+                : portal.bounds(4.0).contains(center));
+        String problem = portal == null ? "portal not found"
+                : !portal.dimension().equals(player.level().dimension().identifier()) ? "other dimension"
+                : !near ? "too far from the portal" : !isOpen(portal) ? "portal closed"
+                : !canPlayerEnter(server, player, portal) ? "not allowed to enter" : null;
+        if (problem != null) {
             player.sendOverlayMessage(Component.literal("Portal travel could not be confirmed from here"));
+            CrazyWorldProgression.LOGGER.info("Portal entry for {} not confirmed: {}", player.getGameProfile().name(), problem);
             return;
         }
         if (portal.isCoordinates() && coordinateTravelOnCooldown(server, player.getUUID(), server.getTickCount())) return;
@@ -593,7 +601,14 @@ public final class PortalService {
                         && Double.compare(portal.centerY(), y) == 0
                         && Double.compare(portal.centerZ(), z) == 0)
                 .findFirst().orElse(null);
-        if (touching == null || !touching.contains(player.position().add(0.0, 0.9, 0.0), TRIGGER_THICKNESS)
+        // In a fast vehicle the server's position can be a few blocks off the client's at the moment of contact.
+        boolean touches = touching != null && (touching.isCoordinates() && player.isPassenger()
+                ? touching.isNear(player.position().add(0.0, 0.9, 0.0), 16.0)
+                : touching.contains(player.position().add(0.0, 0.9, 0.0), TRIGGER_THICKNESS));
+        if (touching != null && touching.isCoordinates() && !touches)
+            CrazyWorldProgression.LOGGER.info("Coordinate portal {} contact by {} rejected: server position {}",
+                    touching.id(), player.getGameProfile().name(), player.position());
+        if (touching == null || !touches
                 || !isOpen(touching) || touching.isExit() && !PortalRegistry.instanceSlots().contains(dimension))
             return;
         if (touching.isExit() && RaidService.inEncounterAt(server, dimension)) {

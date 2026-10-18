@@ -104,6 +104,14 @@ public final class AdminPanelNetworking {
                 .sorted(Comparator.comparing(module -> module.id().toString()))
                 .map(module -> new ModuleSnapshot(module.id().toString(), module.displayName(),
                         module.description(), module.icon())).toList();
+        List<NavTab> navigation = navigation();
+        // There is no module picker: without a selection the panel opens on the first Moderate page.
+        if ((requestedModule == null || requestedModule.isBlank()) && !navigation.isEmpty()) {
+            NavTab first = navigation.stream().filter(tab -> tab.workspace().equals(AdminPanelRegistry.MODERATE))
+                    .findFirst().orElse(navigation.getFirst());
+            requestedModule = first.moduleId();
+            requestedPage = first.pageId();
+        }
         AdminPanelRegistry.AdminPage page = null;
         String selectedModule = EMPTY_SELECTION;
         if (requestedModule != null && !requestedModule.isBlank()) {
@@ -119,7 +127,18 @@ public final class AdminPanelNetworking {
         LAST_LOCATION.put(player.getUUID(), new PanelLocation(selectedModule,
                 page == null ? EMPTY_SELECTION : page.id()));
         ServerPlayNetworking.send(player, new PanelSnapshotPayload(GSON.toJson(
-                new PanelSnapshot(modules, selectedModule, page, notice, error))));
+                new PanelSnapshot(modules, selectedModule, page, notice, error, navigation))));
+    }
+
+    /** Every module's pages in Moderate, Build, Logs order, each keeping the module registration order. */
+    private static List<NavTab> navigation() {
+        List<NavTab> tabs = new java.util.ArrayList<>();
+        for (String workspace : List.of(AdminPanelRegistry.MODERATE, AdminPanelRegistry.BUILD, AdminPanelRegistry.LOGS))
+            for (AdminPanelRegistry.AdminModule module : AdminPanelRegistry.modules())
+                for (AdminPanelRegistry.AdminTab tab : module.navigation())
+                    if (tab.workspace().equals(workspace))
+                        tabs.add(new NavTab(module.id().toString(), tab.id(), tab.label(), workspace));
+        return tabs;
     }
 
     // Check the same game-master permission used by /cwp before exposing state or executing controls.
@@ -133,7 +152,15 @@ public final class AdminPanelNetworking {
 
     /** Complete screen state, refreshed after navigation and every action. */
     public record PanelSnapshot(List<ModuleSnapshot> modules, String selectedModule,
-                                AdminPanelRegistry.AdminPage page, String notice, boolean error) {
+                                AdminPanelRegistry.AdminPage page, String notice, boolean error,
+                                List<NavTab> navigation) {
+        public PanelSnapshot {
+            if (navigation == null) navigation = List.of();
+        }
+    }
+
+    /** One entry of the panel's sidebar: a page of a module, filed under a workspace. */
+    public record NavTab(String moduleId, String pageId, String label, String workspace) {
     }
 
     private record PanelLocation(String moduleId, String pageId) {

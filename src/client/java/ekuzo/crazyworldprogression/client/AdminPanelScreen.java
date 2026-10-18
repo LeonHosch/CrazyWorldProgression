@@ -23,16 +23,20 @@ import org.lwjgl.glfw.GLFW;
 
 /** Responsive generic administration screen whose content and controls are supplied by server modules. */
 public final class AdminPanelScreen extends Screen {
-    private static final int PANEL_GUI_SCALE = 3;
+    /** The panel draws at GUI scale 2 at most, so more fits on screen than at the game's usual scale. */
+    private static final int PANEL_GUI_SCALE = 2;
     private static String lastModule = "";
     private static String lastPage = "";
     private static int lastScroll;
-    private static final int MAX_PANEL_WIDTH = 900;
-    private static final int PANEL_MARGIN = 18;
-    private static final int HEADER_HEIGHT = 58;
-    private static final int FOOTER_HEIGHT = 34;
-    private static final int ROW_HEIGHT = 62;
-    private static final int PORTAL_ROW_HEIGHT = 76;
+    private static final int MAX_PANEL_WIDTH = 1320;
+    private static final int PANEL_MARGIN = 12;
+    private static final int SIDEBAR_WIDTH = 118;
+    private static final int HEADER_HEIGHT = 34;
+    private static final int FOOTER_HEIGHT = 28;
+    private static final int ROW_HEIGHT = 30;
+    private static final int FIELD_ROW_HEIGHT = 62;
+    private static final int PORTAL_ROW_HEIGHT = 40;
+    private static final List<String> WORKSPACES = List.of("moderate", "build", "logs");
     private static final int EDITOR_FIELD_ROW_HEIGHT = 35;
     private static final int EDITOR_ACTION_ROW_HEIGHT = 26;
     private static final int EDITOR_SECTION_HEIGHT = 16;
@@ -44,10 +48,13 @@ public final class AdminPanelScreen extends Screen {
     private final Map<String, EditBox> editBoxes = new HashMap<>();
     private final Map<String, AdminPanelRegistry.AdminField> fieldDefinitions = new HashMap<>();
     private AdminPanelNetworking.PanelSnapshot snapshot;
+    /** Content area right of the sidebar; the whole panel is shellLeft..shellLeft + shellWidth. */
     private int left;
     private int top;
     private int panelWidth;
     private int panelHeight;
+    private int shellLeft;
+    private int shellWidth;
     private int scroll;
     private String pendingDangerousAction;
     private String expandedSelect;
@@ -106,19 +113,85 @@ public final class AdminPanelScreen extends Screen {
         editBoxes.clear();
         fieldDefinitions.clear();
         selectAnchor = null;
-        panelWidth = Math.min(MAX_PANEL_WIDTH, width - PANEL_MARGIN * 2);
-        panelHeight = Math.max(220, height - PANEL_MARGIN * 2);
-        left = (width - panelWidth) / 2;
+        shellWidth = Math.min(MAX_PANEL_WIDTH, width - PANEL_MARGIN * 2);
+        panelHeight = Math.max(200, height - PANEL_MARGIN * 2);
+        shellLeft = (width - shellWidth) / 2;
         top = (height - panelHeight) / 2;
+        left = shellLeft + SIDEBAR_WIDTH;
+        panelWidth = shellWidth - SIDEBAR_WIDTH;
+        buildSidebar();
         if (isDashboard()) buildDashboardButtons();
         else buildModuleButtons();
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), ignored -> onClose())
-                .bounds(left + panelWidth - 88, top + panelHeight - 27, 78, 20).build());
+                .bounds(left + panelWidth - 70, top + panelHeight - 24, 62, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Refresh"), ignored -> {
                     flushAutoSave();
                     request(snapshot.selectedModule(), pageId(snapshot));
                 })
-                .bounds(left + panelWidth - 174, top + panelHeight - 27, 78, 20).build());
+                .bounds(left + panelWidth - 136, top + panelHeight - 24, 62, 20).build());
+    }
+
+    /** Moderate / Build / Logs switch and the pages of the current workspace, from every module. */
+    private void buildSidebar() {
+        List<AdminPanelNetworking.NavTab> navigation = snapshot.navigation();
+        if (navigation == null || navigation.isEmpty()) return;
+        String workspace = currentWorkspace();
+        int x = shellLeft + 8;
+        int buttonWidth = SIDEBAR_WIDTH - 16;
+        int y = top + 10;
+        for (String option : WORKSPACES) {
+            AdminPanelNetworking.NavTab first = navigation.stream().filter(tab -> tab.workspace().equals(option))
+                    .findFirst().orElse(null);
+            if (first == null) continue;
+            Button button = Button.builder(Component.literal(workspaceName(option)), ignored -> {
+                flushAutoSave();
+                request(first.moduleId(), first.pageId());
+            }).bounds(x, y, buttonWidth, 18).build();
+            button.active = !option.equals(workspace);
+            addRenderableWidget(button);
+            y += 20;
+        }
+        y += 12;
+        AdminPanelNetworking.NavTab selected = selectedTab();
+        for (AdminPanelNetworking.NavTab tab : navigation) {
+            if (!tab.workspace().equals(workspace)) continue;
+            if (y + 16 > top + panelHeight - 6) break;
+            Button button = Button.builder(Component.literal(trim(tab.label(), buttonWidth - 8)), ignored -> {
+                flushAutoSave();
+                request(tab.moduleId(), tab.pageId());
+            }).bounds(x, y, buttonWidth, 16).build();
+            button.active = tab != selected;
+            addRenderableWidget(button);
+            y += 18;
+        }
+    }
+
+    private static String workspaceName(String workspace) {
+        return switch (workspace) {
+            case "moderate" -> "Moderate";
+            case "logs" -> "Logs";
+            default -> "Build";
+        };
+    }
+
+    /** The sidebar entry of the open page: same module, and the longest page ID the open page starts with. */
+    private AdminPanelNetworking.NavTab selectedTab() {
+        if (snapshot.navigation() == null || isDashboard()) return null;
+        String page = snapshot.page().id();
+        AdminPanelNetworking.NavTab best = null;
+        for (AdminPanelNetworking.NavTab tab : snapshot.navigation()) {
+            if (!tab.moduleId().equals(snapshot.selectedModule()) || !isSelectedTab(page, tab.pageId())) continue;
+            if (best == null || tab.pageId().length() > best.pageId().length()) best = tab;
+        }
+        return best;
+    }
+
+    private static String lastWorkspace = "moderate";
+
+    private String currentWorkspace() {
+        AdminPanelNetworking.NavTab selected = selectedTab();
+        if (selected != null) lastWorkspace = selected.workspace();
+        return lastWorkspace;
     }
 
     // Add one full-width, readable button for every registered mod module.
@@ -136,28 +209,6 @@ public final class AdminPanelScreen extends Screen {
     // Add Back, tab, and visible row action buttons for the selected module page.
     private void buildModuleButtons() {
         AdminPanelRegistry.AdminPage page = snapshot.page();
-        addRenderableWidget(Button.builder(Component.literal("‹ Mods"), ignored -> {
-                    flushAutoSave();
-                    request("", "");
-                })
-                .bounds(left + 10, top + 31, 64, 20).build());
-        int tabX = left + 80;
-        int tabY = top + 31;
-        for (AdminPanelRegistry.AdminTab tab : page.tabs()) {
-            int tabWidth = Math.max(52, font.width(tab.label()) + 14);
-            if (tabX + tabWidth > left + panelWidth - 10) {
-                tabX = left + 10;
-                tabY += 24;
-            }
-            Button button = Button.builder(Component.literal(tab.label()), ignored -> {
-                        flushAutoSave();
-                        request(snapshot.selectedModule(), tab.id());
-                    })
-                    .bounds(tabX, tabY, tabWidth, 20).build();
-            button.active = !isSelectedTab(page.id(), tab.id());
-            addRenderableWidget(button);
-            tabX += tabWidth + 4;
-        }
         List<AdminPanelRegistry.AdminEntry> entries = page.entries();
         if (page.layout() == AdminPanelRegistry.PageLayout.EDITOR) {
             buildEditorWidgets();
@@ -177,8 +228,8 @@ public final class AdminPanelScreen extends Screen {
             int entryIndex = scroll + visibleIndex;
             AdminPanelRegistry.AdminEntry entry = entries.get(entryIndex);
             int y = contentTop() + visibleIndex * (rowHeight() + ROW_GAP);
-            addFields(entry, y, left + 24, panelWidth - 48, false);
-            addActionButtons(entry, y, left + panelWidth - 18, false);
+            addFields(entry, y, left + 18, panelWidth - 36, false);
+            addActionButtons(entry, y, left + panelWidth - 14, false);
         }
         addSelectOptions();
     }
@@ -413,18 +464,20 @@ public final class AdminPanelScreen extends Screen {
         graphics.pose().pushMatrix();
         graphics.pose().scale(panelRenderScale, panelRenderScale);
         graphics.fill(0, 0, width, height, 0xB0000000);
-        graphics.fill(left, top, left + panelWidth, top + panelHeight, 0xF012151B);
-        graphics.fill(left, top, left + 4, top + panelHeight, 0xFF7C5CDA);
-        graphics.text(font, Component.literal(isDashboard() ? "Administration" : snapshot.page().title()),
-                left + 14, top + 10, 0xFFF2F2F5, false);
-        String subtitle = isDashboard() ? "Choose a mod to manage" : snapshot.page().subtitle();
-        graphics.text(font, Component.literal(trim(subtitle, panelWidth - 28)),
-                left + 14, top + 21, 0xFF9CA3AF, false);
+        graphics.fill(shellLeft, top, shellLeft + shellWidth, top + panelHeight, 0xF012151B);
+        graphics.fill(shellLeft, top, left, top + panelHeight, 0xF00C0E13);
+        graphics.fill(left, top, left + 1, top + panelHeight, 0xFF2A2F3A);
+        graphics.fill(shellLeft, top, shellLeft + 2, top + panelHeight, 0xFF7C5CDA);
+        graphics.text(font, Component.literal(trim(isDashboard() ? "Administration" : snapshot.page().title(),
+                panelWidth / 2)), left + 12, top + 8, 0xFFF2F2F5, false);
+        String subtitle = isDashboard() ? "" : snapshot.page().subtitle();
+        graphics.text(font, Component.literal(trim(subtitle, panelWidth - 120)),
+                left + 12, top + 20, 0xFF9CA3AF, false);
         if (isDashboard()) renderDashboard(graphics);
         else renderEntries(graphics);
         if (snapshot.notice() != null && !snapshot.notice().isBlank()) {
-            graphics.text(font, Component.literal(trim(snapshot.notice(), panelWidth - 190)), left + 14,
-                    top + panelHeight - 21, snapshot.error() ? 0xFFFF6B6B : 0xFF72D69C, false);
+            graphics.text(font, Component.literal(trim(snapshot.notice(), panelWidth - 160)), left + 12,
+                    top + panelHeight - 18, snapshot.error() ? 0xFFFF6B6B : 0xFF72D69C, false);
         }
         super.extractRenderState(graphics, (int) (mouseX / panelRenderScale),
                 (int) (mouseY / panelRenderScale), delta);
@@ -469,17 +522,17 @@ public final class AdminPanelScreen extends Screen {
         for (int index = 0; index < visible && scroll + index < entries.size(); index++) {
             AdminPanelRegistry.AdminEntry entry = entries.get(scroll + index);
             int y = contentTop() + index * (rowHeight() + ROW_GAP);
-            graphics.fill(left + 14, y, left + panelWidth - 14, y + rowHeight(), 0xFF1D222B);
-            graphics.fill(left + 14, y, left + 17, y + rowHeight(), toneColor(entry.tone()));
+            graphics.fill(left + 10, y, left + panelWidth - 10, y + rowHeight(), 0xFF1D222B);
+            graphics.fill(left + 10, y, left + 12, y + rowHeight(), toneColor(entry.tone()));
             int actionWidth = actionWidth(entry);
-            int previewWidth = entry.preview() == null ? 0 : 66;
-            int textWidth = Math.max(80, panelWidth - 48 - actionWidth - previewWidth);
-            int textX = left + 24 + previewWidth;
-            if (entry.preview() != null) renderPreview(graphics, entry.preview(), left + 23, y + 9, 56, 56);
+            int previewWidth = entry.preview() == null ? 0 : 28;
+            int textWidth = Math.max(80, panelWidth - 40 - actionWidth - previewWidth);
+            int textX = left + 18 + previewWidth;
+            if (entry.preview() != null) renderPreview(graphics, entry.preview(), left + 16, y + 3, 24, 24);
             graphics.text(font, Component.literal(trim(entry.title(), textWidth)),
-                    textX, y + 10, 0xFFF0F1F3, false);
+                    textX, y + 5, 0xFFF0F1F3, false);
             graphics.text(font, Component.literal(trim(entry.detail(), textWidth)),
-                    textX, y + 24, 0xFFA7AFBA, false);
+                    textX, y + 17, 0xFFA7AFBA, false);
         }
         if (entries.size() > visible) {
             String position = (scroll + 1) + "–" + Math.min(entries.size(), scroll + visible)
@@ -498,15 +551,15 @@ public final class AdminPanelScreen extends Screen {
             int y = placement.y();
             int cardWidth = placement.width();
             graphics.fill(x, y, x + cardWidth, y + PORTAL_ROW_HEIGHT, 0xFF1D222B);
-            graphics.fill(x, y, x + 3, y + PORTAL_ROW_HEIGHT, toneColor(entry.tone()));
-            int previewWidth = entry.preview() == null ? 0 : 58;
-            if (entry.preview() != null) renderPreview(graphics, entry.preview(), x + 9, y + 10, 50, 56);
+            graphics.fill(x, y, x + 2, y + PORTAL_ROW_HEIGHT, toneColor(entry.tone()));
+            int previewWidth = entry.preview() == null ? 0 : 36;
+            if (entry.preview() != null) renderPreview(graphics, entry.preview(), x + 6, y + 4, 32, 32);
             int actions = actionWidth(entry);
-            int textX = x + 10 + previewWidth;
-            int textWidth = Math.max(45, cardWidth - 20 - previewWidth - actions);
-            graphics.text(font, Component.literal(trim(entry.title(), textWidth)), textX, y + 17,
+            int textX = x + 8 + previewWidth;
+            int textWidth = Math.max(45, cardWidth - 16 - previewWidth - actions);
+            graphics.text(font, Component.literal(trim(entry.title(), textWidth)), textX, y + 9,
                     0xFFF0F1F3, false);
-            graphics.text(font, Component.literal(trim(entry.detail(), textWidth)), textX, y + 32,
+            graphics.text(font, Component.literal(trim(entry.detail(), textWidth)), textX, y + 22,
                     0xFFA7AFBA, false);
         }
         int columns = previewColumns();
@@ -527,15 +580,15 @@ public final class AdminPanelScreen extends Screen {
         int rows = visibleRows();
         int totalRows = (entries.size() + columns - 1) / columns;
         scroll = Math.max(0, Math.min(scroll, Math.max(0, totalRows - rows)));
-        int gap = 7;
-        int available = panelWidth - 28;
+        int gap = 5;
+        int available = panelWidth - 20;
         int cardWidth = (available - gap * (columns - 1)) / columns;
         int first = scroll * columns;
         int capacity = rows * columns;
         for (int slot = 0; slot < capacity && first + slot < entries.size(); slot++) {
             int column = slot % columns;
             int row = slot / columns;
-            int x = left + 14 + column * (cardWidth + gap);
+            int x = left + 10 + column * (cardWidth + gap);
             int y = contentTop() + row * (PORTAL_ROW_HEIGHT + ROW_GAP);
             placements.add(new PreviewPlacement(first + slot, entries.get(first + slot), x, y, cardWidth));
         }
@@ -544,7 +597,7 @@ public final class AdminPanelScreen extends Screen {
 
     // Return the responsive preview-grid column count for the current scaled window width.
     private int previewColumns() {
-        return panelWidth >= 700 ? 2 : 1;
+        return panelWidth >= 1000 ? 3 : panelWidth >= 620 ? 2 : 1;
     }
 
     // Render a dense form with shared section headings, aligned labels, and subtle row backgrounds.
@@ -753,18 +806,7 @@ public final class AdminPanelScreen extends Screen {
     }
 
     private int moduleHeaderHeight() {
-        if (isDashboard()) return HEADER_HEIGHT;
-        int x = 80;
-        int rows = 1;
-        for (AdminPanelRegistry.AdminTab tab : snapshot.page().tabs()) {
-            int tabWidth = Math.max(52, font.width(tab.label()) + 14);
-            if (x + tabWidth > panelWidth - 10) {
-                rows++;
-                x = 10;
-            }
-            x += tabWidth + 4;
-        }
-        return HEADER_HEIGHT + (rows - 1) * 24;
+        return HEADER_HEIGHT;
     }
 
     // Calculate how many complete cards fit between navigation and footer areas.
@@ -774,8 +816,10 @@ public final class AdminPanelScreen extends Screen {
 
     // Choose the card height requested by the current server-provided page layout.
     private int rowHeight() {
-        return snapshot.page() != null && snapshot.page().layout() == AdminPanelRegistry.PageLayout.PREVIEW_CARDS
-                ? PORTAL_ROW_HEIGHT : ROW_HEIGHT;
+        if (snapshot.page() == null) return ROW_HEIGHT;
+        if (snapshot.page().layout() == AdminPanelRegistry.PageLayout.PREVIEW_CARDS) return PORTAL_ROW_HEIGHT;
+        // Plain pages with input fields keep room for a label line above the fields.
+        return snapshot.page().entries().stream().anyMatch(entry -> !entry.fields().isEmpty()) ? FIELD_ROW_HEIGHT : ROW_HEIGHT;
     }
 
     // Keep a parent tab selected while one of its nested editor pages is open.

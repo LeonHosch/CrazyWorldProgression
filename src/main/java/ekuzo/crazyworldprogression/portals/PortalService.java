@@ -403,6 +403,16 @@ public final class PortalService {
         }
     }
 
+    /** Moderation: takes a player out of their instance or workshop, also during an encounter. */
+    public static boolean sendOut(ServerPlayer player) {
+        MinecraftServer server = player.level().getServer();
+        Identifier current = player.level().dimension().identifier();
+        boolean inInstance = PortalData.get(server).instances().containsKey(current.toString());
+        if (!inInstance && !PocketEditorService.isEditorDimension(current)) return false;
+        teleportBack(server, player);
+        return true;
+    }
+
     // Let a player leave a temporary instance immediately using their remembered entry position.
     public static boolean leave(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();

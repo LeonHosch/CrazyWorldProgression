@@ -483,7 +483,7 @@ CWP generates commands from every registered currency. In these examples, `renow
 | `/influence` | Player | Show the shared global balance |
 | `/influence give\|take\|set <amount>` | Game master | Change the shared global wallet |
 | `/skill` | Player | Open the skill-tree screen |
-| `/cwp admin` | Game master | Open the modular CWP administration dashboard |
+| `/cwp admin` | Game master | Open the administration panel: **Moderate** (players, instances, events, kingdom, Veil), **Build** (pockets, portals, buildings, mobs and scripts, loot pools, currencies, skill trees, anomalies, advancements) and **Logs** (recent server log, status pages) |
 | `/cwp` or `/cwp status` | Game master | Show loaded currencies, trees, stat functions, events, handlers, active events, and blackout state |
 | `/cwp help` | Game master | Show the available CWP administration branches |
 | `/cwp events` | Game master | Summarize the random-event scheduler |

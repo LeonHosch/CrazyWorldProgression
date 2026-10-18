@@ -35,7 +35,8 @@ public final class AdminPanelRegistry {
 
     /** One top-level mod button and its server-owned page and action providers. */
     public record AdminModule(Identifier id, String displayName, String description, String icon,
-                              String defaultPage, PageProvider pages, ActionHandler actions) {
+                              String defaultPage, PageProvider pages, ActionHandler actions,
+                              List<AdminTab> navigation) {
         // Validate extension metadata early so a broken integration cannot break the admin screen later.
         public AdminModule {
             if (id == null || displayName == null || displayName.isBlank() || description == null
@@ -43,6 +44,14 @@ public final class AdminPanelRegistry {
                     || pages == null || actions == null) {
                 throw new IllegalArgumentException("CWP admin module fields must be complete");
             }
+            navigation = navigation == null ? List.of() : List.copyOf(navigation);
+        }
+
+        // A module without navigation entries gets one Build entry for its default page.
+        public AdminModule(Identifier id, String displayName, String description, String icon,
+                           String defaultPage, PageProvider pages, ActionHandler actions) {
+            this(id, displayName, description, icon, defaultPage, pages, actions,
+                    List.of(new AdminTab(defaultPage, displayName, BUILD)));
         }
     }
 
@@ -76,8 +85,21 @@ public final class AdminPanelRegistry {
         EDITOR
     }
 
-    /** Compact page selector shown consistently across all registered modules. */
-    public record AdminTab(String id, String label) {
+    /** Workspaces the panel's navigation is split into. */
+    public static final String MODERATE = "moderate";
+    public static final String BUILD = "build";
+    public static final String LOGS = "logs";
+
+    /** One page in the panel's navigation; workspace is MODERATE, BUILD or LOGS. */
+    public record AdminTab(String id, String label, String workspace) {
+        public AdminTab {
+            if (workspace == null || workspace.isBlank()) workspace = BUILD;
+        }
+
+        // Tabs registered without a workspace go to Build.
+        public AdminTab(String id, String label) {
+            this(id, label, BUILD);
+        }
     }
 
     /** One status card with optional server-authoritative action buttons. */

@@ -86,16 +86,23 @@ public final class CwpAdminModule {
     private static final List<String> DAYTIMES = List.of("Dawn", "Morning", "Noon", "Dusk", "Night", "Midnight");
     private static final List<String> WEATHER_STATES = List.of("Clear", "Rain", "Thunder");
     private static final List<String> DIFFICULTIES = List.of("1 skull", "2 skulls", "3 skulls", "4 skulls", "5 skulls");
+    private static final String PLAYERS = "players";
+    private static final String LOGS = "logs";
     private static final List<AdminPanelRegistry.AdminTab> TABS = List.of(
-            new AdminPanelRegistry.AdminTab(OVERVIEW, "Overview"),
-            new AdminPanelRegistry.AdminTab(POCKETS, "Pockets"),
-            new AdminPanelRegistry.AdminTab(PORTALS, "Portals"),
-            new AdminPanelRegistry.AdminTab(BUILDINGS, "Buildings"),
-            new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot Pools"),
-            new AdminPanelRegistry.AdminTab(CURRENCIES, "Currency"),
-            new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill Trees"),
-            new AdminPanelRegistry.AdminTab(MOBFORGE, "MobForge"),
-            new AdminPanelRegistry.AdminTab(EVENTS, "Events"));
+            new AdminPanelRegistry.AdminTab(PLAYERS, "Players", AdminPanelRegistry.MODERATE),
+            new AdminPanelRegistry.AdminTab(POCKET_INSTANCES, "Instances", AdminPanelRegistry.MODERATE),
+            new AdminPanelRegistry.AdminTab(EVENTS, "Events", AdminPanelRegistry.MODERATE),
+            new AdminPanelRegistry.AdminTab(POCKETS, "Pockets", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(PORTALS, "Portals", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(BUILDINGS, "Buildings", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(MOBFORGE, "Mobs & scripts", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot pools", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(CURRENCIES, "Currencies", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill trees", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(LOGS, "Server log", AdminPanelRegistry.LOGS),
+            new AdminPanelRegistry.AdminTab(OVERVIEW, "CWP status", AdminPanelRegistry.LOGS));
+    /** Per admin: whether the server log shows only warnings and errors. */
+    private static final Map<java.util.UUID, Boolean> LOG_PROBLEMS_ONLY = new java.util.HashMap<>();
 
     // Prevent construction of the native module registrar.
     private CwpAdminModule() {
@@ -106,7 +113,8 @@ public final class CwpAdminModule {
         AdminPanelRegistry.register(new AdminPanelRegistry.AdminModule(
                 CrazyWorldProgression.id("admin"), "Crazy World Progression",
                 "Framework health, pockets, MobForge, currencies, skill trees and random events.",
-                "minecraft:nether_star", OVERVIEW, CwpAdminModule::page, CwpAdminModule::action));
+                "minecraft:nether_star", OVERVIEW, CwpAdminModule::page, CwpAdminModule::action, TABS));
+        AdminLog.install();
     }
 
     /** Opens the mob editor in the admin panel (used by /mobforge editor). */
@@ -145,6 +153,8 @@ public final class CwpAdminModule {
             return currencyEditorPage(player, id);
         }
         return switch (pageId) {
+            case PLAYERS -> playersPage(player);
+            case LOGS -> logsPage(player);
             case POCKETS -> pocketsPage(player);
             case PORTALS -> portalsPage(player);
             case BUILDINGS -> buildingsPage(player);
@@ -157,6 +167,54 @@ public final class CwpAdminModule {
             case EVENTS -> eventsPage(player);
             default -> overviewPage(player);
         };
+    }
+
+    /** Moderation: every online player with where they are, and quick actions. */
+    private static AdminPanelRegistry.AdminPage playersPage(ServerPlayer viewer) {
+        MinecraftServer server = viewer.level().getServer();
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        List<ServerPlayer> players = new ArrayList<>(server.getPlayerList().getPlayers());
+        players.sort(java.util.Comparator.comparing(p -> p.getGameProfile().name().toLowerCase(java.util.Locale.ROOT)));
+        for (ServerPlayer target : players) {
+            Identifier dimension = target.level().dimension().identifier();
+            boolean instance = PortalService.inInstance(target);
+            boolean workshop = PocketEditorService.isEditorDimension(dimension);
+            String where = instance ? "in instance " + dimension.getPath() : workshop ? "in workshop " + dimension.getPath()
+                    : dimension.getPath() + " " + target.blockPosition().toShortString();
+            String detail = where + " · " + target.gameMode().getName() + " · "
+                    + Math.round(target.getHealth()) + "/" + Math.round(target.getMaxHealth()) + " hp";
+            List<AdminPanelRegistry.AdminAction> actions = new ArrayList<>();
+            if (!target.getUUID().equals(viewer.getUUID()))
+                actions.add(new AdminPanelRegistry.AdminAction("player.tp|" + target.getUUID(), "Teleport to", false));
+            if (instance || workshop)
+                actions.add(new AdminPanelRegistry.AdminAction("player.out|" + target.getUUID(), "Send out", true));
+            entries.add(new AdminPanelRegistry.AdminEntry(target.getGameProfile().name(), detail, GOOD, List.of(),
+                    actions, new AdminPanelRegistry.EntryPreview("item", "minecraft:player_head", 0)));
+        }
+        return new AdminPanelRegistry.AdminPage(PLAYERS, "Players", players.size() + " online", TABS, entries,
+                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    /** Recent server log lines: warnings and errors from everything, normal messages from CWP and Echelon. */
+    private static AdminPanelRegistry.AdminPage logsPage(ServerPlayer player) {
+        boolean problemsOnly = LOG_PROBLEMS_ONLY.getOrDefault(player.getUUID(), false);
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(new AdminPanelRegistry.AdminEntry(problemsOnly ? "Showing warnings and errors" : "Showing everything",
+                "Newest first · kept in memory until the server restarts", NORMAL, List.of(),
+                List.of(new AdminPanelRegistry.AdminAction("logs.toggle", problemsOnly ? "Show all" : "Only problems", false),
+                        new AdminPanelRegistry.AdminAction("logs.clear", "Clear", true)), null));
+        java.time.format.DateTimeFormatter time = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+                .withZone(java.time.ZoneId.systemDefault());
+        for (AdminLog.Line line : AdminLog.lines(problemsOnly, 200)) {
+            AdminPanelRegistry.Tone tone = line.level().equals("ERROR") || line.level().equals("FATAL")
+                    ? AdminPanelRegistry.Tone.DANGER
+                    : line.level().equals("WARN") ? AdminPanelRegistry.Tone.WARNING : NORMAL;
+            entries.add(new AdminPanelRegistry.AdminEntry(time.format(line.time()) + "  " + line.message(),
+                    line.level() + " · " + line.source(), tone, List.of(), List.of(), null));
+        }
+        if (entries.size() == 1) entries.add(AdminPanelRegistry.AdminEntry.info("Nothing logged yet", ""));
+        return new AdminPanelRegistry.AdminPage(LOGS, "Server log", (entries.size() - 1) + " line(s)", TABS, entries,
+                AdminPanelRegistry.PageLayout.STANDARD);
     }
 
     // Assemble the framework health overview and its safe refresh control.
@@ -733,6 +791,28 @@ public final class CwpAdminModule {
         if (AdminLootPoolEditor.owns(pageId) && actionId.startsWith("loot."))
             return AdminLootPoolEditor.action(player, actionId, values);
         MinecraftServer server = player.level().getServer();
+        if (actionId.equals("logs.toggle")) {
+            LOG_PROBLEMS_ONLY.merge(player.getUUID(), true, (old, ignored) -> !old);
+            return AdminPanelRegistry.ActionResult.success("");
+        }
+        if (actionId.equals("logs.clear")) {
+            AdminLog.clear();
+            return AdminPanelRegistry.ActionResult.success("Cleared the log view");
+        }
+        if (actionId.startsWith("player.tp|") || actionId.startsWith("player.out|")) {
+            ServerPlayer target = server.getPlayerList().getPlayer(
+                    java.util.UUID.fromString(actionId.substring(actionId.indexOf('|') + 1)));
+            if (target == null) return AdminPanelRegistry.ActionResult.failure("That player is offline");
+            String name = target.getGameProfile().name();
+            if (actionId.startsWith("player.tp|")) {
+                player.teleportTo(target.level(), target.getX(), target.getY(), target.getZ(), java.util.Set.of(),
+                        player.getYRot(), player.getXRot(), false);
+                return AdminPanelRegistry.ActionResult.success("Teleported to " + name);
+            }
+            return PortalService.sendOut(target)
+                    ? AdminPanelRegistry.ActionResult.success("Sent " + name + " out")
+                    : AdminPanelRegistry.ActionResult.failure(name + " is not in an instance or workshop");
+        }
         ScriptRoute scriptRoute = scriptRoute(pageId);
         if (scriptRoute != null) return AdminScriptEditor.action(player, pageId, actionId, values,
                 scriptRoute.backPage(), scriptRoute.pocketId(), scriptRoute.scriptId());

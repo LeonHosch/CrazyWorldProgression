@@ -776,8 +776,8 @@ public final class CwpAdminModule {
             all.put(template.id(), (new AdminPanelRegistry.AdminEntry(template.id(),
                     template.entity() + " · " + template.ai().mode() + " AI",
                     NORMAL, List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_EDIT + template.id()),
-                            new AdminPanelRegistry.AdminAction("mob.template.spawn|" + template.id(),
-                                    "Spawn here", false)), null)));
+                            new AdminPanelRegistry.AdminAction("mob.template.delete|" + template.id(),
+                                    "Delete", true)), null)));
         }
         entries.addAll(AdminCategories.sectioned(server, "mob", "All mobs", all, MOB_MOBS));
         if (!MobForge.mobs().all().isEmpty()) entries.add(in("Registered by mods", new AdminPanelRegistry.AdminEntry(
@@ -798,7 +798,7 @@ public final class CwpAdminModule {
             AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(script.id(),
                     script.steps().size() + " steps · " + runs + " running", runs > 0 ? GOOD : NORMAL, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_SCRIPT_EDIT + script.id()),
-                            new AdminPanelRegistry.AdminAction("mob.script.run|" + script.id(), "Run here", false)), null);
+                            new AdminPanelRegistry.AdminAction("mob.script.delete|" + script.id(), "Delete", true)), null);
             if (runs > 0) active.add(in("Active · running now", entry));
             all.put(script.id(), entry);
         }
@@ -868,6 +868,25 @@ public final class CwpAdminModule {
             return AdminLootPoolEditor.action(player, actionId, values);
         MinecraftServer server = player.level().getServer();
         if (AdminCategories.owns(pageId)) return AdminCategories.action(player, pageId, actionId, values);
+        if (actionId.startsWith("mob.template.delete|")) {
+            String id = actionId.substring(actionId.indexOf('|') + 1);
+            try {
+                return MobForge.TEMPLATES.delete(id) ? AdminPanelRegistry.ActionResult.success("Deleted mob " + id)
+                        : AdminPanelRegistry.ActionResult.failure("Unknown mob " + id);
+            } catch (IOException exception) {
+                return AdminPanelRegistry.ActionResult.failure("Could not delete mob: " + exception.getMessage());
+            }
+        }
+        if (actionId.startsWith("mob.script.delete|")) {
+            String id = actionId.substring(actionId.indexOf('|') + 1);
+            try {
+                if (!MobForge.SCRIPTS.delete(id)) return AdminPanelRegistry.ActionResult.failure("Unknown script " + id);
+            } catch (IOException exception) {
+                return AdminPanelRegistry.ActionResult.failure("Could not delete script: " + exception.getMessage());
+            }
+            PocketEditorService.detachScriptEverywhere(server, id);
+            return AdminPanelRegistry.ActionResult.success("Deleted script " + id);
+        }
         if (actionId.equals("logs.toggle")) {
             LOG_PROBLEMS_ONLY.merge(player.getUUID(), true, (old, ignored) -> !old);
             return AdminPanelRegistry.ActionResult.success("");

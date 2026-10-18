@@ -1103,13 +1103,21 @@ public final class AdminPanelScreen extends Screen {
         }
         float size = Math.max(1f, Math.min(height / Math.max(0.3f, entity.getBbHeight()),
                 width / Math.max(0.3f, entity.getBbWidth())) * 0.8f);
+        // The model is drawn into its own picture box in real screen coordinates, which ignores the panel's own
+        // scaling; so the box is converted to unscaled coordinates here, and the panel scale is undone meanwhile.
+        float scale = panelRenderScale;
+        int x0 = Math.round(x * scale), y0 = Math.round(y * scale);
+        int x1 = Math.round((x + width) * scale), y1 = Math.round((y + height) * scale);
+        graphics.pose().pushMatrix();
+        graphics.pose().identity();
         try {
             net.minecraft.client.gui.screens.inventory.InventoryScreen.extractEntityInInventoryFollowsMouse(graphics,
-                    x, y, x + width, y + height, (int) size, 0.0625f, x + width / 2f, y + height / 2f, entity);
+                    x0, y0, x1, y1, Math.max(1, Math.round(size * scale)), 0.0625f, (x0 + x1) / 2f, (y0 + y1) / 2f, entity);
         } catch (RuntimeException exception) {
             // Some entities cannot be drawn outside the world; show their spawn egg from now on.
             entityCache.put(entityId, java.util.Optional.empty());
         }
+        graphics.pose().popMatrix();
     }
 
     private final Map<String, java.util.Optional<net.minecraft.world.entity.LivingEntity>> entityCache = new HashMap<>();

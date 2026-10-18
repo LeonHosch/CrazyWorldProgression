@@ -146,6 +146,10 @@ public final class CwpAdminModule {
         }
         if (pageId.equals(PORTAL_NEW)) return portalEditorPage(player, null);
         if (pageId.equals(BUILDING_NEW)) return newBuildingPage(player);
+        if (pageId.startsWith(BUILDINGS + "/edit/")) {
+            Identifier id = Identifier.tryParse(pageId.substring((BUILDINGS + "/edit/").length()));
+            if (id != null) return buildingEditorPage(player, id);
+        }
         if (pageId.startsWith(PORTAL_EDIT)) {
             Identifier id = Identifier.tryParse(pageId.substring(PORTAL_EDIT.length()));
             return portalEditorPage(player, id);
@@ -376,13 +380,13 @@ public final class CwpAdminModule {
                                     new AdminPanelRegistry.AdminAction("pocket.script.remove|" + scriptId,
                                             "Remove", true))));
         }
-        entries.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Automatic saving",
-                "Changes save after 10 seconds of inactivity, periodically while building, and when leaving.",
-                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back to pockets", POCKETS))));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Save",
+                "Saves the settings on this page. Blocks you build in the workshop are saved when you leave it.",
+                List.of(), List.of(AdminPanelRegistry.AdminAction.wide("pocket.save|" + requestedId, "Save", false),
+                        AdminPanelRegistry.AdminAction.navigate("Back to pockets", POCKETS))));
         return new AdminPanelRegistry.AdminPage(POCKET_EDIT + requestedId,
-                "Edit pocket", "Private build dimension and automatic capture",
-                TABS, entries, AdminPanelRegistry.PageLayout.EDITOR,
-                "pocket.autosave|" + requestedId);
+                "Edit pocket", "Private build dimension",
+                TABS, entries, AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     // List portal definitions independently of their placements.
@@ -427,13 +431,44 @@ public final class CwpAdminModule {
             all.put(building.id().toString(), (new AdminPanelRegistry.AdminEntry(building.id().toString(),
                     building.sizeX() + " × " + building.sizeY() + " × " + building.sizeZ()
                             + " blocks · by " + building.author(), NORMAL, List.of(),
-                    List.of(new AdminPanelRegistry.AdminAction("building.delete|" + building.id(),
+                    List.of(AdminPanelRegistry.AdminAction.navigate("Edit", BUILDINGS + "/edit/" + building.id()),
+                            new AdminPanelRegistry.AdminAction("building.delete|" + building.id(),
                             "Delete", true)), null)));
         }
         entries.addAll(AdminCategories.sectioned(player.level().getServer(), "building", "All buildings", all, BUILDINGS));
         return new AdminPanelRegistry.AdminPage(BUILDINGS, "Buildings",
                 "Saved building copies for scripts", TABS, entries,
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
+    /** A saved building: its details, and replacing its blocks with a new selection. */
+    private static AdminPanelRegistry.AdminPage buildingEditorPage(ServerPlayer player, Identifier id) {
+        BuildingService.BuildingInfo building = BuildingService.buildings(player.level().getServer()).stream()
+                .filter(info -> info.id().equals(id)).findFirst().orElse(null);
+        if (building == null) return buildingsPage(player);
+        var selection = AreaSelectionService.selection(player).filter(value ->
+                BuildingService.SELECTION_OWNER.equals(value.owner())).orElse(null);
+        String status = selection == null ? "Select corners to choose the new blocks"
+                : selection.complete() ? selection.minimum().toShortString() + " to "
+                        + selection.maximum().toShortString() + " · " + selection.volume() + " blocks"
+                        : "Select both corners in the world";
+        List<AdminPanelRegistry.AdminEntry> entries = List.of(
+                AdminPanelRegistry.AdminEntry.editor("Building", "Identity",
+                        building.sizeX() + " × " + building.sizeY() + " × " + building.sizeZ() + " blocks · by "
+                                + building.author(),
+                        List.of(AdminPanelRegistry.AdminField.readOnly("build_id", "Building ID", id.toString())),
+                        List.of()),
+                AdminPanelRegistry.AdminEntry.editor("Replace blocks", "New block range", status,
+                        List.of(), List.of(new AdminPanelRegistry.AdminAction("building.select", "Select corners", false))),
+                AdminPanelRegistry.AdminEntry.editor("Replace blocks", "Save over this building",
+                        "Scripts using this building place the new blocks from now on.", List.of(),
+                        List.of(new AdminPanelRegistry.AdminAction("building.recapture|" + id, "Save new blocks", true))),
+                AdminPanelRegistry.AdminEntry.editor("Actions", "Delete building",
+                        "Only possible while no script uses it.", List.of(),
+                        List.of(new AdminPanelRegistry.AdminAction("building.delete|" + id, "Delete", true),
+                                AdminPanelRegistry.AdminAction.navigate("Back to buildings", BUILDINGS))));
+        return new AdminPanelRegistry.AdminPage(BUILDINGS + "/edit/" + id, "Edit building", id.toString(), TABS,
+                entries, AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     private static AdminPanelRegistry.AdminPage newBuildingPage(ServerPlayer player) {
@@ -591,20 +626,21 @@ public final class CwpAdminModule {
         if (!creating) addScheduleEditor(entries, schedule);
         String saveAction = creating ? "portal.create" : "";
         entries.add(AdminPanelRegistry.AdminEntry.editor("Actions",
-                creating ? "Create portal" : "Changes apply automatically",
+                creating ? "Create portal" : "Save",
                 creating ? "Creates the definition. Add locations from its editor afterward."
-                        : "Text applies after a short pause; dropdowns apply immediately.",
+                        : "Saves every change on this page.",
                 List.of(),
                 creating ? List.of(new AdminPanelRegistry.AdminAction(saveAction, "Create", false),
                                 AdminPanelRegistry.AdminAction.navigate("Cancel", PORTALS))
-                        : List.of(AdminPanelRegistry.AdminAction.navigate("Back to portals", PORTALS))));
+                        : List.of(new AdminPanelRegistry.AdminAction("portal.apply|" + id, "Save", false),
+                                AdminPanelRegistry.AdminAction.navigate("Back to portals", PORTALS))));
         return new AdminPanelRegistry.AdminPage(creating ? PORTAL_NEW : PORTAL_EDIT + id,
                 creating ? "Create portal" : "Edit · " + portal.effectiveDisplayName(),
                 creating ? "General, style, gameplay, then optional time gates"
-                        : portal.id() + " · changes save automatically · linked to "
+                        : portal.id() + " · linked to "
                         + (portal.isExit() ? "Exit" : portal.isCoordinates() ? "Coordinates" : portal.templateId()),
                 TABS, entries,
-                AdminPanelRegistry.PageLayout.EDITOR, creating ? "" : "portal.autosave|" + id);
+                AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     // Append periodic and calendar scheduling controls to an existing portal editor.
@@ -888,6 +924,11 @@ public final class CwpAdminModule {
             AreaSelectionService.begin(player, BuildingService.SELECTION_OWNER);
             return AdminPanelRegistry.ActionResult.success("Select the first and second corners in the world");
         }
+        if (actionId.startsWith("building.recapture|")) {
+            Identifier id = Identifier.parse(actionId.substring(actionId.indexOf('|') + 1));
+            BuildingService.capture(player, id, true);
+            return AdminPanelRegistry.ActionResult.success("Saved new blocks for " + id, BUILDINGS + "/edit/" + id);
+        }
         if (actionId.equals("building.capture")) {
             Identifier id = formId(values, "build_id");
             BuildingService.capture(player, id);
@@ -1023,10 +1064,10 @@ public final class CwpAdminModule {
             return AdminPanelRegistry.ActionResult.success("Spawned " + id + " in "
                     + player.level().dimension().identifier());
         }
-        if (parts.length == 2 && parts[0].equals("portal.autosave")) {
+        if (parts.length == 2 && (parts[0].equals("portal.autosave") || parts[0].equals("portal.apply"))) {
             return patchPortal(player, Identifier.parse(parts[1]), values);
         }
-        if (parts.length == 2 && parts[0].equals("pocket.autosave")) {
+        if (parts.length == 2 && (parts[0].equals("pocket.autosave") || parts[0].equals("pocket.save"))) {
             Identifier id = pocketPageId(pageId);
             if (!id.equals(Identifier.parse(parts[1]))) {
                 return AdminPanelRegistry.ActionResult.failure("Pocket editor changed");
@@ -1039,7 +1080,7 @@ public final class CwpAdminModule {
             int z = values.containsKey("pocket_spawn_z")
                     ? Integer.parseInt(required(values, "pocket_spawn_z")) : current.getZ();
             PocketEditorService.setEntry(server, id, new BlockPos(x, y, z));
-            return AdminPanelRegistry.ActionResult.success("Pocket spawn updated");
+            return AdminPanelRegistry.ActionResult.success("Saved pocket " + id);
         }
         if (parts.length == 2 && parts[0].equals("portal.save")) {
             return updatePortal(player, Identifier.parse(parts[1]), values);

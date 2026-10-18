@@ -29,13 +29,13 @@ final class UnsavedChangesScreen extends Screen {
         int buttonWidth = (WIDTH - 16 - (buttons - 1) * 4) / buttons;
         int bx = x + 8;
         if (save != null) {
-            addRenderableWidget(Button.builder(Component.literal("Save and leave"), ignored -> {
+            addRenderableWidget(Button.builder(Component.literal("Save"), ignored -> {
                 minecraft.gui.setScreen(parent);
                 save.run();
             }).bounds(bx, y, buttonWidth, 20).build());
             bx += buttonWidth + 4;
         }
-        addRenderableWidget(Button.builder(Component.literal("Leave without saving"), ignored -> {
+        addRenderableWidget(Button.builder(Component.literal("Discard"), ignored -> {
             minecraft.gui.setScreen(parent);
             discard.run();
         }).bounds(bx, y, buttonWidth, 20).build());

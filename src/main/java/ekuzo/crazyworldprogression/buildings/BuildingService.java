@@ -47,8 +47,15 @@ public final class BuildingService {
     }
 
     public static BuildingInfo capture(ServerPlayer player, Identifier id) {
-        if (building(player.level().getServer(), id) != null)
+        return capture(player, id, false);
+    }
+
+    /** replace: overwrite an existing building's blocks with the current selection (its ID stays). */
+    public static BuildingInfo capture(ServerPlayer player, Identifier id, boolean replace) {
+        if (!replace && building(player.level().getServer(), id) != null)
             throw new IllegalArgumentException("Building already exists: " + id);
+        if (replace && building(player.level().getServer(), id) == null)
+            throw new IllegalArgumentException("Unknown building: " + id);
         AreaSelectionService.Selection selection = AreaSelectionService.requireComplete(player);
         if (!SELECTION_OWNER.equals(selection.owner()) ||
                 !selection.dimension().equals(player.level().dimension().identifier()))

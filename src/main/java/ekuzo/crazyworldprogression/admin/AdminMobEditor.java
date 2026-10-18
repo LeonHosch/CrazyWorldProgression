@@ -26,9 +26,9 @@ import java.util.UUID;
 import java.util.WeakHashMap;
 
 /**
- * The MobForge mob editor (the only one; /mobforge editor opens it too). Size, speed, health, damage and similar
- * attributes are entered as multipliers of the entity type's own defaults; armor and knockback values are
- * absolute because most mobs have none by default. Entities and equipment are picked with the same type-to-search
+ * The MobForge mob editor (the only one; /mobforge editor opens it too). Size, movement speed and attack speed are
+ * entered as multipliers of the entity type's own defaults; health, damage, follow range, armor and knockback as
+ * absolute values. Entities and equipment are picked with the same type-to-search
  * fields as the loot pool editor.
  */
 final class AdminMobEditor {
@@ -39,8 +39,11 @@ final class AdminMobEditor {
     private static final List<String> AI_MODES = List.of("vanilla", "target_position", "target_player", "nearest_player");
     private static final List<String> YES_NO = List.of("Yes", "No");
     private static final List<String> DESPAWN = List.of("vanilla", "never");
-    /** Absolute attributes, blank = the entity's default. */
-    private static final List<String> ABSOLUTE = List.of("armor", "armor_toughness", "knockback_resistance", "attack_knockback");
+    /** Entered as multipliers of the entity's default (1 = unchanged). */
+    private static final List<String> MULTIPLIED = List.of("scale", "movement_speed", "attack_speed");
+    /** Entered as absolute values, blank = the entity's default. */
+    private static final List<String> ABSOLUTE = List.of("max_health", "attack_damage", "follow_range", "armor",
+            "armor_toughness", "knockback_resistance", "attack_knockback");
     private static final List<String> SLOTS = List.of("main_hand", "off_hand", "head", "chest", "legs", "feet");
     static final String DRAFT_ACTION = "mob.draft";
 
@@ -64,24 +67,24 @@ final class AdminMobEditor {
         rows.add(row("Identity", "Tags", "Comma separated, for selecting mobs in scripts (such as raid, wave_1).",
                 List.of(text("tags", "Tags", "raid, wave_1", v, 512)), List.of(), null));
 
-        rows.add(row("Size and movement", "Multipliers", "1 = " + entityName + "'s normal value. "
-                        + defaults(type, "scale", "movement_speed", "follow_range"),
+        rows.add(row("Multipliers", "Size and speed", "1 = " + entityName + "'s normal value, 2 = double. "
+                        + defaults(type, MULTIPLIED.toArray(String[]::new)),
                 List.of(multiplier("scale", "Size ×", v), multiplier("movement_speed", "Movement speed ×", v),
-                        multiplier("follow_range", "Follow range ×", v)), List.of(), null));
-        rows.add(row("Combat", "Multipliers", "1 = " + entityName + "'s normal value. "
-                        + defaults(type, "max_health", "attack_damage", "attack_speed"),
-                List.of(multiplier("max_health", "Health ×", v), multiplier("attack_damage", "Attack damage ×", v),
                         multiplier("attack_speed", "Attack speed ×", v)), List.of(), null));
-        rows.add(row("Defense", "Values", "Blank keeps the default. Knockback resistance goes from 0 to 1. "
-                        + defaults(type, ABSOLUTE.toArray(String[]::new)),
+        rows.add(row("Values", "Combat", "Blank keeps the default. "
+                        + defaults(type, "max_health", "attack_damage", "follow_range"),
+                List.of(text("max_health", "Health", "default", v, 16), text("attack_damage", "Attack damage", "default", v, 16),
+                        text("follow_range", "Follow range", "default", v, 16)), List.of(), null));
+        rows.add(row("Values", "Defense", "Blank keeps the default. Knockback resistance goes from 0 to 1. "
+                        + defaults(type, "armor", "armor_toughness", "knockback_resistance", "attack_knockback"),
                 List.of(text("armor", "Armor", "default", v, 16), text("armor_toughness", "Toughness", "default", v, 16),
                         text("knockback_resistance", "Knockback res.", "default", v, 16),
                         text("attack_knockback", "Attack knockback", "default", v, 16)), List.of(), null));
 
         List<String> items = itemIds();
         for (String slot : SLOTS) {
-            rows.add(row("Equipment", pretty(slot), "Type to search; leave empty for nothing.",
-                    List.of(new AdminPanelRegistry.AdminField("equip_" + slot, "Item (type to search)", "empty",
+            rows.add(row("Equipment", slotName(slot), "Type to search; leave empty for nothing.",
+                    List.of(new AdminPanelRegistry.AdminField("equip_" + slot, slotName(slot) + " (type to search)", "empty",
                                     v.get("equip_" + slot), 128, items),
                             text("equip_" + slot + "_count", "Count", "1", v, 4)),
                     List.of(), new AdminPanelRegistry.EntryPreview("item", "field:equip_" + slot, 0)));
@@ -212,6 +215,18 @@ final class AdminMobEditor {
         return BigDecimal.valueOf(value).setScale(4, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 
+    private static String slotName(String slot) {
+        return switch (slot) {
+            case "main_hand" -> "Main hand";
+            case "off_hand" -> "Off hand";
+            case "head" -> "Helmet";
+            case "chest" -> "Chestplate";
+            case "legs" -> "Leggings";
+            case "feet" -> "Boots";
+            default -> pretty(slot);
+        };
+    }
+
     private static String pretty(String key) {
         String value = key.replace('_', ' ');
         return Character.toUpperCase(value.charAt(0)) + value.substring(1);
@@ -274,7 +289,7 @@ final class AdminMobEditor {
             fields.put("name", template.name() == null ? "" : template.name());
             fields.put("tags", String.join(", ", template.tags()));
             EntityType<?> type = entityType(template.entity());
-            for (String attribute : MobTemplate.MULTIPLIED) {
+            for (String attribute : MULTIPLIED) {
                 Double factor = template.multipliers().get(attribute);
                 Double absolute = template.attributes().get(attribute);
                 double base = type == null ? -1 : MobTemplateValidator.defaultValue(type, attribute);
@@ -284,6 +299,9 @@ final class AdminMobEditor {
             }
             for (String attribute : ABSOLUTE) {
                 Double value = template.attributes().get(attribute);
+                Double factor = template.multipliers().get(attribute);
+                double base = type == null ? -1 : MobTemplateValidator.defaultValue(type, attribute);
+                if (value == null && factor != null && base >= 0) value = base * factor;
                 fields.put(attribute, value == null ? "" : number(value));
             }
             for (String slot : SLOTS) {
@@ -324,7 +342,7 @@ final class AdminMobEditor {
         private MobTemplate build() {
             Map<String, Double> attributes = new LinkedHashMap<>(keptAbsolute);
             Map<String, Double> multipliers = new LinkedHashMap<>();
-            for (String attribute : MobTemplate.MULTIPLIED) {
+            for (String attribute : MULTIPLIED) {
                 String value = fields.get("mult_" + attribute).trim();
                 if (value.isEmpty()) continue;
                 double factor = decimal(value, pretty(attribute) + " multiplier");

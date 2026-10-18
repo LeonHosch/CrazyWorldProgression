@@ -38,10 +38,11 @@ id: raid_zombie
 entity: minecraft:zombie
 name: Raid Zombie
 multipliers:
-  max_health: 2.0
   movement_speed: 1.25
   scale: 1.2
 attributes:
+  max_health: 40.0
+  attack_damage: 8.0
   armor: 4.0
 equipment:
   main_hand:
@@ -74,7 +75,7 @@ ai:
 
 Supported AI modes are `vanilla`, `target_position`, `target_player`, and `nearest_player`. Path recalculation is staggered at one-second intervals; templates are parsed only on startup, reload, or editor save.
 
-`multipliers` scale the entity type's own default value: `max_health: 2.0` gives a zombie 40 health, `scale: 1.2` makes it 20% bigger. `scale`, `movement_speed`, `follow_range`, `max_health`, `attack_damage` and `attack_speed` can be multipliers. `attributes` sets absolute values instead, which suits `armor`, `armor_toughness`, `knockback_resistance` and `attack_knockback` because most mobs have none of those by default. One attribute cannot be in both. Older templates with absolute values for the multiplier attributes still work; the editor shows them as multipliers and saves them that way.
+`multipliers` scale the entity type's own default value: `scale: 1.2` makes it 20% bigger, `movement_speed: 1.25` 25% faster. The editor uses multipliers for size, movement speed and attack speed, and absolute `attributes` for health, attack damage, follow range, armor, toughness, knockback resistance and attack knockback. In YAML, `max_health`, `attack_damage` and `follow_range` may also be multipliers; the editor shows them as absolute values. One attribute cannot be in both sections.
 
 Movement speed above `0.70` (absolute, or default times multiplier) is rejected because vanilla node navigation becomes unstable and visibly rubber-bands; most hostile mobs walk at about `0.20`–`0.35`.
 

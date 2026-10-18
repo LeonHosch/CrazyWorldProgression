@@ -586,6 +586,11 @@ public final class PortalService {
         if (touching == null || !touching.contains(player.position().add(0.0, 0.9, 0.0), TRIGGER_THICKNESS)
                 || !isOpen(touching) || touching.isExit() && !PortalRegistry.instanceSlots().contains(dimension))
             return;
+        if (touching.isExit() && RaidService.inEncounterAt(server, dimension)) {
+            player.sendOverlayMessage(Component.translatableWithFallback("message.crazy-world-progression.exit.encounter",
+                    "The exit is closed during an encounter"));
+            return;
+        }
         if (!canPlayerEnter(server, player, touching)) {
             player.sendOverlayMessage(Component.literal("You have already used "
                     + touching.effectiveDisplayName()));
@@ -759,6 +764,8 @@ public final class PortalService {
             if (!PortalRegistry.instanceSlots().contains(player.level().dimension().identifier())) {
                 throw new IllegalStateException("Return portals can only be used inside an instance");
             }
+            if (RaidService.inEncounterAt(server, player.level().dimension().identifier()))
+                throw new IllegalStateException("The exit is closed during an encounter");
             returnToMainWorld(server, player);
             return;
         }
@@ -814,6 +821,8 @@ public final class PortalService {
         }
         UUID leader = PortalGroups.leader(server, player.getUUID());
         if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your party leader can start this dungeon");
+        // Offline members never hold a start up: they leave the party (and can be invited again later).
+        Parties.removeOffline(server, leader);
         List<UUID> members = PortalGroups.members(server, leader);
         if (members.size() > portal.admission().maxPlayers()) {
             throw new IllegalStateException("your party is larger than this dungeon's " + portal.admission().maxPlayers() + " player limit");

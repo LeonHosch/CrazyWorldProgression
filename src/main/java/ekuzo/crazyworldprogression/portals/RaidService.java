@@ -347,6 +347,11 @@ public final class RaidService {
         return inEncounter(server, instance.slotDimension());
     }
 
+    /** True while an encounter runs in this instance dimension. */
+    public static boolean inEncounterAt(MinecraftServer server, Identifier dimension) {
+        return inEncounter(server, dimension);
+    }
+
     private static boolean inEncounter(MinecraftServer server, Identifier dimension) {
         if (!isRaid(server, dimension)) return false;
         RaidData.Attempt attempt = RaidData.get(server).get(dimension.toString());

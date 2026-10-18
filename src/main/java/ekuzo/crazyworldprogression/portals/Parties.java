@@ -309,6 +309,28 @@ public final class Parties {
         refresh(server);
     }
 
+    /**
+     * Removes offline members from the party a leader starts a dungeon with, so they do not hold the start up.
+     * Returns their names (empty when there is no party or nobody is offline).
+     */
+    public static List<String> removeOffline(MinecraftServer server, UUID leader) {
+        PartyBook book = book(server);
+        PartyBook.Party party = book.partyOf(leader);
+        if (party == null || !party.leader().equals(leader)) return List.of();
+        List<String> removed = new java.util.ArrayList<>();
+        for (UUID member : List.copyOf(party.members())) {
+            if (member.equals(leader) || server.getPlayerList().getPlayer(member) != null) continue;
+            book.kick(leader, member);
+            removed.add(name(server, member));
+        }
+        if (removed.isEmpty()) return removed;
+        save(server);
+        notifyParty(server, party, String.join(", ", removed) + (removed.size() == 1 ? " was" : " were")
+                + " offline and removed from the party when the dungeon started.");
+        refresh(server);
+        return removed;
+    }
+
     /** /party join <leader>: joins (public) or asks to join (semi-private) the party that player leads or is in. */
     public static void joinLeader(ServerPlayer player, String leaderName) {
         MinecraftServer server = player.level().getServer();

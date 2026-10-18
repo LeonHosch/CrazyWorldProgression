@@ -34,6 +34,8 @@ public final class PortalBuildProtection {
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, entity) ->
                 !(player instanceof ServerPlayer serverPlayer) || PortalService.canBuild(serverPlayer));
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
+            if (player instanceof ServerPlayer serverPlayer && spawnEggBlocked(serverPlayer, player.getItemInHand(hand).getItem()))
+                return InteractionResult.FAIL;
             if (player instanceof ServerPlayer serverPlayer && PortalService.inInstance(serverPlayer)
                     && placesEntity(player.getItemInHand(hand).getItem())) {
                 boolean opensBlock = !player.isShiftKeyDown()
@@ -63,6 +65,7 @@ public final class PortalBuildProtection {
         UseItemCallback.EVENT.register((player, level, hand) -> {
             if (!(player instanceof ServerPlayer serverPlayer)) return InteractionResult.PASS;
             Item item = player.getItemInHand(hand).getItem();
+            if (spawnEggBlocked(serverPlayer, item)) return InteractionResult.FAIL;
             if (PortalService.inInstance(serverPlayer) && placesEntity(item)) {
                 serverPlayer.sendOverlayMessage(net.minecraft.network.chat.Component.literal(
                         "You cannot place that inside an instance."));
@@ -71,6 +74,18 @@ public final class PortalBuildProtection {
             return !PortalService.canBuild(serverPlayer) && item instanceof BucketItem
                     ? InteractionResult.FAIL : InteractionResult.PASS;
         });
+    }
+
+    /**
+     * Spawn eggs (also on spawners) only work for administrators in creative mode, everywhere. Dispensers are not
+     * affected.
+     */
+    static boolean spawnEggBlocked(ServerPlayer player, Item item) {
+        if (!(item instanceof net.minecraft.world.item.SpawnEggItem)) return false;
+        if (player.isCreative() && player.permissions().hasPermission(net.minecraft.server.permissions.Permissions.COMMANDS_ADMIN))
+            return false;
+        player.sendOverlayMessage(net.minecraft.network.chat.Component.literal("Spawn eggs are disabled."));
+        return true;
     }
 
     /**

@@ -58,7 +58,7 @@ For a normal Minecraft instance, place these files in the instance's `mods` dire
 
 Use the same CWP and content-mod versions on the client and server.
 
-MobForge is built into the CWP JAR. Remove the old `mobforge-<version>.jar` from client and server `mods` folders when upgrading; keep existing `config/mobforge/templates/` and `config/mobforge/scripts/` files. The **MobForge** tab in `/cwp admin` edits scripts directly in the admin panel, including all supported step types; the mob template editor and `/mobforge` commands remain available. Scripts now save as Python-like `.mfs` files; existing YAML scripts still load. See the [scripting manual](docs/mobforge-scripting.md) and [MobForge commands](docs/mobforge.md).
+MobForge is built into the CWP JAR. Remove the old `mobforge-<version>.jar` from client and server `mods` folders when upgrading; keep existing `config/mobforge/templates/` and `config/mobforge/scripts/` files. The **MobForge** tab in `/cwp admin` edits scripts directly in the admin panel, including all supported step types; mobs are edited there too (also opened by `/mobforge editor`), and the `/mobforge` commands remain available. Scripts now save as Python-like `.mfs` files; existing YAML scripts still load. See the [scripting manual](docs/mobforge-scripting.md) and [MobForge commands](docs/mobforge.md).
 
 Content mods can also register custom MobForge definitions, abilities, and behaviors through the [MobForge developer API](docs/mobforge-api.md). The [architecture rules](docs/architecture.md) keep content and framework responsibilities separate.
 

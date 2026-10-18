@@ -45,7 +45,13 @@ public final class MobForgeSpawner {
 				Holder<Attribute> attribute = ATTRIBUTES.get(name); AttributeInstance instance = attribute == null ? null : living.getAttribute(attribute);
 				if (instance != null) instance.setBaseValue(value);
 			});
-			Double health = template.attributes().get("max_health"); if (health != null) living.setHealth(health.floatValue());
+			// Multipliers scale the entity type's own default, after absolute values.
+			template.multipliers().forEach((name, factor) -> {
+				Holder<Attribute> attribute = ATTRIBUTES.get(name); AttributeInstance instance = attribute == null ? null : living.getAttribute(attribute);
+				if (instance != null) instance.setBaseValue(instance.getBaseValue() * factor);
+			});
+			if (template.attributes().containsKey("max_health") || template.multipliers().containsKey("max_health"))
+				living.setHealth(living.getMaxHealth());
 			template.equipment().forEach((slot, entry) -> {
 				Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(entry.id()));
 				living.setItemSlot(SLOTS.get(slot), new ItemStack(item, entry.count()));
@@ -56,6 +62,8 @@ public final class MobForgeSpawner {
 		if (!level.addFreshEntity(entity)) throw new IllegalStateException("server rejected spawned entity");
 		return entity;
 	}
+
+	public static Holder<Attribute> attribute(String name) { return ATTRIBUTES.get(name); }
 
 	public static boolean setAttribute(Entity entity, String name, double value) {
 		if (!(entity instanceof LivingEntity living)) return false;

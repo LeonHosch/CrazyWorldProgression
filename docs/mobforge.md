@@ -37,10 +37,12 @@ Console, command blocks, and functions can use the non-graphical commands. Playe
 id: raid_zombie
 entity: minecraft:zombie
 name: Raid Zombie
+multipliers:
+  max_health: 2.0
+  movement_speed: 1.25
+  scale: 1.2
 attributes:
-  max_health: 40.0
-  movement_speed: 0.3
-  attack_damage: 8.0
+  armor: 4.0
 equipment:
   main_hand:
     id: minecraft:iron_sword
@@ -72,7 +74,11 @@ ai:
 
 Supported AI modes are `vanilla`, `target_position`, `target_player`, and `nearest_player`. Path recalculation is staggered at one-second intervals; templates are parsed only on startup, reload, or editor save.
 
-`movement_speed` is the absolute vanilla attribute value, not a percentage or multiplier. Most hostile mobs use approximately `0.20`–`0.35`; MobForge rejects values above `0.70` because vanilla node navigation becomes unstable and visibly rubber-bands at extreme speeds.
+`multipliers` scale the entity type's own default value: `max_health: 2.0` gives a zombie 40 health, `scale: 1.2` makes it 20% bigger. `scale`, `movement_speed`, `follow_range`, `max_health`, `attack_damage` and `attack_speed` can be multipliers. `attributes` sets absolute values instead, which suits `armor`, `armor_toughness`, `knockback_resistance` and `attack_knockback` because most mobs have none of those by default. One attribute cannot be in both. Older templates with absolute values for the multiplier attributes still work; the editor shows them as multipliers and saves them that way.
+
+Movement speed above `0.70` (absolute, or default times multiplier) is rejected because vanilla node navigation becomes unstable and visibly rubber-bands; most hostile mobs walk at about `0.20`–`0.35`.
+
+`/mobforge editor [id]` and the **MobForge** tab in `/cwp admin` open the same editor in the admin panel. Entity type and equipment are picked with type-to-search fields (with a picture of the entity and item icons), and multipliers show the entity's defaults next to them. Equipment components in YAML are kept as they are; the editor does not change them.
 
 ## Legacy YAML wave scripts
 

@@ -18,27 +18,14 @@ public final class MobForgeNetworking {
 	private MobForgeNetworking() {}
 
 	public static void initialize() {
-		PayloadTypeRegistry.clientboundPlay().register(EditorPayloads.OpenEditor.TYPE, EditorPayloads.OpenEditor.CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(EditorPayloads.SaveTemplate.TYPE, EditorPayloads.SaveTemplate.CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(EditorPayloads.DeleteTemplate.TYPE, EditorPayloads.DeleteTemplate.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(EditorPayloads.OpenScriptEditor.TYPE, EditorPayloads.OpenScriptEditor.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(EditorPayloads.SaveScript.TYPE, EditorPayloads.SaveScript.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(EditorPayloads.DeleteScript.TYPE, EditorPayloads.DeleteScript.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(EditorPayloads.SaveResult.TYPE, EditorPayloads.SaveResult.CODEC);
-		ServerPlayNetworking.registerGlobalReceiver(EditorPayloads.SaveTemplate.TYPE, (payload, context) -> context.server().execute(() -> save(payload, context.player())));
-		ServerPlayNetworking.registerGlobalReceiver(EditorPayloads.DeleteTemplate.TYPE, (payload, context) -> context.server().execute(() -> delete(payload, context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(EditorPayloads.SaveScript.TYPE, (payload, context) -> context.server().execute(() -> saveScript(payload, context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(EditorPayloads.DeleteScript.TYPE, (payload, context) -> context.server().execute(() -> deleteScript(payload, context.player())));
 	}
 
-	public static boolean open(ServerPlayer player, MobTemplate template) {
-		return open(player, template, true);
-	}
-	public static boolean open(ServerPlayer player, MobTemplate template, boolean existing) {
-		if (!ServerPlayNetworking.canSend(player, EditorPayloads.OpenEditor.TYPE)) return false;
-		ServerPlayNetworking.send(player, new EditorPayloads.OpenEditor(YAML.encode(template), existing));
-		return true;
-	}
 	public static boolean openScript(ServerPlayer player, MobScript script) {
 		return openScript(player, script, true);
 	}
@@ -56,22 +43,6 @@ public final class MobForgeNetworking {
 	}
 
 	private static boolean authorized(ServerPlayer player) { return player.permissions().hasPermission(Permissions.COMMANDS_ADMIN); }
-	private static void save(EditorPayloads.SaveTemplate payload, ServerPlayer player) {
-		if (!authorized(player)) { player.sendSystemMessage(Component.literal("You do not have permission to edit MobForge templates.")); return; }
-		try {
-			MobTemplate template = YAML.decode(payload.yaml());
-			if (!template.id().equals(payload.originId()) && MobForge.TEMPLATES.get(template.id()).isPresent()) {
-				throw new IllegalArgumentException("Template ID already exists: " + template.id());
-			}
-			MobForge.TEMPLATES.save(template);
-			result(player, "template", true, "Saved MobForge template " + template.id() + ".");
-		} catch (Exception exception) { result(player, "template", false, "MobForge save failed: " + exception.getMessage()); }
-	}
-	private static void delete(EditorPayloads.DeleteTemplate payload, ServerPlayer player) {
-		if (!authorized(player)) { player.sendSystemMessage(Component.literal("You do not have permission to edit MobForge templates.")); return; }
-		try { player.sendSystemMessage(Component.literal(MobForge.TEMPLATES.delete(payload.id()) ? "Deleted MobForge template " + payload.id() + "." : "Template was not found.")); }
-		catch (Exception exception) { player.sendSystemMessage(Component.literal("MobForge delete failed: " + exception.getMessage())); }
-	}
 	private static void saveScript(EditorPayloads.SaveScript payload, ServerPlayer player) {
 		if (!authorized(player)) { player.sendSystemMessage(Component.literal("You do not have permission to edit MobForge scripts.")); return; }
 		try { MobScript script = SCRIPT_YAML.decode(payload.yaml());

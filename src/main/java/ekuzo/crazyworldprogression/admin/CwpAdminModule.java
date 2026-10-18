@@ -109,6 +109,12 @@ public final class CwpAdminModule {
                 "minecraft:nether_star", OVERVIEW, CwpAdminModule::page, CwpAdminModule::action));
     }
 
+    /** Opens the mob editor in the admin panel (used by /mobforge editor). */
+    public static boolean openMobEditor(ServerPlayer player, String templateId) {
+        return AdminPanelNetworking.openPage(player, CrazyWorldProgression.id("admin"),
+                MOB_EDIT + (templateId == null ? "@new" : templateId));
+    }
+
     public static boolean openScriptEditor(ServerPlayer player, String scriptId) {
         return AdminPanelNetworking.openPage(player, CrazyWorldProgression.id("admin"),
                 MOB_SCRIPT_EDIT + (scriptId == null ? "@new" : scriptId));
@@ -739,12 +745,7 @@ public final class CwpAdminModule {
             return AdminPanelRegistry.ActionResult.success("Reloaded " + templates.loaded() + " mobs and "
                     + scripts.loaded() + " scripts; " + (templates.failed() + scripts.failed()) + " failed");
         }
-        if (actionId.equals("mob.template.new")) {
-            MobTemplate template = new MobTemplate("new_template", "minecraft:zombie", null,
-                    Map.of(), Map.of(), null, null, List.of(), null);
-            return MobForgeNetworking.open(player, template, false) ? AdminPanelRegistry.ActionResult.silentSuccess()
-                    : AdminPanelRegistry.ActionResult.failure("MobForge editor is unavailable on this client");
-        }
+        if (actionId.equals("mob.template.new")) return AdminPanelRegistry.ActionResult.success("", MOB_EDIT + "@new");
         if (actionId.equals("mob.script.new")) {
             return AdminPanelRegistry.ActionResult.success("", MOB_SCRIPT_EDIT + "@new");
         }
@@ -860,10 +861,9 @@ public final class CwpAdminModule {
             }
         }
         if (parts.length == 2 && parts[0].equals("mob.template.edit")) {
-            MobTemplate template = MobForge.TEMPLATES.get(parts[1]).orElse(null);
-            if (template == null) return AdminPanelRegistry.ActionResult.failure("Unknown mob template " + parts[1]);
-            return MobForgeNetworking.open(player, template) ? AdminPanelRegistry.ActionResult.silentSuccess()
-                    : AdminPanelRegistry.ActionResult.failure("MobForge editor is unavailable on this client");
+            if (MobForge.TEMPLATES.get(parts[1]).isEmpty())
+                return AdminPanelRegistry.ActionResult.failure("Unknown mob template " + parts[1]);
+            return AdminPanelRegistry.ActionResult.success("", MOB_EDIT + parts[1]);
         }
         if (parts.length == 2 && parts[0].equals("mob.script.edit")) {
             MobScript script = MobForge.SCRIPTS.get(parts[1]).orElse(null);

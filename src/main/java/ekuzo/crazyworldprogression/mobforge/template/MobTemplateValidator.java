@@ -29,6 +29,19 @@ public final class MobTemplateValidator {
 			if (value == null || !Double.isFinite(value)) errors.add("attribute " + key + " must be finite");
 			else if (value < 0) errors.add("attribute " + key + " cannot be negative");
 		});
+		template.multipliers().forEach((key, value) -> {
+			if (!MobTemplate.MULTIPLIED.contains(key)) errors.add("attribute " + key + " cannot be a multiplier");
+			if (value == null || !Double.isFinite(value) || value <= 0) errors.add("multiplier " + key + " must be greater than zero");
+			if (template.attributes().containsKey(key)) errors.add("attribute " + key + " is set both as a value and as a multiplier");
+		});
+		Double speedMultiplier = template.multipliers().get("movement_speed");
+		if (speedMultiplier != null && entityId != null && BuiltInRegistries.ENTITY_TYPE.containsKey(entityId)) {
+			double base = defaultValue(BuiltInRegistries.ENTITY_TYPE.getValue(entityId), "movement_speed");
+			if (base > 0 && base * speedMultiplier > MAX_STABLE_MOVEMENT_SPEED)
+				errors.add("movement speed x" + speedMultiplier + " would be " + String.format(java.util.Locale.ROOT, "%.2f", base * speedMultiplier)
+						+ ", above " + MAX_STABLE_MOVEMENT_SPEED + " where pathfinding gets unstable (at most x"
+						+ String.format(java.util.Locale.ROOT, "%.2f", MAX_STABLE_MOVEMENT_SPEED / base) + " for this entity)");
+		}
 		Double health = template.attributes().get("max_health");
 		if (health != null && health <= 0) errors.add("max_health must be greater than zero");
 		Double movementSpeed = template.attributes().get("movement_speed");
@@ -55,6 +68,16 @@ public final class MobTemplateValidator {
 			else if (tag.startsWith("mobforge.")) errors.add("custom tags cannot use the reserved mobforge. prefix");
 		}
 		if (!errors.isEmpty()) throw new TemplateValidationException(errors);
+	}
+
+	/** The entity type's own default for an attribute, or -1 when it has none (not a living entity). */
+	@SuppressWarnings("unchecked")
+	public static double defaultValue(net.minecraft.world.entity.EntityType<?> type, String attribute) {
+		var holder = ekuzo.crazyworldprogression.mobforge.entity.MobForgeSpawner.attribute(attribute);
+		if (holder == null || !net.minecraft.world.entity.ai.attributes.DefaultAttributes.hasSupplier(type)) return -1;
+		var supplier = net.minecraft.world.entity.ai.attributes.DefaultAttributes.getSupplier(
+				(net.minecraft.world.entity.EntityType<? extends net.minecraft.world.entity.LivingEntity>) type);
+		return supplier.hasAttribute(holder) ? supplier.getBaseValue(holder) : -1;
 	}
 
 	private static Identifier parseId(String value, String field, List<String> errors) {

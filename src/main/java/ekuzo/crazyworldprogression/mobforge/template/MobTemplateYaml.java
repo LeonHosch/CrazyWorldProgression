@@ -25,6 +25,7 @@ public final class MobTemplateYaml {
 		out.name = nullableString(map.get("name"));
 
 		map(map.get("attributes"), "attributes", true).forEach((key, value) -> out.attributes.put(key, number(value, "attributes." + key).doubleValue()));
+		map(map.get("multipliers"), "multipliers", true).forEach((key, value) -> out.multipliers.put(key, number(value, "multipliers." + key).doubleValue()));
 		map(map.get("equipment"), "equipment", true).forEach((slot, value) -> {
 			Map<String, Object> item = map(value, "equipment." + slot);
 			out.equipment.put(slot, new MobTemplate.EquipmentEntry(string(item.get("id")), integer(item.getOrDefault("count", 1), "count"),
@@ -62,6 +63,7 @@ public final class MobTemplateYaml {
 		root.put("entity", template.entity());
 		if (template.name() != null && !template.name().isBlank()) root.put("name", template.name());
 		if (!template.attributes().isEmpty()) root.put("attributes", new LinkedHashMap<>(template.attributes()));
+		if (!template.multipliers().isEmpty()) root.put("multipliers", new LinkedHashMap<>(template.multipliers()));
 		if (!template.equipment().isEmpty()) {
 			Map<String, Object> equipment = new LinkedHashMap<>();
 			template.equipment().forEach((slot, entry) -> {

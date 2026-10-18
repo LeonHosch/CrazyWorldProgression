@@ -6,14 +6,26 @@ import java.util.Map;
 
 /** The one canonical representation used by YAML, commands, spawning, and the editor. */
 public record MobTemplate(String id, String entity, String name, Map<String, Double> attributes,
-		Map<String, EquipmentEntry> equipment, Properties properties, Loot loot, List<String> tags, Ai ai) {
+		Map<String, EquipmentEntry> equipment, Properties properties, Loot loot, List<String> tags, Ai ai,
+		Map<String, Double> multipliers) {
+	/** Attributes that are set as a multiple of the entity type's own default value (1 = unchanged). */
+	public static final List<String> MULTIPLIED = List.of("scale", "movement_speed", "follow_range", "max_health",
+			"attack_damage", "attack_speed");
+
 	public MobTemplate {
 		attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+		multipliers = multipliers == null ? Map.of() : Map.copyOf(multipliers);
 		equipment = equipment == null ? Map.of() : Map.copyOf(equipment);
 		properties = properties == null ? Properties.DEFAULT : properties;
 		loot = loot == null ? Loot.DEFAULT : loot;
 		tags = tags == null ? List.of() : List.copyOf(tags);
 		ai = ai == null ? Ai.VANILLA : ai;
+	}
+
+	/** Without multipliers, for code that only sets absolute attribute values. */
+	public MobTemplate(String id, String entity, String name, Map<String, Double> attributes,
+			Map<String, EquipmentEntry> equipment, Properties properties, Loot loot, List<String> tags, Ai ai) {
+		this(id, entity, name, attributes, equipment, properties, loot, tags, ai, Map.of());
 	}
 
 	public record EquipmentEntry(String id, int count, Map<String, Object> components) {
@@ -51,11 +63,12 @@ public record MobTemplate(String id, String entity, String name, Map<String, Dou
 		public String entity = "minecraft:zombie";
 		public String name;
 		public final Map<String, Double> attributes = new LinkedHashMap<>();
+		public final Map<String, Double> multipliers = new LinkedHashMap<>();
 		public final Map<String, EquipmentEntry> equipment = new LinkedHashMap<>();
 		public Properties properties = Properties.DEFAULT;
 		public Loot loot = Loot.DEFAULT;
 		public List<String> tags = List.of();
 		public Ai ai = Ai.VANILLA;
-		public MobTemplate build() { return new MobTemplate(id, entity, name, attributes, equipment, properties, loot, tags, ai); }
+		public MobTemplate build() { return new MobTemplate(id, entity, name, attributes, equipment, properties, loot, tags, ai, multipliers); }
 	}
 }

@@ -22,6 +22,20 @@ class MobTemplateYamlTest {
 		assertFalse(yaml.encode(input).contains("!!"), "generated YAML must not expose Java type metadata");
 	}
 
+	@Test void multipliersRoundTripAndAreChecked() {
+		MobTemplate input = new MobTemplate("big_zombie", "minecraft:zombie", null, Map.of("armor", 4.0), Map.of(),
+				null, null, List.of(), null, Map.of("scale", 1.5, "max_health", 2.0));
+		String text = yaml.encode(input);
+		assertTrue(text.contains("multipliers:"));
+		assertEquals(input, yaml.decode(text));
+		MobTemplate bad = new MobTemplate("bad", "not an id", null, Map.of("scale", 2.0), Map.of(), null, null,
+				List.of(), null, Map.of("scale", 0.0, "armor", 2.0));
+		String message = assertThrows(TemplateValidationException.class, () -> MobTemplateValidator.validate(bad)).getMessage();
+		assertTrue(message.contains("multiplier scale must be greater than zero"));
+		assertTrue(message.contains("armor cannot be a multiplier"));
+		assertTrue(message.contains("set both as a value and as a multiplier"));
+	}
+
 	@Test void malformedYamlFailsWithoutAffectingOtherFiles() {
 		assertThrows(RuntimeException.class, () -> yaml.decode("id: [unterminated"));
 	}

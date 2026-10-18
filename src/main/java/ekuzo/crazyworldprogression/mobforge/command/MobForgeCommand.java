@@ -160,10 +160,10 @@ public final class MobForgeCommand {
 	}
 	private static int openEditor(CommandSourceStack source, String id) {
 		var player = source.getPlayer(); if (player == null) { source.sendFailure(Component.literal("The graphical editor requires a player.")); return 0; }
-		MobTemplate template;
-		if (id == null) template = new MobTemplate("new_template", "minecraft:zombie", null, java.util.Map.of(), java.util.Map.of(), null, null, java.util.List.of(), null);
-		else { var found = MobForge.TEMPLATES.get(id); if (found.isEmpty()) { source.sendFailure(Component.literal("Unknown MobForge template: " + id)); return 0; } template = found.get(); }
-		if (!MobForgeNetworking.open(player, template, id != null)) { source.sendFailure(Component.literal("The MobForge client mod is required to use the editor.")); return 0; }
+		if (id != null && MobForge.TEMPLATES.get(id).isEmpty()) { source.sendFailure(Component.literal("Unknown MobForge template: " + id)); return 0; }
+		if (!ekuzo.crazyworldprogression.admin.CwpAdminModule.openMobEditor(player, id)) {
+			source.sendFailure(Component.literal("CWP admin panel is unavailable.")); return 0;
+		}
 		return 1;
 	}
 	private static int setAi(CommandContext<CommandSourceStack> context, MobTemplate.Ai ai) throws com.mojang.brigadier.exceptions.CommandSyntaxException {

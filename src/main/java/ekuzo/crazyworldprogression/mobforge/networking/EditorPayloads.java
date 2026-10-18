@@ -10,24 +10,6 @@ public final class EditorPayloads {
 	private EditorPayloads() {}
 	private static final StreamCodec<RegistryFriendlyByteBuf, String> YAML = ByteBufCodecs.stringUtf8(1_000_000).cast();
 
-	public record OpenEditor(String yaml, boolean existing) implements CustomPacketPayload {
-		public static final Type<OpenEditor> TYPE = new Type<>(MobForge.id("open_editor"));
-		public static final StreamCodec<RegistryFriendlyByteBuf, OpenEditor> CODEC = StreamCodec.composite(
-				YAML, OpenEditor::yaml, ByteBufCodecs.BOOL, OpenEditor::existing, OpenEditor::new);
-		@Override public Type<OpenEditor> type() { return TYPE; }
-	}
-	public record SaveTemplate(String yaml, String originId) implements CustomPacketPayload {
-		public static final Type<SaveTemplate> TYPE = new Type<>(MobForge.id("save_template"));
-		public static final StreamCodec<RegistryFriendlyByteBuf, SaveTemplate> CODEC = StreamCodec.composite(
-				YAML, SaveTemplate::yaml, ByteBufCodecs.stringUtf8(64), SaveTemplate::originId,
-				SaveTemplate::new);
-		@Override public Type<SaveTemplate> type() { return TYPE; }
-	}
-	public record DeleteTemplate(String id) implements CustomPacketPayload {
-		public static final Type<DeleteTemplate> TYPE = new Type<>(MobForge.id("delete_template"));
-		public static final StreamCodec<RegistryFriendlyByteBuf, DeleteTemplate> CODEC = StreamCodec.composite(ByteBufCodecs.stringUtf8(64).cast(), DeleteTemplate::id, DeleteTemplate::new);
-		@Override public Type<DeleteTemplate> type() { return TYPE; }
-	}
 	public record OpenScriptEditor(String yaml, String templates, String entities, String abilities,
 			boolean existing) implements CustomPacketPayload {
 		public static final Type<OpenScriptEditor> TYPE = new Type<>(MobForge.id("open_script_editor"));

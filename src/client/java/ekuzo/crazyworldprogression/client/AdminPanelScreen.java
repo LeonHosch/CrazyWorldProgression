@@ -196,7 +196,7 @@ public final class AdminPanelScreen extends Screen {
     // Add generic text inputs and retain their values while the current page rebuilds its widgets.
     private void addFields(AdminPanelRegistry.AdminEntry entry, int y, int areaX, int areaWidth, boolean compact) {
         if (entry.fields().isEmpty()) return;
-        int actionWidth = actionWidth(entry) + (compact && hasItemIcon(entry) ? 22 : 0);
+        int actionWidth = actionWidth(entry) + (compact ? previewWidth(entry) : 0);
         int available = Math.max(100, areaWidth - actionWidth);
         int dividedWidth = (available - (entry.fields().size() - 1) * 6) / entry.fields().size();
         int fieldWidth = Math.max(72, compact ? dividedWidth : Math.min(150, dividedWidth));
@@ -577,10 +577,15 @@ public final class AdminPanelScreen extends Screen {
                             placement.y() + 8, 0xFF9CA3AF, false);
                 continue;
             }
-            int actionWidth = actionWidth(entry) + (hasItemIcon(entry) ? 22 : 0);
-            if (hasItemIcon(entry))
-                graphics.item(icon(entry.preview().shape()), left + panelWidth - 24 - actionWidth + 2,
-                        placement.y() + 15);
+            int actionWidth = actionWidth(entry) + previewWidth(entry);
+            if (previewWidth(entry) > 0) {
+                int iconX = left + panelWidth - 24 - actionWidth + 2;
+                String target = previewTarget(entry);
+                if (entry.preview().kind().equals("entity"))
+                    renderEntityPreview(graphics, target, iconX, placement.y() + 1, previewWidth(entry) - 4,
+                            placement.height() - 2);
+                else if (!target.isBlank()) graphics.item(icon(target), iconX, placement.y() + 15);
+            }
             int available = Math.max(100, panelWidth - 48 - actionWidth);
             int fieldWidth = Math.max(72,
                     (available - (entry.fields().size() - 1) * 6) / entry.fields().size());
@@ -843,7 +848,8 @@ public final class AdminPanelScreen extends Screen {
 
     // Show the unmatched suffix of the first case-insensitive completion candidate as ghost text.
     private static void updateSuggestion(EditBox box, AdminPanelRegistry.AdminField field, String value) {
-        String match = completion(field, value);
+        // Nothing typed yet: the placeholder is shown instead, so the field never shows two words at once.
+        String match = value == null || value.isEmpty() ? null : completion(field, value);
         box.setSuggestion(match == null || match.equals(value) ? null : match.substring(value.length()));
     }
 
@@ -855,8 +861,61 @@ public final class AdminPanelScreen extends Screen {
                 candidate.toLowerCase(java.util.Locale.ROOT).startsWith(normalized)).findFirst().orElse(null);
     }
 
-    private static boolean hasItemIcon(AdminPanelRegistry.AdminEntry entry) {
-        return entry.preview() != null && entry.preview().kind().equals("item");
+    /** Room an editor row keeps free for its picture: an item icon or a small entity model. */
+    private static int previewWidth(AdminPanelRegistry.AdminEntry entry) {
+        if (entry.preview() == null) return 0;
+        return switch (entry.preview().kind()) {
+            case "item" -> 22;
+            case "entity" -> 40;
+            default -> 0;
+        };
+    }
+
+    /** A preview shape "field:<id>" follows what is typed in that field right now. */
+    private String previewTarget(AdminPanelRegistry.AdminEntry entry) {
+        String shape = entry.preview().shape();
+        return shape.startsWith("field:") ? formValues.getOrDefault(shape.substring(6), "").trim() : shape;
+    }
+
+    /** Draws the entity type as a small model; entities that cannot be shown that way get their spawn egg. */
+    private void renderEntityPreview(GuiGraphicsExtractor graphics, String entityId, int x, int y, int width, int height) {
+        net.minecraft.world.entity.LivingEntity entity = previewEntity(entityId);
+        if (entity == null) {
+            String egg = spawnEgg(entityId);
+            if (egg != null) graphics.item(icon(egg), x + (width - 16) / 2, y + (height - 16) / 2);
+            return;
+        }
+        float size = Math.max(1f, Math.min(height / Math.max(0.3f, entity.getBbHeight()),
+                width / Math.max(0.3f, entity.getBbWidth())) * 0.8f);
+        net.minecraft.client.gui.screens.inventory.InventoryScreen.extractEntityInInventoryFollowsMouse(graphics,
+                x, y, x + width, y + height, (int) size, 0.0625f, x + width / 2f, y + height / 2f, entity);
+    }
+
+    private final Map<String, java.util.Optional<net.minecraft.world.entity.LivingEntity>> entityCache = new HashMap<>();
+
+    private net.minecraft.world.entity.LivingEntity previewEntity(String entityId) {
+        if (entityId == null || entityId.isBlank() || minecraft.level == null) return null;
+        return entityCache.computeIfAbsent(entityId, key -> {
+            Identifier id = Identifier.tryParse(key);
+            var type = id == null ? null : BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null);
+            if (type == null) return java.util.Optional.empty();
+            try {
+                net.minecraft.world.entity.Entity created = type.create(minecraft.level,
+                        net.minecraft.world.entity.EntitySpawnReason.LOAD);
+                return created instanceof net.minecraft.world.entity.LivingEntity living
+                        ? java.util.Optional.of(living) : java.util.Optional.empty();
+            } catch (RuntimeException exception) {
+                return java.util.Optional.empty();
+            }
+        }).orElse(null);
+    }
+
+    /** The spawn egg item of an entity type, if it has one. */
+    private static String spawnEgg(String entityId) {
+        Identifier id = Identifier.tryParse(entityId);
+        if (id == null) return null;
+        Identifier egg = Identifier.fromNamespaceAndPath(id.getNamespace(), id.getPath() + "_spawn_egg");
+        return BuiltInRegistries.ITEM.containsKey(egg) ? egg.toString() : null;
     }
 
     // Search fields with many candidates (such as every item) get a clickable dropdown of matches.
@@ -890,6 +949,8 @@ public final class AdminPanelScreen extends Screen {
     private String displayName(String candidate) {
         return itemNameCache.computeIfAbsent(candidate, key -> {
             Identifier id = Identifier.tryParse(key);
+            if (id != null && !BuiltInRegistries.ITEM.containsKey(id) && BuiltInRegistries.ENTITY_TYPE.containsKey(id))
+                return BuiltInRegistries.ENTITY_TYPE.getValue(id).getDescription().getString();
             if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return key;
             return new ItemStack(BuiltInRegistries.ITEM.getValue(id)).getHoverName().getString();
         });
@@ -954,9 +1015,10 @@ public final class AdminPanelScreen extends Screen {
                 graphics.fill(x, rowY, x + width, rowY + DROPDOWN_ROW_HEIGHT, row == dropdownIndex ? 0xFF33294D : 0xFF242A35);
             Identifier id = Identifier.tryParse(candidate);
             boolean item = id != null && BuiltInRegistries.ITEM.containsKey(id);
+            String egg = item || id == null || !BuiltInRegistries.ENTITY_TYPE.containsKey(id) ? null : spawnEgg(candidate);
             int textX = x + 4;
-            if (item) {
-                graphics.item(icon(candidate), x + 2, rowY + 1);
+            if (item || egg != null) {
+                graphics.item(icon(item ? candidate : egg), x + 2, rowY + 1);
                 textX = x + 22;
             }
             String name = displayName(candidate);

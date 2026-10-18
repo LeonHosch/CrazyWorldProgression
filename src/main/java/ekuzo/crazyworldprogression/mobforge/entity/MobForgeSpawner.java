@@ -57,6 +57,10 @@ public final class MobForgeSpawner {
 				living.setItemSlot(SLOTS.get(slot), new ItemStack(item, entry.count()));
 			});
 			if (template.loot().xp() == 0) living.skipDropExperience();
+			// Without vanilla loot the mob's own gear does not drop either. Items it picks up later still drop,
+			// since Minecraft marks those as guaranteed drops.
+			if (!template.loot().dropVanillaLoot() && living instanceof Mob mob)
+				for (EquipmentSlot slot : EquipmentSlot.values()) mob.setDropChance(slot, 0f);
 		}
 		MobForgeEntityData.apply(entity, template);
 		if (!level.addFreshEntity(entity)) throw new IllegalStateException("server rejected spawned entity");

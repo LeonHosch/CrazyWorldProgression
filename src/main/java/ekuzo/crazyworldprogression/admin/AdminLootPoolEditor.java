@@ -57,20 +57,20 @@ final class AdminLootPoolEditor {
     private static AdminPanelRegistry.AdminPage list(MinecraftServer server, List<AdminPanelRegistry.AdminTab> tabs) {
         Map<String, LootPoolData.Pool> pools = LootPoolService.all(server);
         List<AdminPanelRegistry.AdminEntry> rows = new ArrayList<>();
-        rows.add(new AdminPanelRegistry.AdminEntry("Create loot pool",
+        rows.add(CwpAdminModule.in("Create", new AdminPanelRegistry.AdminEntry("Create loot pool",
                 "Create a pool first, then add items and nested pools in its editor.", GOOD, List.of(),
-                List.of(AdminPanelRegistry.AdminAction.navigate("Create", NEW)), null));
+                List.of(AdminPanelRegistry.AdminAction.navigate("Create", NEW)), null)));
         List<LootPoolData.Pool> topLevel = pools.values().stream()
                 .filter(pool -> !LootPoolService.nested(pools, pool.id()))
                 .sorted(Comparator.comparing(pool -> pool.id().toString())).toList();
         for (LootPoolData.Pool pool : topLevel) {
             var firstItem = pool.entries().stream().filter(entry -> entry.kind().equals("item")).findFirst();
-            rows.add(new AdminPanelRegistry.AdminEntry(pool.name(),
+            rows.add(CwpAdminModule.in("All loot pools", new AdminPanelRegistry.AdminEntry(pool.name(),
                     pool.id() + " · " + countLabel(pool.entries().size()), GOOD, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", EDIT + pool.id()),
                             new AdminPanelRegistry.AdminAction("loot.delete|" + pool.id(), "Delete", true)),
                     new AdminPanelRegistry.EntryPreview("item",
-                            firstItem.map(entry -> entry.target().toString()).orElse("minecraft:chest"), 0)));
+                            firstItem.map(entry -> entry.target().toString()).orElse("minecraft:chest"), 0))));
         }
         return new AdminPanelRegistry.AdminPage(ROOT, "Loot pools",
                 topLevel.size() + " loot pool(s) · use loot(lootpool_id=\"…\") in a pocket script", tabs, rows,

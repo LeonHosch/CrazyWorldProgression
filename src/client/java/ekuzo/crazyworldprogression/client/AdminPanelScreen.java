@@ -31,8 +31,9 @@ public final class AdminPanelScreen extends Screen {
     private static final int MAX_PANEL_WIDTH = 1320;
     private static final int PANEL_MARGIN = 12;
     private static final int SIDEBAR_WIDTH = 118;
-    private static final int HEADER_HEIGHT = 34;
-    private static final int FOOTER_HEIGHT = 28;
+    private static final int HEADER_HEIGHT = 46;
+    private static final int FOOTER_HEIGHT = 18;
+    private static final int SECTION_HEADING_HEIGHT = 14;
     private static final int ROW_HEIGHT = 30;
     private static final int FIELD_ROW_HEIGHT = 62;
     private static final int PORTAL_ROW_HEIGHT = 40;
@@ -72,7 +73,7 @@ public final class AdminPanelScreen extends Screen {
     public AdminPanelScreen(Screen parent, AdminPanelNetworking.PanelSnapshot snapshot) {
         super(Component.literal("CWP Administration"));
         this.parent = parent;
-        this.snapshot = snapshot;
+        this.snapshot = withoutBackActions(snapshot);
         if (snapshot.selectedModule().equals(lastModule) && pageId(snapshot).equals(lastPage)) {
             scroll = lastScroll;
         }
@@ -84,6 +85,7 @@ public final class AdminPanelScreen extends Screen {
         boolean changedPage = this.snapshot == null
                 || !this.snapshot.selectedModule().equals(snapshot.selectedModule())
                 || !pageId(this.snapshot).equals(pageId(snapshot));
+        snapshot = withoutBackActions(snapshot);
         this.snapshot = snapshot;
         boolean successfulAction = snapshot.notice() != null && !snapshot.notice().isBlank() && !snapshot.error();
         if (changedPage) {
@@ -122,13 +124,57 @@ public final class AdminPanelScreen extends Screen {
         buildSidebar();
         if (isDashboard()) buildDashboardButtons();
         else buildModuleButtons();
-        addRenderableWidget(Button.builder(Component.translatable("gui.done"), ignored -> onClose())
-                .bounds(left + panelWidth - 70, top + panelHeight - 24, 62, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Refresh"), ignored -> {
+        int right = left + panelWidth - 6;
+        Button close = Button.builder(Component.literal("✕"), ignored -> onClose())
+                .bounds(right - 18, top + 5, 18, 18).build();
+        close.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Close")));
+        addRenderableWidget(close);
+        Button refresh = Button.builder(Component.literal("⟳"), ignored -> {
                     flushAutoSave();
                     request(snapshot.selectedModule(), pageId(snapshot));
                 })
-                .bounds(left + panelWidth - 136, top + panelHeight - 24, 62, 20).build());
+                .bounds(right - 40, top + 5, 18, 18).build();
+        refresh.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Refresh")));
+        addRenderableWidget(refresh);
+        if (backTarget != null) {
+            String target = backTarget;
+            addRenderableWidget(Button.builder(Component.literal("‹ Back"), ignored -> {
+                        flushAutoSave();
+                        request(snapshot.selectedModule(), target);
+                    })
+                    .bounds(right - 52, top + 26, 52, 16).build());
+        }
+    }
+
+    /** Where the page's Back button leads, shown in the header instead of in the page's rows. */
+    private String backTarget;
+
+    /**
+     * Takes every "Back" navigation button out of the page's rows; the first one becomes the header's Back
+     * button. Rows that only held a Back button disappear.
+     */
+    private AdminPanelNetworking.PanelSnapshot withoutBackActions(AdminPanelNetworking.PanelSnapshot value) {
+        backTarget = null;
+        if (value == null || value.page() == null) return value;
+        AdminPanelRegistry.AdminPage page = value.page();
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        for (AdminPanelRegistry.AdminEntry entry : page.entries()) {
+            List<AdminPanelRegistry.AdminAction> actions = new ArrayList<>();
+            boolean hadBack = false;
+            for (AdminPanelRegistry.AdminAction action : entry.actions()) {
+                boolean back = action.label().equals("Back") && action.targetPage() != null && !action.targetPage().isBlank();
+                if (!back) { actions.add(action); continue; }
+                hadBack = true;
+                if (backTarget == null) backTarget = action.targetPage();
+            }
+            if (!hadBack) { entries.add(entry); continue; }
+            if (actions.isEmpty() && entry.fields().isEmpty()) continue;
+            entries.add(new AdminPanelRegistry.AdminEntry(entry.title(), entry.detail(), entry.tone(), entry.fields(),
+                    actions, entry.section(), entry.preview()));
+        }
+        return new AdminPanelNetworking.PanelSnapshot(value.modules(), value.selectedModule(),
+                new AdminPanelRegistry.AdminPage(page.id(), page.title(), page.subtitle(), page.tabs(), entries,
+                        page.layout(), page.autoAction()), value.notice(), value.error(), value.navigation());
     }
 
     /** Moderate / Build / Logs switch and the pages of the current workspace, from every module. */
@@ -471,13 +517,13 @@ public final class AdminPanelScreen extends Screen {
         graphics.text(font, Component.literal(trim(isDashboard() ? "Administration" : snapshot.page().title(),
                 panelWidth / 2)), left + 12, top + 8, 0xFFF2F2F5, false);
         String subtitle = isDashboard() ? "" : snapshot.page().subtitle();
-        graphics.text(font, Component.literal(trim(subtitle, panelWidth - 120)),
+        graphics.text(font, Component.literal(trim(subtitle, panelWidth - 80)),
                 left + 12, top + 20, 0xFF9CA3AF, false);
         if (isDashboard()) renderDashboard(graphics);
         else renderEntries(graphics);
         if (snapshot.notice() != null && !snapshot.notice().isBlank()) {
             graphics.text(font, Component.literal(trim(snapshot.notice(), panelWidth - 160)), left + 12,
-                    top + panelHeight - 18, snapshot.error() ? 0xFFFF6B6B : 0xFF72D69C, false);
+                    top + panelHeight - 13, snapshot.error() ? 0xFFFF6B6B : 0xFF72D69C, false);
         }
         super.extractRenderState(graphics, (int) (mouseX / panelRenderScale),
                 (int) (mouseY / panelRenderScale), delta);
@@ -537,8 +583,8 @@ public final class AdminPanelScreen extends Screen {
         if (entries.size() > visible) {
             String position = (scroll + 1) + "–" + Math.min(entries.size(), scroll + visible)
                     + " / " + entries.size();
-            graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 16,
-                    top + 10, 0xFF9CA3AF, false);
+            graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 62,
+                    top + 30, 0xFF9CA3AF, false);
         }
     }
 
@@ -562,36 +608,76 @@ public final class AdminPanelScreen extends Screen {
             graphics.text(font, Component.literal(trim(entry.detail(), textWidth)), textX, y + 22,
                     0xFFA7AFBA, false);
         }
-        int columns = previewColumns();
-        int totalRows = (snapshot.page().entries().size() + columns - 1) / columns;
-        if (totalRows > visibleRows()) {
-            String position = (scroll + 1) + "–" + Math.min(totalRows, scroll + visibleRows())
-                    + " / " + totalRows + " rows";
-            graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 16,
-                    top + 10, 0xFF9CA3AF, false);
+        for (PreviewHeading heading : previewHeadings) {
+            graphics.text(font, Component.literal(heading.title()), left + 12, heading.y() + 3, 0xFFE1D8FF, false);
+            int lineX = left + 20 + font.width(heading.title());
+            graphics.fill(lineX, heading.y() + 7, left + panelWidth - 10, heading.y() + 8, 0xFF4A405F);
+        }
+        if (scroll > 0 || previewHasMore) {
+            String position = previewHasMore ? "scroll for more ↓" : "↑ scroll up";
+            graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 62,
+                    top + 30, 0xFF9CA3AF, false);
         }
     }
 
-    // Calculate responsive preview-card positions using two columns whenever the screen has enough width.
-    private List<PreviewPlacement> previewPlacements() {
-        List<PreviewPlacement> placements = new ArrayList<>();
+    /** Section headings of the cards currently on screen. */
+    private final List<PreviewHeading> previewHeadings = new ArrayList<>();
+    private boolean previewHasMore;
+
+    /** Card rows and section headings in order: a heading whenever the section changes, then rows of cards. */
+    private List<List<Integer>> previewLines() {
+        List<List<Integer>> lines = new ArrayList<>();
         List<AdminPanelRegistry.AdminEntry> entries = snapshot.page().entries();
         int columns = previewColumns();
-        int rows = visibleRows();
-        int totalRows = (entries.size() + columns - 1) / columns;
-        scroll = Math.max(0, Math.min(scroll, Math.max(0, totalRows - rows)));
+        String section = null;
+        List<Integer> row = null;
+        for (int index = 0; index < entries.size(); index++) {
+            String entrySection = entries.get(index).section();
+            if (!entrySection.equals(section)) {
+                section = entrySection;
+                if (!section.isBlank()) lines.add(List.of(-1 - index)); // heading, carries the entry index
+                row = null;
+            }
+            if (row == null || row.size() >= columns) {
+                row = new ArrayList<>();
+                lines.add(row);
+            }
+            row.add(index);
+        }
+        return lines;
+    }
+
+    // Calculate card positions line by line, with section headings between groups.
+    private List<PreviewPlacement> previewPlacements() {
+        List<PreviewPlacement> placements = new ArrayList<>();
+        previewHeadings.clear();
+        List<AdminPanelRegistry.AdminEntry> entries = snapshot.page().entries();
+        List<List<Integer>> lines = previewLines();
+        scroll = Math.max(0, Math.min(scroll, Math.max(0, lines.size() - 1)));
+        int columns = previewColumns();
         int gap = 5;
         int available = panelWidth - 20;
         int cardWidth = (available - gap * (columns - 1)) / columns;
-        int first = scroll * columns;
-        int capacity = rows * columns;
-        for (int slot = 0; slot < capacity && first + slot < entries.size(); slot++) {
-            int column = slot % columns;
-            int row = slot / columns;
-            int x = left + 10 + column * (cardWidth + gap);
-            int y = contentTop() + row * (PORTAL_ROW_HEIGHT + ROW_GAP);
-            placements.add(new PreviewPlacement(first + slot, entries.get(first + slot), x, y, cardWidth));
+        int y = contentTop();
+        int bottom = top + panelHeight - FOOTER_HEIGHT;
+        int line = scroll;
+        for (; line < lines.size(); line++) {
+            List<Integer> indexes = lines.get(line);
+            if (indexes.size() == 1 && indexes.getFirst() < 0) {
+                if (y + SECTION_HEADING_HEIGHT + PORTAL_ROW_HEIGHT > bottom) break;
+                previewHeadings.add(new PreviewHeading(entries.get(-1 - indexes.getFirst()).section(), y));
+                y += SECTION_HEADING_HEIGHT;
+                continue;
+            }
+            if (y + PORTAL_ROW_HEIGHT > bottom) break;
+            for (int column = 0; column < indexes.size(); column++) {
+                int index = indexes.get(column);
+                placements.add(new PreviewPlacement(index, entries.get(index), left + 10 + column * (cardWidth + gap), y,
+                        cardWidth));
+            }
+            y += PORTAL_ROW_HEIGHT + ROW_GAP;
         }
+        previewHasMore = line < lines.size();
         return placements;
     }
 
@@ -653,8 +739,8 @@ public final class AdminPanelScreen extends Screen {
             int last = placements.getLast().index() + 1;
             if (scroll > 0 || last < snapshot.page().entries().size()) {
                 String position = (scroll + 1) + "–" + last + " / " + snapshot.page().entries().size();
-                graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 16,
-                        top + 10, 0xFF9CA3AF, false);
+                graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 62,
+                        top + 30, 0xFF9CA3AF, false);
             }
         }
     }
@@ -717,11 +803,10 @@ public final class AdminPanelScreen extends Screen {
             return true;
         }
         if (!isDashboard() && snapshot.page().layout() == AdminPanelRegistry.PageLayout.PREVIEW_CARDS) {
-            int columns = previewColumns();
-            int totalRows = (snapshot.page().entries().size() + columns - 1) / columns;
+            previewPlacements();
             int previous = scroll;
-            scroll = Math.max(0, Math.min(Math.max(0, totalRows - visibleRows()),
-                    scroll + (verticalAmount < 0 ? 1 : -1)));
+            if (verticalAmount < 0 && previewHasMore) scroll++;
+            else if (verticalAmount > 0) scroll = Math.max(0, scroll - 1);
             if (scroll != previous) rebuildWidgets();
             return true;
         }
@@ -1104,6 +1189,8 @@ public final class AdminPanelScreen extends Screen {
     }
 
     /** Screen-space card placement shared by preview-grid controls and rendering. */
+    private record PreviewHeading(String title, int y) { }
+
     private record PreviewPlacement(int index, AdminPanelRegistry.AdminEntry entry, int x, int y, int width) {
     }
 }

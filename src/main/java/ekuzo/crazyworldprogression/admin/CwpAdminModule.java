@@ -92,14 +92,15 @@ public final class CwpAdminModule {
             new AdminPanelRegistry.AdminTab(PLAYERS, "Players", AdminPanelRegistry.MODERATE),
             new AdminPanelRegistry.AdminTab(POCKET_INSTANCES, "Instances", AdminPanelRegistry.MODERATE),
             new AdminPanelRegistry.AdminTab(EVENTS, "Events", AdminPanelRegistry.MODERATE),
+            new AdminPanelRegistry.AdminTab(CURRENCIES, "Currencies", AdminPanelRegistry.MODERATE),
             new AdminPanelRegistry.AdminTab(POCKETS, "Pockets", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(PORTALS, "Portals", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(BUILDINGS, "Buildings", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(MOBFORGE, "Mobs & scripts", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(MOB_MOBS, "Mobs", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(MOB_SCRIPTS, "Scripts", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot pools", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(CURRENCIES, "Currencies", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill trees", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(LOGS, "Server log", AdminPanelRegistry.LOGS),
+            new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill trees", AdminPanelRegistry.LOGS),
             new AdminPanelRegistry.AdminTab(OVERVIEW, "CWP status", AdminPanelRegistry.LOGS));
     /** Per admin: whether the server log shows only warnings and errors. */
     private static final Map<java.util.UUID, Boolean> LOG_PROBLEMS_ONLY = new java.util.HashMap<>();
@@ -160,13 +161,19 @@ public final class CwpAdminModule {
             case BUILDINGS -> buildingsPage(player);
             case CURRENCIES -> currenciesPage(player);
             case SKILL_TREES -> skillTreesPage(player);
-            case MOBFORGE -> mobForgePage(player);
+            case MOBFORGE -> mobMobsPage();
             case MOB_MOBS -> mobMobsPage();
             case MOB_SCRIPTS -> mobScriptsPage();
             case MOB_API -> mobApiPage();
             case EVENTS -> eventsPage(player);
             default -> overviewPage(player);
         };
+    }
+
+    /** The same entry filed under a section heading (Create, Active, All…). */
+    static AdminPanelRegistry.AdminEntry in(String section, AdminPanelRegistry.AdminEntry entry) {
+        return new AdminPanelRegistry.AdminEntry(entry.title(), entry.detail(), entry.tone(), entry.fields(),
+                entry.actions(), section, entry.preview());
     }
 
     /** Moderation: every online player with where they are, and quick actions. */
@@ -247,22 +254,27 @@ public final class CwpAdminModule {
     private static AdminPanelRegistry.AdminPage pocketsPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(new AdminPanelRegistry.AdminEntry("Create pocket", "Create a dedicated build dimension first.",
-                GOOD, List.of(AdminPanelRegistry.AdminAction.navigate("Create", POCKET_NEW))));
-        entries.add(new AdminPanelRegistry.AdminEntry("Active instances",
-                PortalService.activeInstances(server).size() + " running portal instances",
-                NORMAL, List.of(AdminPanelRegistry.AdminAction.navigate("Show instances", POCKET_INSTANCES))));
+        entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create pocket", "Create a dedicated build dimension first.",
+                GOOD, List.of(AdminPanelRegistry.AdminAction.navigate("Create", POCKET_NEW)))));
+        Map<Identifier, Long> running = PortalService.activeInstances(server).stream().collect(Collectors.groupingBy(
+                PortalService.ActiveInstance::templateId, Collectors.counting()));
+        List<AdminPanelRegistry.AdminEntry> active = new ArrayList<>();
+        List<AdminPanelRegistry.AdminEntry> all = new ArrayList<>();
         for (Identifier id : PocketEditorService.pockets(server)) {
             PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
-            entries.add(new AdminPanelRegistry.AdminEntry(id.toString(),
-                    template == null ? "Build space ready · no build saved yet"
-                            : template.sizeX() + "×" + template.sizeY() + "×" + template.sizeZ()
-                            + " · spawn " + template.spawnX() + ", " + template.spawnY() + ", "
-                            + template.spawnZ(), GOOD, List.of(),
+            long instances = running.getOrDefault(id, 0L);
+            AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(id.toString(),
+                    (template == null ? "Build space ready · no build saved yet"
+                            : template.sizeX() + "×" + template.sizeY() + "×" + template.sizeZ())
+                            + (instances > 0 ? " · " + instances + " running" : ""), instances > 0 ? GOOD : NORMAL, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", POCKET_EDIT + id),
                             new AdminPanelRegistry.AdminAction("pocket.delete|" + id, "Delete", true)),
-                    null));
+                    null);
+            if (instances > 0) active.add(in("Active · instances running", entry));
+            all.add(in("All pockets", entry));
         }
+        entries.addAll(active);
+        entries.addAll(all);
         return new AdminPanelRegistry.AdminPage(POCKETS, "Pocket dimensions",
                 PocketEditorService.pockets(server).size() + " saved pockets", TABS, entries,
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
@@ -271,16 +283,14 @@ public final class CwpAdminModule {
     private static AdminPanelRegistry.AdminPage activeInstancesPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(new AdminPanelRegistry.AdminEntry("Saved pockets", "Return to pocket editing",
-                NORMAL, List.of(AdminPanelRegistry.AdminAction.navigate("Back", POCKETS))));
         for (PortalService.ActiveInstance instance : PortalService.activeInstances(server)) {
             String remaining = instance.expires().toEpochMilli() == Long.MAX_VALUE ? "no expiry"
                     : Math.max(0L, Duration.between(Instant.now(), instance.expires()).toSeconds())
                     + "s remaining";
-            entries.add(new AdminPanelRegistry.AdminEntry(instance.portalId().toString(),
+            entries.add(in("Active · running now", new AdminPanelRegistry.AdminEntry(instance.portalId().toString(),
                     instance.templateId() + " in " + instance.slotDimension() + " · " + remaining,
                     GOOD, List.of(new AdminPanelRegistry.AdminAction(
-                    "instance.expire|" + instance.slotDimension(), "Expire", true))));
+                    "instance.expire|" + instance.slotDimension(), "Expire", true)))));
         }
         return new AdminPanelRegistry.AdminPage(POCKET_INSTANCES, "Active instances",
                 PortalService.activeInstances(server).size() + "/" + PortalRegistry.instanceSlots().size()
@@ -373,12 +383,14 @@ public final class CwpAdminModule {
     private static AdminPanelRegistry.AdminPage portalsPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(new AdminPanelRegistry.AdminEntry("Create portal", "Open an empty, organized portal editor.",
-                GOOD, List.of(AdminPanelRegistry.AdminAction.navigate("Create", PORTAL_NEW))));
+        entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create portal", "Open an empty, organized portal editor.",
+                GOOD, List.of(AdminPanelRegistry.AdminAction.navigate("Create", PORTAL_NEW)))));
+        List<AdminPanelRegistry.AdminEntry> active = new ArrayList<>();
+        List<AdminPanelRegistry.AdminEntry> all = new ArrayList<>();
         for (PortalDefinition portal : PortalService.portals(server)) {
             String portalId = portal.id().toString();
             int locationCount = PortalService.locations(server, portal.id()).size();
-            entries.add(new AdminPanelRegistry.AdminEntry(portal.effectiveDisplayName(),
+            AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(portal.effectiveDisplayName(),
                     "Linked to: " + (portal.isExit() ? "Exit"
                             : portal.isCoordinates() ? "Coordinates" : portal.templateId())
                             + " · " + locationCount + " location(s)",
@@ -386,10 +398,14 @@ public final class CwpAdminModule {
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", PORTAL_EDIT + portalId),
                             new AdminPanelRegistry.AdminAction("portal.delete|" + portalId, "Delete", true)),
                     new AdminPanelRegistry.EntryPreview("portal", portal.shape().serializedName(),
-                            portal.colorRgb())));
+                            portal.colorRgb()));
+            if (locationCount > 0 && PortalService.isOpen(portal)) active.add(in("Active · placed and open", entry));
+            all.add(in("All portals", entry));
         }
-        if (entries.size() == 1) entries.add(AdminPanelRegistry.AdminEntry.info("No portals defined",
-                "Create a portal, then add as many locations as needed."));
+        entries.addAll(active);
+        entries.addAll(all);
+        if (all.isEmpty()) entries.add(in("All portals", AdminPanelRegistry.AdminEntry.info("No portals defined",
+                "Create a portal, then add as many locations as needed.")));
         return new AdminPanelRegistry.AdminPage(PORTALS, "Portals",
                 PortalService.portals(server).size() + " portal definition(s)", TABS, entries,
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
@@ -397,15 +413,15 @@ public final class CwpAdminModule {
 
     private static AdminPanelRegistry.AdminPage buildingsPage(ServerPlayer player) {
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(new AdminPanelRegistry.AdminEntry("Create building",
+        entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create building",
                 "Select a built block range and save an independent copy.", GOOD, List.of(),
-                List.of(AdminPanelRegistry.AdminAction.navigate("Create", BUILDING_NEW)), null));
+                List.of(AdminPanelRegistry.AdminAction.navigate("Create", BUILDING_NEW)), null)));
         for (BuildingService.BuildingInfo building : BuildingService.buildings(player.level().getServer())) {
-            entries.add(new AdminPanelRegistry.AdminEntry(building.id().toString(),
+            entries.add(in("All buildings", new AdminPanelRegistry.AdminEntry(building.id().toString(),
                     building.sizeX() + " × " + building.sizeY() + " × " + building.sizeZ()
                             + " blocks · by " + building.author(), NORMAL, List.of(),
                     List.of(new AdminPanelRegistry.AdminAction("building.delete|" + building.id(),
-                            "Delete", true)), null));
+                            "Delete", true)), null)));
         }
         return new AdminPanelRegistry.AdminPage(BUILDINGS, "Buildings",
                 "Saved building copies for scripts", TABS, entries,
@@ -628,9 +644,9 @@ public final class CwpAdminModule {
             String detail = currency.id() + " · " + currency.scope().name().toLowerCase()
                     + " · " + (currency.scope() == CurrencyDefinition.CurrencyScope.GLOBAL ? "shared" : "your")
                     + " balance " + balance + " " + currency.abbreviation();
-            entries.add(new AdminPanelRegistry.AdminEntry(currency.displayName(), detail, NORMAL,
+            entries.add(in("All currencies", new AdminPanelRegistry.AdminEntry(currency.displayName(), detail, NORMAL,
                     List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", CURRENCY_EDIT + currency.id())),
-                    null));
+                    null)));
         }
         if (entries.isEmpty()) entries.add(AdminPanelRegistry.AdminEntry.info("No currencies",
                 "Dependent mods have not registered any currency definitions."));
@@ -704,35 +720,43 @@ public final class CwpAdminModule {
 
     private static AdminPanelRegistry.AdminPage mobMobsPage() {
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(new AdminPanelRegistry.AdminEntry("Create mob", "Add a MobForge YAML template.", GOOD,
-                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_EDIT + "@new")), null));
+        entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create mob", "Add a MobForge mob.", GOOD,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_EDIT + "@new")), null)));
+        entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Reload from files",
+                "Reload mobs and scripts from config/mobforge.", NORMAL, List.of(),
+                List.of(new AdminPanelRegistry.AdminAction("mob.reload", "Reload", false)), null)));
         for (MobTemplate template : MobForge.TEMPLATES.all()) {
-            entries.add(new AdminPanelRegistry.AdminEntry(template.id(),
+            entries.add(in("All mobs", new AdminPanelRegistry.AdminEntry(template.id(),
                     template.entity() + " · " + template.ai().mode() + " AI",
-                    GOOD, List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_EDIT + template.id()),
+                    NORMAL, List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_EDIT + template.id()),
                             new AdminPanelRegistry.AdminAction("mob.template.spawn|" + template.id(),
-                                    "Spawn here", false)), null));
+                                    "Spawn here", false)), null)));
         }
-        entries.add(new AdminPanelRegistry.AdminEntry("Navigation", "Back to MobForge", NORMAL,
-                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", MOBFORGE)), null));
-        return new AdminPanelRegistry.AdminPage(MOB_MOBS, "MobForge mobs", "Manage each YAML mob", TABS,
+        if (!MobForge.mobs().all().isEmpty()) entries.add(in("Registered by mods", new AdminPanelRegistry.AdminEntry(
+                "Content mod mobs", MobForge.mobs().all().size() + " mob(s) registered in code, read only", NORMAL,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("View", MOB_API)), null)));
+        return new AdminPanelRegistry.AdminPage(MOB_MOBS, "Mobs", MobForge.TEMPLATES.all().size() + " mob(s)", TABS,
                 entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
     private static AdminPanelRegistry.AdminPage mobScriptsPage() {
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(new AdminPanelRegistry.AdminEntry("Create script", "Add an encounter timeline.", GOOD,
-                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_SCRIPT_EDIT + "@new")), null));
+        entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create script", "Add an encounter timeline.", GOOD,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_SCRIPT_EDIT + "@new")), null)));
+        List<AdminPanelRegistry.AdminEntry> active = new ArrayList<>();
+        List<AdminPanelRegistry.AdminEntry> all = new ArrayList<>();
         for (MobScript script : MobForge.SCRIPTS.all()) {
-            entries.add(new AdminPanelRegistry.AdminEntry(script.id(),
-                    script.steps().size() + " steps · " + MobForge.SCRIPT_EXECUTOR.activeRuns(script.id())
-                            + " active runs", NORMAL, List.of(),
+            int runs = MobForge.SCRIPT_EXECUTOR.activeRuns(script.id());
+            AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(script.id(),
+                    script.steps().size() + " steps · " + runs + " running", runs > 0 ? GOOD : NORMAL, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_SCRIPT_EDIT + script.id()),
-                            new AdminPanelRegistry.AdminAction("mob.script.run|" + script.id(), "Run here", false)), null));
+                            new AdminPanelRegistry.AdminAction("mob.script.run|" + script.id(), "Run here", false)), null);
+            if (runs > 0) active.add(in("Active · running now", entry));
+            all.add(in("All scripts", entry));
         }
-        entries.add(new AdminPanelRegistry.AdminEntry("Navigation", "Back to MobForge", NORMAL,
-                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", MOBFORGE)), null));
-        return new AdminPanelRegistry.AdminPage(MOB_SCRIPTS, "MobForge scripts", "Manage each encounter script", TABS,
+        entries.addAll(active);
+        entries.addAll(all);
+        return new AdminPanelRegistry.AdminPage(MOB_SCRIPTS, "Scripts", "Encounter scripts", TABS,
                 entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
@@ -759,8 +783,8 @@ public final class CwpAdminModule {
                     MobForge.behaviors().all().keySet().stream().map(Object::toString).sorted()
                             .collect(Collectors.joining(", "))));
         }
-        entries.add(new AdminPanelRegistry.AdminEntry("Navigation", "Back to MobForge", NORMAL,
-                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", MOBFORGE)), null));
+        entries.add(new AdminPanelRegistry.AdminEntry("Navigation", "Back to mobs", NORMAL,
+                List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Back", MOB_MOBS)), null));
         return new AdminPanelRegistry.AdminPage(MOB_API, "MobForge API", "Content mod registrations are read only",
                 TABS, entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
@@ -768,21 +792,25 @@ public final class CwpAdminModule {
     private static AdminPanelRegistry.AdminPage eventsPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        List<AdminPanelRegistry.AdminEntry> running = new ArrayList<>();
         for (RandomEventDefinition event : RandomEventManager.definitions()) {
             boolean active = RandomEventService.isActive(server, event.id());
-            entries.add(new AdminPanelRegistry.AdminEntry(event.id().toString(),
+            AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(event.id().toString(),
                     event.trigger().getClass().getSimpleName().replace("Trigger", "") + " · "
                     + (RandomEventRegistry.hasHandler(event.id()) ? "handler ready" : "missing handler") + " · "
                     + (active ? "ACTIVE" : "inactive"), active ? GOOD : NORMAL,
                     List.of(new AdminPanelRegistry.AdminAction(
                             (active ? "event.stop|" : "event.start|") + event.id(),
-                            active ? "Stop" : "Start", active))));
+                            active ? "Stop" : "Start", active)));
+            if (active) running.add(in("Active · running now", entry));
+            entries.add(in("All events", entry));
         }
+        entries.addAll(0, running);
         if (entries.isEmpty()) entries.add(AdminPanelRegistry.AdminEntry.info("No events loaded",
                 "Register a random-event YAML source from a content mod."));
-        return page(EVENTS, "Random events",
+        return new AdminPanelRegistry.AdminPage(EVENTS, "Random events",
                 RandomEventService.isBlackoutActive() ? "A blackout window is active" : "Random starts are allowed",
-                entries);
+                TABS, entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
     // Execute one native action after the networking layer has authenticated the administrator.

@@ -87,6 +87,15 @@ public final class AdminPanelScreen extends Screen {
                 || !pageId(this.snapshot).equals(pageId(snapshot));
         snapshot = withoutBackActions(snapshot);
         this.snapshot = snapshot;
+        Runnable pendingLeave = afterSave;
+        afterSave = null;
+        // "Save and leave": only leave when the save worked and the save itself did not already move on.
+        if (pendingLeave != null && !snapshot.error() && !changedPage) {
+            formValues.clear();
+            seedFormValues();
+            pendingLeave.run();
+            return;
+        }
         boolean successfulAction = snapshot.notice() != null && !snapshot.notice().isBlank() && !snapshot.error();
         if (changedPage) {
             scroll = 0;
@@ -125,7 +134,7 @@ public final class AdminPanelScreen extends Screen {
         if (isDashboard()) buildDashboardButtons();
         else buildModuleButtons();
         int right = left + panelWidth - 6;
-        Button close = Button.builder(Component.literal("✕"), ignored -> onClose())
+        Button close = Button.builder(Component.literal("✕"), ignored -> leave(this::onClose))
                 .bounds(right - 18, top + 5, 18, 18).build();
         close.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Close")));
         addRenderableWidget(close);
@@ -138,12 +147,52 @@ public final class AdminPanelScreen extends Screen {
         addRenderableWidget(refresh);
         if (backTarget != null) {
             String target = backTarget;
-            addRenderableWidget(Button.builder(Component.literal("‹ Back"), ignored -> {
+            addRenderableWidget(Button.builder(Component.literal("‹ Back"), ignored -> leave(() -> {
                         flushAutoSave();
                         request(snapshot.selectedModule(), target);
-                    })
+                    }))
                     .bounds(right - 52, top + 26, 52, 16).build());
         }
+    }
+
+    /** Runs after the next successful snapshot once "Save and leave" was chosen. */
+    private Runnable afterSave;
+
+    /**
+     * True when a field differs from what the page was opened with. Pages whose autoAction persists every
+     * edit right away (named …autosave) never count as unsaved.
+     */
+    private boolean hasUnsavedChanges() {
+        if (isDashboard() || snapshot.page().autoAction().contains("autosave")) return false;
+        for (AdminPanelRegistry.AdminEntry entry : snapshot.page().entries())
+            for (AdminPanelRegistry.AdminField field : entry.fields()) {
+                if (field.type() == AdminPanelRegistry.FieldType.READ_ONLY) continue;
+                String value = formValues.get(field.id());
+                if (value != null && !value.equals(field.initialValue())) return true;
+            }
+        return false;
+    }
+
+    /** The page's own Save button (first action labelled Save…), used for "Save and leave". */
+    private AdminPanelRegistry.AdminAction saveAction() {
+        for (AdminPanelRegistry.AdminEntry entry : snapshot.page().entries())
+            for (AdminPanelRegistry.AdminAction action : entry.actions())
+                if (action.label().startsWith("Save") && !action.dangerous()
+                        && (action.targetPage() == null || action.targetPage().isBlank())) return action;
+        return null;
+    }
+
+    /** Leaving the page: asks first when there are unsaved changes. */
+    private void leave(Runnable go) {
+        if (!hasUnsavedChanges()) {
+            go.run();
+            return;
+        }
+        AdminPanelRegistry.AdminAction save = saveAction();
+        minecraft.gui.setScreen(new UnsavedChangesScreen(this, save == null ? null : () -> {
+            afterSave = go;
+            activate(save);
+        }, go));
     }
 
     /** Where the page's Back button leads, shown in the header instead of in the page's rows. */
@@ -191,10 +240,10 @@ public final class AdminPanelScreen extends Screen {
             AdminPanelNetworking.NavTab first = navigation.stream().filter(tab -> tab.workspace().equals(option))
                     .findFirst().orElse(null);
             if (first == null) continue;
-            Button button = Button.builder(Component.literal(workspaceName(option)), ignored -> {
+            Button button = Button.builder(Component.literal(workspaceName(option)), ignored -> leave(() -> {
                 flushAutoSave();
                 request(first.moduleId(), first.pageId());
-            }).bounds(x, y, buttonWidth, 18).build();
+            })).bounds(x, y, buttonWidth, 18).build();
             button.active = !option.equals(workspace);
             addRenderableWidget(button);
             y += 20;
@@ -204,10 +253,10 @@ public final class AdminPanelScreen extends Screen {
         for (AdminPanelNetworking.NavTab tab : navigation) {
             if (!tab.workspace().equals(workspace)) continue;
             if (y + 16 > top + panelHeight - 6) break;
-            Button button = Button.builder(Component.literal(trim(tab.label(), buttonWidth - 8)), ignored -> {
+            Button button = Button.builder(Component.literal(trim(tab.label(), buttonWidth - 8)), ignored -> leave(() -> {
                 flushAutoSave();
                 request(tab.moduleId(), tab.pageId());
-            }).bounds(x, y, buttonWidth, 16).build();
+            })).bounds(x, y, buttonWidth, 16).build();
             button.active = tab != selected;
             addRenderableWidget(button);
             y += 18;
@@ -265,7 +314,7 @@ public final class AdminPanelScreen extends Screen {
         }
         if (page.layout() == AdminPanelRegistry.PageLayout.PREVIEW_CARDS) {
             for (PreviewPlacement placement : previewPlacements()) {
-                addActionButtons(placement.entry(), placement.y(),
+                addActionButtons(placement.entry(), placement.y(), placement.x() + 8,
                         placement.x() + placement.width() - 8, false);
             }
             return;
@@ -277,18 +326,19 @@ public final class AdminPanelScreen extends Screen {
             AdminPanelRegistry.AdminEntry entry = entries.get(entryIndex);
             int y = contentTop() + visibleIndex * (rowHeight() + ROW_GAP);
             addFields(entry, y, left + 18, panelWidth - 36, false);
-            addActionButtons(entry, y, left + panelWidth - 14, false);
+            addActionButtons(entry, y, left + 18, left + panelWidth - 14, false);
         }
         addSelectOptions();
     }
 
-    // Lay out a compact continuous editor using section dividers instead of oversized status cards.
+    // Editor pages: every section is a box, boxes fill the columns like a dashboard.
     private void buildEditorWidgets() {
-        List<EditorPlacement> placements = editorPlacements();
-        for (EditorPlacement placement : placements) {
+        for (EditorPlacement placement : editorPlacements()) {
+            if (!placement.visible()) continue;
             AdminPanelRegistry.AdminEntry entry = placement.entry();
-            addFields(entry, placement.y(), left + 24, panelWidth - 48, true);
-            addActionButtons(entry, placement.y(), left + panelWidth - 24, true);
+            addFields(entry, placement.y(), placement.x() + 6, placement.width() - 12, true);
+            addActionButtons(entry, placement.y(), placement.x() + 6, placement.x() + placement.width() - 6, true,
+                    placement.height());
         }
     }
 
@@ -298,7 +348,7 @@ public final class AdminPanelScreen extends Screen {
         int actionWidth = actionWidth(entry) + (compact ? previewWidth(entry) : 0);
         int available = Math.max(100, areaWidth - actionWidth);
         int dividedWidth = (available - (entry.fields().size() - 1) * 6) / entry.fields().size();
-        int fieldWidth = Math.max(72, compact ? dividedWidth : Math.min(150, dividedWidth));
+        int fieldWidth = compact ? Math.max(40, dividedWidth) : Math.max(72, Math.min(150, dividedWidth));
         int x = areaX;
         int fieldY = y + (compact ? 13 : 35);
         for (AdminPanelRegistry.AdminField field : entry.fields()) {
@@ -428,13 +478,18 @@ public final class AdminPanelScreen extends Screen {
     }
 
     // Place an entry's compact controls from right to left while preserving room for its text.
-    private void addActionButtons(AdminPanelRegistry.AdminEntry entry, int y, int right, boolean compact) {
+    private void addActionButtons(AdminPanelRegistry.AdminEntry entry, int y, int areaX, int right, boolean compact) {
+        addActionButtons(entry, y, areaX, right, compact, compact ? EDITOR_ACTION_ROW_HEIGHT : rowHeight());
+    }
+
+    private void addActionButtons(AdminPanelRegistry.AdminEntry entry, int y, int areaX, int right, boolean compact,
+                                  int height) {
         if (compact && entry.fields().isEmpty() && entry.actions().size() == 1 && entry.actions().getFirst().wide()) {
             AdminPanelRegistry.AdminAction action = entry.actions().getFirst();
             String label = action.dangerous() && action.id().equals(pendingDangerousAction)
                     ? "Confirm" : action.label();
             addRenderableWidget(Button.builder(Component.literal(label), ignored -> activate(action))
-                    .bounds(left + 24, y + 3, right - left - 24, 20).build());
+                    .bounds(areaX, y + (height - 20) / 2, right - areaX, 20).build());
             return;
         }
         int x = right;
@@ -445,7 +500,7 @@ public final class AdminPanelScreen extends Screen {
             String label = confirming ? "Confirm" : action.label();
             int buttonWidth = buttonWidth(label);
             x -= buttonWidth;
-            int buttonY = compact ? y + (entry.fields().isEmpty() ? 3 : 13)
+            int buttonY = compact ? y + (entry.fields().isEmpty() ? (height - 20) / 2 : 13)
                     : y + (entry.fields().isEmpty() ? (rowHeight() - 20) / 2 : 35);
             addRenderableWidget(Button.builder(Component.literal(label), ignored -> activate(action))
                     .bounds(x, buttonY, buttonWidth, 20).build());
@@ -465,8 +520,10 @@ public final class AdminPanelScreen extends Screen {
     // Require a deliberate second click for destructive controls before sending them to the server.
     private void activate(AdminPanelRegistry.AdminAction action) {
         if (action.targetPage() != null && !action.targetPage().isBlank()) {
-            flushAutoSave();
-            request(snapshot.selectedModule(), action.targetPage());
+            leave(() -> {
+                flushAutoSave();
+                request(snapshot.selectedModule(), action.targetPage());
+            });
             return;
         }
         if (action.dangerous() && !action.id().equals(pendingDangerousAction)) {
@@ -688,72 +745,80 @@ public final class AdminPanelScreen extends Screen {
         return panelWidth >= 1000 ? 3 : panelWidth >= 620 ? 2 : 1;
     }
 
-    // Render a dense form with shared section headings, aligned labels, and subtle row backgrounds.
+    // Editor pages as dashboard boxes: a rounded-looking tile per section, rows inside, cut at the viewport.
     private void renderEditor(GuiGraphicsExtractor graphics) {
         List<EditorPlacement> placements = editorPlacements();
-        for (EditorPlacement placement : placements) {
-            AdminPanelRegistry.AdminEntry entry = placement.entry();
-            if (placement.sectionY() >= 0) {
-                String section = placement.section();
-                graphics.text(font, Component.literal(section), left + 22, placement.sectionY() + 3,
+        int viewTop = contentTop();
+        int viewBottom = top + panelHeight - FOOTER_HEIGHT;
+        for (EditorBox box : editorBoxes) {
+            int y0 = Math.max(viewTop, box.y()), y1 = Math.min(viewBottom, box.y() + box.height());
+            if (y1 <= y0) continue;
+            graphics.fill(box.x(), y0, box.x() + box.width(), y1, 0xFF1A1E26);
+            graphics.fill(box.x(), y0, box.x() + box.width(), y0 + 1, 0xFF2C3240);
+            if (box.y() >= viewTop && box.y() + 14 <= viewBottom)
+                graphics.text(font, Component.literal(trim(box.title(), box.width() - 12)), box.x() + 7, box.y() + 5,
                         0xFFE1D8FF, false);
-                int lineX = left + 30 + font.width(section);
-                graphics.fill(lineX, placement.sectionY() + 7, left + panelWidth - 22,
-                        placement.sectionY() + 8, 0xFF4A405F);
-            }
-            graphics.fill(left + 18, placement.y(), left + panelWidth - 18,
-                    placement.y() + placement.height(), 0x99191E26);
+        }
+        for (EditorPlacement placement : placements) {
+            if (!placement.visible()) continue;
+            AdminPanelRegistry.AdminEntry entry = placement.entry();
+            int rowLeft = placement.x() + 6, rowRight = placement.x() + placement.width() - 6;
+            graphics.fill(rowLeft - 2, placement.y(), rowRight + 2, placement.y() + placement.height(), 0x66232934);
             if (entry.fields().isEmpty()) {
-                if (entry.preview() != null && entry.preview().kind().equals("item"))
+                int textX = rowLeft + 2;
+                if (entry.preview() != null && entry.preview().kind().equals("item")) {
                     graphics.item(icon(entry.title().equals("Item preview")
                                     ? formValues.getOrDefault("target", entry.preview().shape())
-                                    : entry.preview().shape()), left + 25, placement.y() + 3);
-                int textX = left + (entry.preview() == null ? 25 : 46);
-                int textRight = left + panelWidth - 24 - actionWidth(entry) - 6;
+                                    : entry.preview().shape()), rowLeft, placement.y() + (placement.height() - 16) / 2);
+                    textX = rowLeft + 20;
+                }
+                int textRight = rowRight - actionWidth(entry) - 4;
                 String name = trim(editorRowName(entry.title()), Math.max(20, textRight - textX));
-                graphics.text(font, Component.literal(name), textX, placement.y() + 8, 0xFFF0F1F3, false);
-                int detailX = textX + font.width(name) + 10;
-                if (!entry.detail().isBlank() && detailX < textRight - 20)
-                    graphics.text(font, Component.literal(trim(entry.detail(), textRight - detailX)), detailX,
-                            placement.y() + 8, 0xFF9CA3AF, false);
+                boolean twoLines = !entry.detail().isBlank();
+                graphics.text(font, Component.literal(name), textX, placement.y() + (twoLines ? 4 : 8), 0xFFF0F1F3, false);
+                if (twoLines) graphics.text(font, Component.literal(trim(entry.detail(), Math.max(20, textRight - textX))),
+                        textX, placement.y() + 16, 0xFF9CA3AF, false);
                 continue;
             }
             int actionWidth = actionWidth(entry) + previewWidth(entry);
             if (previewWidth(entry) > 0) {
-                int iconX = left + panelWidth - 24 - actionWidth + 2;
+                int iconX = rowRight - actionWidth + 2;
                 String target = previewTarget(entry);
                 if (entry.preview().kind().equals("entity"))
                     renderEntityPreview(graphics, target, iconX, placement.y() + 1, previewWidth(entry) - 4,
                             placement.height() - 2);
                 else if (!target.isBlank()) graphics.item(icon(target), iconX, placement.y() + 15);
             }
-            int available = Math.max(100, panelWidth - 48 - actionWidth);
-            int fieldWidth = Math.max(72,
-                    (available - (entry.fields().size() - 1) * 6) / entry.fields().size());
-            int x = left + 24;
+            int available = Math.max(60, rowRight - rowLeft - actionWidth);
+            int fieldWidth = Math.max(40, (available - (entry.fields().size() - 1) * 6) / entry.fields().size());
+            int x = rowLeft;
             for (AdminPanelRegistry.AdminField field : entry.fields()) {
                 graphics.text(font, Component.literal(trim(field.label(), fieldWidth)), x, placement.y() + 2,
                         0xFFAEB6C2, false);
                 x += fieldWidth + 6;
             }
         }
-        if (!placements.isEmpty()) {
-            int last = placements.getLast().index() + 1;
-            if (scroll > 0 || last < snapshot.page().entries().size()) {
-                String position = (scroll + 1) + "–" + last + " / " + snapshot.page().entries().size();
-                graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 62,
-                        top + 30, 0xFF9CA3AF, false);
-            }
+        if (scroll > 0 || editorHasMore) {
+            String position = editorHasMore ? "scroll for more ↓" : "↑ scroll up";
+            graphics.text(font, Component.literal(position), left + panelWidth - font.width(position) - 62,
+                    top + 30, 0xFF9CA3AF, false);
         }
     }
 
-    // Calculate visible compact-editor rows and insert space only when a logical section changes.
+    private final List<EditorBox> editorBoxes = new ArrayList<>();
+    private boolean editorHasMore;
+    private static final int EDITOR_SCROLL_STEP = 24;
+    private static final int EDITOR_BOX_HEADER = 18;
+
+    /** Columns of section boxes; each box goes to the currently shortest column, keeping page order. */
     private List<EditorPlacement> editorPlacements() {
         List<EditorPlacement> placements = new ArrayList<>();
+        editorBoxes.clear();
         List<AdminPanelRegistry.AdminEntry> entries = snapshot.page().entries();
-        int y = contentTop() + 1;
-        String previousSection = "";
-        for (int index = scroll; index < entries.size(); index++) {
+        // Group consecutive rows of the same section into one box.
+        List<String> titles = new ArrayList<>();
+        List<List<Integer>> groups = new ArrayList<>();
+        for (int index = 0; index < entries.size(); index++) {
             AdminPanelRegistry.AdminEntry entry = entries.get(index);
             if (entry.fields().stream().anyMatch(field -> field.id().equals("portal_target_x"))
                     && !"Coordinates".equalsIgnoreCase(formValues.getOrDefault("portal_template", ""))) continue;
@@ -761,18 +826,39 @@ public final class AdminPanelScreen extends Screen {
                     && ("Coordinates".equalsIgnoreCase(formValues.getOrDefault("portal_template", ""))
                     || "Exit".equalsIgnoreCase(formValues.getOrDefault("portal_template", "")))) continue;
             String section = editorSection(entry);
-            boolean changedSection = placements.isEmpty() || !section.equals(previousSection);
-            int sectionY = -1;
-            if (changedSection) {
-                sectionY = y;
-                y += EDITOR_SECTION_HEIGHT;
+            if (titles.isEmpty() || !titles.getLast().equals(section)) {
+                titles.add(section);
+                groups.add(new ArrayList<>());
             }
-            int height = entry.fields().isEmpty() ? EDITOR_ACTION_ROW_HEIGHT : EDITOR_FIELD_ROW_HEIGHT;
-            if (y + height > top + panelHeight - FOOTER_HEIGHT - 2) break;
-            placements.add(new EditorPlacement(index, entry, y, height, section, sectionY));
-            y += height + 3;
-            previousSection = section;
+            groups.getLast().add(index);
         }
+        int columns = panelWidth >= 1150 ? 3 : panelWidth >= 640 ? 2 : 1;
+        int gap = 6;
+        int columnWidth = (panelWidth - 20 - gap * (columns - 1)) / columns;
+        int[] heights = new int[columns];
+        int scrollPixels = scroll * EDITOR_SCROLL_STEP;
+        int viewTop = contentTop();
+        int viewBottom = top + panelHeight - FOOTER_HEIGHT;
+        for (int group = 0; group < groups.size(); group++) {
+            int column = 0;
+            for (int candidate = 1; candidate < columns; candidate++) if (heights[candidate] < heights[column]) column = candidate;
+            int x = left + 10 + column * (columnWidth + gap);
+            int boxTop = viewTop + heights[column] - scrollPixels;
+            int y = boxTop + EDITOR_BOX_HEADER;
+            for (int index : groups.get(group)) {
+                AdminPanelRegistry.AdminEntry entry = entries.get(index);
+                int height = entry.fields().isEmpty() ? (entry.detail().isBlank() ? 24 : 30) : EDITOR_FIELD_ROW_HEIGHT;
+                boolean visible = y >= viewTop && y + height <= viewBottom;
+                placements.add(new EditorPlacement(index, entry, x, y, columnWidth, height, visible));
+                y += height + 3;
+            }
+            int boxHeight = y + 3 - boxTop;
+            editorBoxes.add(new EditorBox(titles.get(group), x, boxTop, columnWidth, boxHeight));
+            heights[column] += boxHeight + gap;
+        }
+        int tallest = 0;
+        for (int height : heights) tallest = Math.max(tallest, height);
+        editorHasMore = tallest - scrollPixels > viewBottom - viewTop;
         return placements;
     }
 
@@ -796,10 +882,9 @@ public final class AdminPanelScreen extends Screen {
         mouseX /= panelRenderScale;
         mouseY /= panelRenderScale;
         if (!isDashboard() && snapshot.page().layout() == AdminPanelRegistry.PageLayout.EDITOR) {
-            List<EditorPlacement> placements = editorPlacements();
+            editorPlacements();
             int previous = scroll;
-            if (verticalAmount < 0 && !placements.isEmpty()
-                    && placements.getLast().index() < snapshot.page().entries().size() - 1) scroll++;
+            if (verticalAmount < 0 && editorHasMore) scroll++;
             else if (verticalAmount > 0) scroll = Math.max(0, scroll - 1);
             if (scroll != previous) rebuildWidgets();
             return true;
@@ -1186,8 +1271,12 @@ public final class AdminPanelScreen extends Screen {
     }
 
     /** Calculated screen-space row used identically by compact editor widgets and rendering. */
-    private record EditorPlacement(int index, AdminPanelRegistry.AdminEntry entry, int y, int height,
-                                   String section, int sectionY) {
+    private record EditorPlacement(int index, AdminPanelRegistry.AdminEntry entry, int x, int y, int width, int height,
+                                   boolean visible) {
+    }
+
+    /** One section box of an editor page. */
+    private record EditorBox(String title, int x, int y, int width, int height) {
     }
 
     /** Screen-space card placement shared by preview-grid controls and rendering. */

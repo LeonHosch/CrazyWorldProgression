@@ -63,15 +63,17 @@ final class AdminLootPoolEditor {
         List<LootPoolData.Pool> topLevel = pools.values().stream()
                 .filter(pool -> !LootPoolService.nested(pools, pool.id()))
                 .sorted(Comparator.comparing(pool -> pool.id().toString())).toList();
+        Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (LootPoolData.Pool pool : topLevel) {
             var firstItem = pool.entries().stream().filter(entry -> entry.kind().equals("item")).findFirst();
-            rows.add(CwpAdminModule.in("All loot pools", new AdminPanelRegistry.AdminEntry(pool.name(),
+            all.put(pool.id().toString(), (new AdminPanelRegistry.AdminEntry(pool.name(),
                     pool.id() + " · " + countLabel(pool.entries().size()), GOOD, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", EDIT + pool.id()),
                             new AdminPanelRegistry.AdminAction("loot.delete|" + pool.id(), "Delete", true)),
                     new AdminPanelRegistry.EntryPreview("item",
                             firstItem.map(entry -> entry.target().toString()).orElse("minecraft:chest"), 0))));
         }
+        rows.addAll(AdminCategories.sectioned(server, "loot_pool", "All loot pools", all, ROOT));
         return new AdminPanelRegistry.AdminPage(ROOT, "Loot pools",
                 topLevel.size() + " loot pool(s) · use loot(lootpool_id=\"…\") in a pocket script", tabs, rows,
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);

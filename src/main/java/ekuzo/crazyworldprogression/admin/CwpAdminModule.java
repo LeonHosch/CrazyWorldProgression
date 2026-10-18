@@ -131,6 +131,7 @@ public final class CwpAdminModule {
 
     // Route a requested tab to a fresh server-authoritative page.
     private static AdminPanelRegistry.AdminPage page(ServerPlayer player, String pageId) {
+        if (AdminCategories.owns(pageId)) return AdminCategories.page(player, pageId, TABS);
         if (AdminLootPoolEditor.owns(pageId)) return AdminLootPoolEditor.page(player, pageId, TABS);
         ScriptRoute scriptRoute = scriptRoute(pageId);
         if (scriptRoute != null) return AdminScriptEditor.page(player, pageId, scriptRoute.backPage(),
@@ -161,9 +162,9 @@ public final class CwpAdminModule {
             case BUILDINGS -> buildingsPage(player);
             case CURRENCIES -> currenciesPage(player);
             case SKILL_TREES -> skillTreesPage(player);
-            case MOBFORGE -> mobMobsPage();
-            case MOB_MOBS -> mobMobsPage();
-            case MOB_SCRIPTS -> mobScriptsPage();
+            case MOBFORGE -> mobMobsPage(player.level().getServer());
+            case MOB_MOBS -> mobMobsPage(player.level().getServer());
+            case MOB_SCRIPTS -> mobScriptsPage(player.level().getServer());
             case MOB_API -> mobApiPage();
             case EVENTS -> eventsPage(player);
             default -> overviewPage(player);
@@ -181,6 +182,10 @@ public final class CwpAdminModule {
         MinecraftServer server = viewer.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
         List<ServerPlayer> players = new ArrayList<>(server.getPlayerList().getPlayers());
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Find", "Teleport to a player", "Type a name, then Teleport.",
+                List.of(new AdminPanelRegistry.AdminField("player_name", "Player (type to search)", "name", "", 32,
+                        players.stream().map(p -> p.getGameProfile().name()).sorted(String.CASE_INSENSITIVE_ORDER).toList())),
+                List.of(new AdminPanelRegistry.AdminAction("player.tp_name", "Teleport", false))));
         players.sort(java.util.Comparator.comparing(p -> p.getGameProfile().name().toLowerCase(java.util.Locale.ROOT)));
         for (ServerPlayer target : players) {
             Identifier dimension = target.level().dimension().identifier();
@@ -195,11 +200,12 @@ public final class CwpAdminModule {
                 actions.add(new AdminPanelRegistry.AdminAction("player.tp|" + target.getUUID(), "Teleport to", false));
             if (instance || workshop)
                 actions.add(new AdminPanelRegistry.AdminAction("player.out|" + target.getUUID(), "Send out", true));
-            entries.add(new AdminPanelRegistry.AdminEntry(target.getGameProfile().name(), detail, GOOD, List.of(),
-                    actions, new AdminPanelRegistry.EntryPreview("item", "minecraft:player_head", 0)));
+            entries.add(in("Online", new AdminPanelRegistry.AdminEntry(target.getGameProfile().name()
+                    + (target.getUUID().equals(viewer.getUUID()) ? " (you)" : ""), detail, GOOD, List.of(),
+                    actions, new AdminPanelRegistry.EntryPreview("item", "minecraft:player_head", 0))));
         }
         return new AdminPanelRegistry.AdminPage(PLAYERS, "Players", players.size() + " online", TABS, entries,
-                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+                AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     /** Recent server log lines: warnings and errors from everything, normal messages from CWP and Echelon. */
@@ -259,7 +265,7 @@ public final class CwpAdminModule {
         Map<Identifier, Long> running = PortalService.activeInstances(server).stream().collect(Collectors.groupingBy(
                 PortalService.ActiveInstance::templateId, Collectors.counting()));
         List<AdminPanelRegistry.AdminEntry> active = new ArrayList<>();
-        List<AdminPanelRegistry.AdminEntry> all = new ArrayList<>();
+        Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (Identifier id : PocketEditorService.pockets(server)) {
             PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
             long instances = running.getOrDefault(id, 0L);
@@ -271,10 +277,10 @@ public final class CwpAdminModule {
                             new AdminPanelRegistry.AdminAction("pocket.delete|" + id, "Delete", true)),
                     null);
             if (instances > 0) active.add(in("Active · instances running", entry));
-            all.add(in("All pockets", entry));
+            all.put(id.toString(), entry);
         }
         entries.addAll(active);
-        entries.addAll(all);
+        entries.addAll(AdminCategories.sectioned(server, "pocket", "All pockets", all, POCKETS));
         return new AdminPanelRegistry.AdminPage(POCKETS, "Pocket dimensions",
                 PocketEditorService.pockets(server).size() + " saved pockets", TABS, entries,
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
@@ -386,7 +392,7 @@ public final class CwpAdminModule {
         entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create portal", "Open an empty, organized portal editor.",
                 GOOD, List.of(AdminPanelRegistry.AdminAction.navigate("Create", PORTAL_NEW)))));
         List<AdminPanelRegistry.AdminEntry> active = new ArrayList<>();
-        List<AdminPanelRegistry.AdminEntry> all = new ArrayList<>();
+        Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (PortalDefinition portal : PortalService.portals(server)) {
             String portalId = portal.id().toString();
             int locationCount = PortalService.locations(server, portal.id()).size();
@@ -400,10 +406,10 @@ public final class CwpAdminModule {
                     new AdminPanelRegistry.EntryPreview("portal", portal.shape().serializedName(),
                             portal.colorRgb()));
             if (locationCount > 0 && PortalService.isOpen(portal)) active.add(in("Active · placed and open", entry));
-            all.add(in("All portals", entry));
+            all.put(portalId, entry);
         }
         entries.addAll(active);
-        entries.addAll(all);
+        entries.addAll(AdminCategories.sectioned(server, "portal", "All portals", all, PORTALS));
         if (all.isEmpty()) entries.add(in("All portals", AdminPanelRegistry.AdminEntry.info("No portals defined",
                 "Create a portal, then add as many locations as needed.")));
         return new AdminPanelRegistry.AdminPage(PORTALS, "Portals",
@@ -416,13 +422,15 @@ public final class CwpAdminModule {
         entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create building",
                 "Select a built block range and save an independent copy.", GOOD, List.of(),
                 List.of(AdminPanelRegistry.AdminAction.navigate("Create", BUILDING_NEW)), null)));
+        Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (BuildingService.BuildingInfo building : BuildingService.buildings(player.level().getServer())) {
-            entries.add(in("All buildings", new AdminPanelRegistry.AdminEntry(building.id().toString(),
+            all.put(building.id().toString(), (new AdminPanelRegistry.AdminEntry(building.id().toString(),
                     building.sizeX() + " × " + building.sizeY() + " × " + building.sizeZ()
                             + " blocks · by " + building.author(), NORMAL, List.of(),
                     List.of(new AdminPanelRegistry.AdminAction("building.delete|" + building.id(),
                             "Delete", true)), null)));
         }
+        entries.addAll(AdminCategories.sectioned(player.level().getServer(), "building", "All buildings", all, BUILDINGS));
         return new AdminPanelRegistry.AdminPage(BUILDINGS, "Buildings",
                 "Saved building copies for scripts", TABS, entries,
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
@@ -639,15 +647,17 @@ public final class CwpAdminModule {
     private static AdminPanelRegistry.AdminPage currenciesPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (CurrencyDefinition currency : CurrencyRegistry.values()) {
             long balance = CurrencyService.getBalance(server, player.getUUID(), currency.id());
             String detail = currency.id() + " · " + currency.scope().name().toLowerCase()
                     + " · " + (currency.scope() == CurrencyDefinition.CurrencyScope.GLOBAL ? "shared" : "your")
                     + " balance " + balance + " " + currency.abbreviation();
-            entries.add(in("All currencies", new AdminPanelRegistry.AdminEntry(currency.displayName(), detail, NORMAL,
+            all.put(currency.id().toString(), (new AdminPanelRegistry.AdminEntry(currency.displayName(), detail, NORMAL,
                     List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", CURRENCY_EDIT + currency.id())),
                     null)));
         }
+        entries.addAll(AdminCategories.sectioned(server, "currency", "All currencies", all, CURRENCIES));
         if (entries.isEmpty()) entries.add(AdminPanelRegistry.AdminEntry.info("No currencies",
                 "Dependent mods have not registered any currency definitions."));
         return new AdminPanelRegistry.AdminPage(CURRENCIES, "Currencies", "Registered wallets", TABS, entries,
@@ -718,20 +728,22 @@ public final class CwpAdminModule {
                 entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
-    private static AdminPanelRegistry.AdminPage mobMobsPage() {
+    private static AdminPanelRegistry.AdminPage mobMobsPage(MinecraftServer server) {
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
         entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create mob", "Add a MobForge mob.", GOOD,
                 List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_EDIT + "@new")), null)));
         entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Reload from files",
                 "Reload mobs and scripts from config/mobforge.", NORMAL, List.of(),
                 List.of(new AdminPanelRegistry.AdminAction("mob.reload", "Reload", false)), null)));
+        Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (MobTemplate template : MobForge.TEMPLATES.all()) {
-            entries.add(in("All mobs", new AdminPanelRegistry.AdminEntry(template.id(),
+            all.put(template.id(), (new AdminPanelRegistry.AdminEntry(template.id(),
                     template.entity() + " · " + template.ai().mode() + " AI",
                     NORMAL, List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_EDIT + template.id()),
                             new AdminPanelRegistry.AdminAction("mob.template.spawn|" + template.id(),
                                     "Spawn here", false)), null)));
         }
+        entries.addAll(AdminCategories.sectioned(server, "mob", "All mobs", all, MOB_MOBS));
         if (!MobForge.mobs().all().isEmpty()) entries.add(in("Registered by mods", new AdminPanelRegistry.AdminEntry(
                 "Content mod mobs", MobForge.mobs().all().size() + " mob(s) registered in code, read only", NORMAL,
                 List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("View", MOB_API)), null)));
@@ -739,12 +751,12 @@ public final class CwpAdminModule {
                 entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
-    private static AdminPanelRegistry.AdminPage mobScriptsPage() {
+    private static AdminPanelRegistry.AdminPage mobScriptsPage(MinecraftServer server) {
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
         entries.add(in("Create", new AdminPanelRegistry.AdminEntry("Create script", "Add an encounter timeline.", GOOD,
                 List.of(), List.of(AdminPanelRegistry.AdminAction.navigate("Create", MOB_SCRIPT_EDIT + "@new")), null)));
         List<AdminPanelRegistry.AdminEntry> active = new ArrayList<>();
-        List<AdminPanelRegistry.AdminEntry> all = new ArrayList<>();
+        Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (MobScript script : MobForge.SCRIPTS.all()) {
             int runs = MobForge.SCRIPT_EXECUTOR.activeRuns(script.id());
             AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(script.id(),
@@ -752,10 +764,10 @@ public final class CwpAdminModule {
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", MOB_SCRIPT_EDIT + script.id()),
                             new AdminPanelRegistry.AdminAction("mob.script.run|" + script.id(), "Run here", false)), null);
             if (runs > 0) active.add(in("Active · running now", entry));
-            all.add(in("All scripts", entry));
+            all.put(script.id(), entry);
         }
         entries.addAll(active);
-        entries.addAll(all);
+        entries.addAll(AdminCategories.sectioned(server, "script", "All scripts", all, MOB_SCRIPTS));
         return new AdminPanelRegistry.AdminPage(MOB_SCRIPTS, "Scripts", "Encounter scripts", TABS,
                 entries, AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
@@ -819,6 +831,7 @@ public final class CwpAdminModule {
         if (AdminLootPoolEditor.owns(pageId) && actionId.startsWith("loot."))
             return AdminLootPoolEditor.action(player, actionId, values);
         MinecraftServer server = player.level().getServer();
+        if (AdminCategories.owns(pageId)) return AdminCategories.action(player, pageId, actionId, values);
         if (actionId.equals("logs.toggle")) {
             LOG_PROBLEMS_ONLY.merge(player.getUUID(), true, (old, ignored) -> !old);
             return AdminPanelRegistry.ActionResult.success("");
@@ -826,6 +839,14 @@ public final class CwpAdminModule {
         if (actionId.equals("logs.clear")) {
             AdminLog.clear();
             return AdminPanelRegistry.ActionResult.success("Cleared the log view");
+        }
+        if (actionId.equals("player.tp_name")) {
+            String name = values.getOrDefault("player_name", "").trim();
+            ServerPlayer target = server.getPlayerList().getPlayerByName(name);
+            if (target == null) return AdminPanelRegistry.ActionResult.failure("No online player named " + name);
+            player.teleportTo(target.level(), target.getX(), target.getY(), target.getZ(), java.util.Set.of(),
+                    player.getYRot(), player.getXRot(), false);
+            return AdminPanelRegistry.ActionResult.success("Teleported to " + target.getGameProfile().name());
         }
         if (actionId.startsWith("player.tp|") || actionId.startsWith("player.out|")) {
             ServerPlayer target = server.getPlayerList().getPlayer(

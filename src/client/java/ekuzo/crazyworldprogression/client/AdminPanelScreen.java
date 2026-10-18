@@ -162,7 +162,9 @@ public final class AdminPanelScreen extends Screen {
             List<AdminPanelRegistry.AdminAction> actions = new ArrayList<>();
             boolean hadBack = false;
             for (AdminPanelRegistry.AdminAction action : entry.actions()) {
-                boolean back = action.label().equals("Back") && action.targetPage() != null && !action.targetPage().isBlank();
+                String label = action.label();
+                boolean back = (label.equals("Back") || label.startsWith("Back to ") || label.equals("Cancel"))
+                        && action.targetPage() != null && !action.targetPage().isBlank();
                 if (!back) { actions.add(action); continue; }
                 hadBack = true;
                 if (backTarget == null) backTarget = action.targetPage();

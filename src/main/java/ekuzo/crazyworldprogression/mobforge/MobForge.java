@@ -52,6 +52,11 @@ public final class MobForge {
 			if (damageTaken > 0 && MobForgeEntityData.definition(entity).flatMap(MOBS::get).isPresent())
 				MobForgeEvents.damaged(new RegisteredMobHandle(entity), damageTaken);
 		});
+		// Vanilla's invulnerable flag still lets players in creative mode hurt the entity. For template mobs it
+		// means no damage at all, except damage that bypasses invulnerability (/kill, the void).
+		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> !(entity.isInvulnerable()
+				&& entity.entityTags().contains(MobForgeEntityData.MARKER)
+				&& !source.is(net.minecraft.tags.DamageTypeTags.BYPASSES_INVULNERABILITY)));
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
 			if (entity.level() instanceof net.minecraft.server.level.ServerLevel level) SCRIPT_EXECUTOR.entityDied(level, entity);
 			rollKillLoot(entity, source);

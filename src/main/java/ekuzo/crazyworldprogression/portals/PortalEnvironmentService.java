@@ -41,6 +41,8 @@ public final class PortalEnvironmentService {
     static void applyDistances(MinecraftServer server, net.minecraft.resources.Identifier slot, Environment environment) {
         ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, slot));
         if (level == null) return;
+        if (environment != null && !environment.randomTicks()) NO_RANDOM_TICKS.add(slot); else NO_RANDOM_TICKS.remove(slot);
+        if (environment != null && !environment.fireSpread()) NO_FIRE_SPREAD.add(slot); else NO_FIRE_SPREAD.remove(slot);
         int view = environment != null && environment.viewDistance() > 0 ? environment.viewDistance()
                 : server.getPlayerList().getViewDistance();
         int simulation = environment != null && environment.simulationDistance() > 0 ? environment.simulationDistance()
@@ -55,7 +57,24 @@ public final class PortalEnvironmentService {
         for (ServerPlayer player : level.players()) syncDistances(player, level);
     }
 
-    static void clearDistances() { DISTANCES.clear(); }
+    static void clearDistances() {
+        DISTANCES.clear();
+        NO_RANDOM_TICKS.clear();
+        NO_FIRE_SPREAD.clear();
+    }
+
+    private static final java.util.Set<net.minecraft.resources.Identifier> NO_RANDOM_TICKS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final java.util.Set<net.minecraft.resources.Identifier> NO_FIRE_SPREAD = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Instance worlds whose portal turned random ticks off. */
+    public static boolean randomTicksOff(ServerLevel level) {
+        return !NO_RANDOM_TICKS.isEmpty() && NO_RANDOM_TICKS.contains(level.dimension().identifier());
+    }
+
+    /** Instance worlds whose portal turned fire spread off. */
+    public static boolean fireSpreadOff(ServerLevel level) {
+        return !NO_FIRE_SPREAD.isEmpty() && NO_FIRE_SPREAD.contains(level.dimension().identifier());
+    }
 
     /** Distances CWP set on instance worlds that differ from the server's; Minecraft has no getter for them. */
     private static final java.util.Map<net.minecraft.resources.Identifier, int[]> DISTANCES = new java.util.concurrent.ConcurrentHashMap<>();

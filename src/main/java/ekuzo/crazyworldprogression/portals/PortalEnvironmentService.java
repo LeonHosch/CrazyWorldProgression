@@ -57,6 +57,30 @@ public final class PortalEnvironmentService {
         for (ServerPlayer player : level.players()) syncDistances(player, level);
     }
 
+    /**
+     * A script changes its instance's distances: -1 leaves a value, 0 returns it to the portal's setting (or the
+     * server's), anything else is chunks. Saving the portal or releasing the slot applies the portal's again.
+     */
+    public static void scriptDistances(ServerLevel level, int view, int simulation) {
+        MinecraftServer server = level.getServer();
+        net.minecraft.resources.Identifier slot = level.dimension().identifier();
+        PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot.toString());
+        if (instance == null) return;
+        PortalDefinition portal = PortalService.portal(server, instance.portalId());
+        Environment environment = portal == null ? null : portal.environment();
+        int defaultView = environment != null && environment.viewDistance() > 0 ? environment.viewDistance()
+                : server.getPlayerList().getViewDistance();
+        int defaultSimulation = environment != null && environment.simulationDistance() > 0
+                ? environment.simulationDistance() : server.getPlayerList().getSimulationDistance();
+        int[] current = DISTANCES.getOrDefault(slot, new int[] {defaultView, defaultSimulation});
+        int newView = view < 0 ? current[0] : view == 0 ? defaultView : view;
+        int newSimulation = simulation < 0 ? current[1] : simulation == 0 ? defaultSimulation : simulation;
+        level.getChunkSource().setViewDistance(newView);
+        level.getChunkSource().setSimulationDistance(newSimulation);
+        DISTANCES.put(slot, new int[] {newView, newSimulation});
+        for (ServerPlayer player : level.players()) syncDistances(player, level);
+    }
+
     static void clearDistances() {
         DISTANCES.clear();
         NO_RANDOM_TICKS.clear();

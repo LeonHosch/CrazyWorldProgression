@@ -8,7 +8,7 @@ import java.util.List;
 public record MobScript(String id, List<Step> steps) {
 	public MobScript { steps = steps == null ? List.of() : List.copyOf(steps); }
 
-	public sealed interface Step permits SpawnStep, SpawnMobsStep, SleepStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, EffectStep, EncounterStartStep, EncounterEndStep, RaidCompleteStep, WipeStep { }
+	public sealed interface Step permits SpawnStep, SpawnMobsStep, SleepStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, DistancesStep, EffectStep, EncounterStartStep, EncounterEndStep, RaidCompleteStep, WipeStep { }
 	public record Position(double x, double y, double z) { }
 	public record Offset(double x, double y, double z) {
 		public static final Offset NONE = new Offset(0, 0, 0);
@@ -103,6 +103,8 @@ public record MobScript(String id, List<Step> steps) {
 	}
 	public record ParticleStep(Identifier particleId, Position location, Offset offset, int count, double speed) implements Step { }
 	public record ExplosionStep(Position location, float power) implements Step { }
+	/** View and simulation distance of the instance in chunks: -1 leaves it, 0 returns to the portal's setting. */
+	public record DistancesStep(int view, int simulation) implements Step { }
 	public record SoundStep(Identifier soundId, Position location) implements Step { }
 	/** A blank playerId targets every player in this run's world or pocket instance. */
 	public record EffectStep(Identifier effectId, String playerId, String action, int amplifier) implements Step { }

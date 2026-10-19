@@ -438,6 +438,10 @@ public final class MobScriptExecutor {
 				run.step++;
 				run.level.explode(null, explosion.location().x(), explosion.location().y(),
 						explosion.location().z(), explosion.power(), Level.ExplosionInteraction.NONE);
+			} else if (step instanceof MobScript.DistancesStep distances) {
+				run.step++;
+				ekuzo.crazyworldprogression.portals.PortalEnvironmentService.scriptDistances(run.level,
+						distances.view(), distances.simulation());
 			} else if (step instanceof MobScript.SoundStep sound) {
 				run.step++;
 				var event = BuiltInRegistries.SOUND_EVENT.getValue(sound.soundId());

@@ -65,6 +65,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("building")) return building(map(step.get("building"), field + ".building"), field);
 		if (step.containsKey("particles")) return particles(map(step.get("particles"), field + ".particles"), field);
 		if (step.containsKey("explosion")) return explosion(map(step.get("explosion"), field + ".explosion"), field);
+		if (step.containsKey("distances")) return distances(map(step.get("distances"), field + ".distances"), field);
 		if (step.containsKey("sound")) return sound(map(step.get("sound"), field + ".sound"), field);
 		if (step.containsKey("effect")) return effect(map(step.get("effect"), field + ".effect"), field);
 		if (step.containsKey("raid_complete")) return new MobScript.RaidCompleteStep();
@@ -100,6 +101,7 @@ public final class MobScriptYaml {
 			case "building" -> building(step, field);
 			case "particles" -> particles(step, field);
 			case "explosion" -> explosion(step, field);
+			case "distances" -> distances(step, field);
 			case "sound" -> sound(step, field);
 			case "effect" -> effect(step, field);
 			case "raid_complete" -> new MobScript.RaidCompleteStep();
@@ -205,6 +207,10 @@ public final class MobScriptYaml {
 		return new MobScript.ExplosionStep(
 				position(map(value.get("location"), field + ".location"), field + ".location"),
 				(float) number(value.getOrDefault("power", 2), field + ".power"));
+	}
+	private MobScript.Step distances(Map<String, Object> value, String field) {
+		return new MobScript.DistancesStep(integer(value.getOrDefault("view", -1), field + ".view"),
+				integer(value.getOrDefault("simulation", -1), field + ".simulation"));
 	}
 	private MobScript.Step sound(Map<String, Object> value, String field) {
 		return new MobScript.SoundStep(namespaced(value.get("sound_id"), field + ".sound_id"),
@@ -391,6 +397,12 @@ public final class MobScriptYaml {
 			else if (step instanceof MobScript.ExplosionStep explosion) steps.add(Map.of("explosion",
 					Map.of("location", position(explosion.location().x(), explosion.location().y(), explosion.location().z()),
 							"power", explosion.power())));
+			else if (step instanceof MobScript.DistancesStep distances) {
+				Map<String, Object> values = new LinkedHashMap<>();
+				if (distances.view() >= 0) values.put("view", distances.view());
+				if (distances.simulation() >= 0) values.put("simulation", distances.simulation());
+				steps.add(Map.of("distances", values));
+			}
 			else if (step instanceof MobScript.SoundStep sound) steps.add(Map.of("sound",
 					Map.of("sound_id", sound.soundId().toString(),
 							"location", position(sound.location().x(), sound.location().y(), sound.location().z()))));

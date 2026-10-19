@@ -122,6 +122,12 @@ public final class MobScriptRegistry {
 				if (!finite(explosion.location().x(), explosion.location().y(), explosion.location().z())
 						|| !Float.isFinite(explosion.power()) || explosion.power() <= 0 || explosion.power() > 8)
 					throw new IllegalArgumentException("steps[" + i + "] explosion power must be 0-8");
+			} else if (step instanceof MobScript.DistancesStep distances) {
+				for (int value : new int[] {distances.view(), distances.simulation()})
+					if (value != -1 && value != 0 && (value < 2 || value > 32))
+						throw new IllegalArgumentException("steps[" + i + "] distances must be 2-32 chunks, or 0 for the portal's setting");
+				if (distances.view() < 0 && distances.simulation() < 0)
+					throw new IllegalArgumentException("steps[" + i + "] distances needs view or simulation");
 			} else if (step instanceof MobScript.SoundStep sound) {
 				if (!finite(sound.location().x(), sound.location().y(), sound.location().z())
 						|| BuiltInRegistries.SOUND_EVENT.getValue(sound.soundId()) == null)

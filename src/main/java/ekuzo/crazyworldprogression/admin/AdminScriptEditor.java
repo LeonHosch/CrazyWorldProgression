@@ -28,7 +28,7 @@ final class AdminScriptEditor {
     private static final Map<MinecraftServer, Map<UUID, Map<String, Draft>>> DRAFTS = new WeakHashMap<>();
     private static final List<String> TYPES = List.of("Mob spawn (mob ID)", "Sleep", "If", "While",
             "Event box", "Check redstone power", "Spawn portal", "Track counter", "Variable",
-            "Particles", "Explosion", "Play sound", "Apply effect", "Remove effect", "Loot pool", "Unlock achievement", "Encounter start", "Encounter end", "Wipe",
+            "Particles", "Explosion", "Distances", "Play sound", "Apply effect", "Remove effect", "Loot pool", "Unlock achievement", "Encounter start", "Encounter end", "Wipe",
             "Spawn building", "Despawn building");
     private static final List<String> ADVANCED_TYPES = List.of("Mob spawn (template)", "Wait",
             "Mob cast", "Mob phase", "Trigger event", "Reward currency", "Reward item", "Reward loot table",
@@ -264,6 +264,10 @@ final class AdminScriptEditor {
                         List.of(field(prefix, step, "x", "X"), field(prefix, step, "y", "Y"),
                                 field(prefix, step, "z", "Z"), field(prefix, step, "power", "Power (0-8)")),
                         List.of(new AdminPanelRegistry.AdminAction("script.step.here|" + i, "Here", false))));
+                case "Distances" -> rows.add(row(section, "View and simulation distance",
+                        "Changes this instance's distances in chunks (2-32). 0 goes back to the portal's setting, empty leaves it.",
+                        List.of(field(prefix, step, "view", "View distance"),
+                                field(prefix, step, "simulation", "Simulation distance")), List.of()));
                 case "Play sound" -> rows.add(row(section, "Sound effect",
                         "Play a sound at this position in the world or pocket instance.",
                         List.of(suggested(prefix, step, "sound_id", "Sound ID",
@@ -669,6 +673,10 @@ final class AdminScriptEditor {
                     form.fields.put("z", player == null ? "0" : Double.toString(player.getZ()));
                     form.fields.put("power", "2");
                 }
+                case "Distances" -> {
+                    form.fields.put("view", "8");
+                    form.fields.put("simulation", "4");
+                }
                 case "Play sound" -> {
                     form.fields.put("sound_id", "minecraft:block.note_block.pling");
                     form.fields.put("x", player == null ? "0" : Double.toString(player.getX()));
@@ -838,6 +846,10 @@ final class AdminScriptEditor {
                 form.fields.put("y", Double.toString(value.location().y()));
                 form.fields.put("z", Double.toString(value.location().z()));
                 form.fields.put("power", Float.toString(value.power()));
+            } else if (step instanceof MobScript.DistancesStep value) {
+                form = empty("Distances", null);
+                form.fields.put("view", value.view() < 0 ? "" : Integer.toString(value.view()));
+                form.fields.put("simulation", value.simulation() < 0 ? "" : Integer.toString(value.simulation()));
             } else if (step instanceof MobScript.SoundStep value) {
                 form = empty("Play sound", null); form.fields.put("sound_id", value.soundId().toString());
                 form.fields.put("x", Double.toString(value.location().x()));
@@ -938,6 +950,9 @@ final class AdminScriptEditor {
                 case "Explosion" -> new MobScript.ExplosionStep(
                         new MobScript.Position(number("x"), number("y"), number("z")),
                         (float) number("power"));
+                case "Distances" -> new MobScript.DistancesStep(
+                        value("view").isBlank() ? -1 : integer("view"),
+                        value("simulation").isBlank() ? -1 : integer("simulation"));
                 case "Play sound" -> new MobScript.SoundStep(Identifier.parse(value("sound_id")),
                         new MobScript.Position(number("x"), number("y"), number("z")));
                 case "Apply effect", "Remove effect" -> new MobScript.EffectStep(Identifier.parse(value("effect_id")),

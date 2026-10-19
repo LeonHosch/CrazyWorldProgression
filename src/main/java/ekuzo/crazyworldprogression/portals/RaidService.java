@@ -176,14 +176,15 @@ public final class RaidService {
             scheduleWipe(server, instance);
         } else {
             spawnMarker(player, spot);
-            boolean teammatesOnly = encounter && strictEncounters(server, slot);
+            long delay = RaidDowns.selfReviveDelay(instanceMode.encounters(), encounter,
+                    instanceMode == PortalDefinition.InstanceMode.RAID, strictEncounters(server, slot));
             if (instanceMode == PortalDefinition.InstanceMode.PLAYER_REVIVE)
                 player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.down_player",
                         "You are down. Another player can revive you at your marker within 60 seconds."));
-            else player.sendSystemMessage(Component.translatableWithFallback(teammatesOnly
-                    ? "message.crazy-world-progression.raid.down_encounter" : "message.crazy-world-progression.raid.down_15",
-                    teammatesOnly ? "You are down. A teammate can revive you at your marker."
-                            : "You are down. Fly into your revive point after 15 seconds, or let a teammate revive you."));
+            else if (delay < 0) player.sendSystemMessage(Component.translatableWithFallback(
+                    "message.crazy-world-progression.raid.down_encounter", "You are down. A teammate can revive you at your marker."));
+            else player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.down_delay",
+                    "You are down. Fly into your revive point after %s seconds, or let a teammate revive you.", delay / 20L));
         }
         return true;
     }
@@ -330,13 +331,14 @@ public final class RaidService {
                             "message.crazy-world-progression.raid.revive_wait", "Waiting for a revive… %s s", (left + 19L) / 20L));
                     continue;
                 }
-                boolean strict = strictEncounters(server, instance.slotDimension());
-                if (instanceMode.encounters() && encounter && strict) continue;
+                long delay = RaidDowns.selfReviveDelay(instanceMode.encounters(), encounter,
+                        instanceMode == PortalDefinition.InstanceMode.RAID, strictEncounters(server, instance.slotDimension()));
+                if (delay < 0) continue;
                 double distance = player.position().distanceTo(down.point());
-                if (RaidDowns.canSelfRevive(false, ticksDown, distance)) {
+                if (RaidDowns.canSelfRevive(ticksDown, distance, delay)) {
                     reviveSelf(player, down);
                 } else if (now % 10L == 0L) {
-                    long seconds = (RaidDowns.SELF_REVIVE_DELAY_TICKS - ticksDown + 19L) / 20L;
+                    long seconds = (delay - ticksDown + 19L) / 20L;
                     player.sendOverlayMessage(seconds > 0
                             ? Component.translatableWithFallback("message.crazy-world-progression.raid.revive_in",
                                     "You can revive in %s s", seconds)
@@ -432,7 +434,8 @@ public final class RaidService {
             if (started != null && started.admittedPlayers().contains(id)) present.add(id);
         }
         data.encounterPlayers(slot.toString(), present);
-        EncounterBanner.show(level.players(), strictEncounters(server, slot) ? EncounterBanner.Kind.STARTED
+        PortalDefinition bannerPortal = portalOf(server, slot);
+        EncounterBanner.show(level.players(), bannerPortal != null && bannerPortal.raidMode() ? EncounterBanner.Kind.STARTED
                 : EncounterBanner.Kind.STARTED_UNLIMITED, "");
     }
 
@@ -685,7 +688,8 @@ public final class RaidService {
         String reviverId = reviver.getUUID().toString(), targetKey = targetId.toString();
         if (before.deaths().containsKey(reviverId) || reviver.isSpectator())
             throw new IllegalStateException("Only a living teammate can revive");
-        boolean strict = inEncounter(server, slot) && strictEncounters(server, slot);
+        // Only raids limit revives: one per player per attempt, during encounters.
+        boolean strict = inEncounter(server, slot) && portal.instanceMode() == PortalDefinition.InstanceMode.RAID;
         if (strict && before.spentRevives().contains(reviverId)) throw new IllegalStateException("Your revive is already spent this attempt");
         Down down = downs(server).get(targetId);
         RaidData.Spot spot = down != null ? new RaidData.Spot(down.point().x, down.point().y, down.point().z)

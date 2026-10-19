@@ -11,6 +11,8 @@ final class RaidDowns {
     static final double LEASH_RADIUS = 10.0;
     /** A downed player may self-revive after this many ticks (15 seconds), where self-revive is allowed. */
     static final long SELF_REVIVE_DELAY_TICKS = 300L;
+    /** Dungeons that keep inventory: self-revive during an encounter after this many ticks (60 seconds). */
+    static final long ENCOUNTER_SELF_REVIVE_DELAY_TICKS = 1_200L;
     /** Player Revive mode: a downed player is sent out after this many ticks (1 minute) without a revive. */
     static final long PLAYER_REVIVE_WINDOW_TICKS = 1_200L;
     /** Reviving someone takes this many ticks (2 seconds) of staying at their marker. */
@@ -35,7 +37,22 @@ final class RaidDowns {
 
     /** Self-revive needs: no active encounter, 15 seconds down, and touching the revive point. */
     static boolean canSelfRevive(boolean inEncounter, long ticksDown, double distanceToPoint) {
-        return !inEncounter && ticksDown >= SELF_REVIVE_DELAY_TICKS && distanceToPoint <= REVIVE_TOUCH_DISTANCE;
+        return !inEncounter && canSelfRevive(ticksDown, distanceToPoint, SELF_REVIVE_DELAY_TICKS);
+    }
+
+    /** Self-revive after the given delay, touching the revive point. */
+    static boolean canSelfRevive(long ticksDown, double distanceToPoint, long delay) {
+        return ticksDown >= delay && distanceToPoint <= REVIVE_TOUCH_DISTANCE;
+    }
+
+    /**
+     * How long a downed player waits before reviving themselves, or -1 when they cannot: during an encounter
+     * there is no self-revive in raids and strict dungeons, and 60 seconds in dungeons that keep inventory.
+     */
+    static long selfReviveDelay(boolean encounterMode, boolean inEncounter, boolean raid, boolean strict) {
+        if (!encounterMode || !inEncounter) return SELF_REVIVE_DELAY_TICKS;
+        if (raid || strict) return -1L;
+        return ENCOUNTER_SELF_REVIVE_DELAY_TICKS;
     }
 
     /** The position clamped onto the leash sphere, or the position itself when it is inside. */

@@ -35,8 +35,8 @@ Every pocket portal has an **instance mode** that decides what happens when a pl
 | No Revive | Sent out of the instance at once (items drop where they died unless the portal keeps inventory) | — |
 | Player Revive | Down as a spectator at a marker | Another player revives them within 1 minute, otherwise they are sent out |
 | Unlimited Revive | Down as a spectator at a marker | Other players can revive; after 15 seconds they can revive themselves by flying into their revive point |
-| Dungeon (private only) | Down | Encounters, wipes and checkpoints; unlimited revives when keeping inventory |
-| Raid (private only) | Down | Like Dungeon with strict encounters: one revive each, no self-revive during encounters |
+| Dungeon (private only) | Down | Encounters, wipes and checkpoints; unlimited teammate revives. During an encounter, self-revive after 60 seconds when keeping inventory, none without |
+| Raid (private only) | Down | Like Dungeon, but during encounters each player has one revive and there is no self-revive |
 
 Reviving takes 2 seconds: right-click the marker and stay within 5 blocks. Self-revive anywhere it is allowed needs 15 seconds down. Old portals keep their behaviour: raids become Raid, other private portals Dungeon, public portals No Revive. Entering a private portal sets the party's size limit to the portal's party limit. For a raid, choose **Raid** and set the party limit to the team size (for example, six). A living teammate can interact with a marker to revive; spectators do not count in script event boxes or use encounter portals.
 

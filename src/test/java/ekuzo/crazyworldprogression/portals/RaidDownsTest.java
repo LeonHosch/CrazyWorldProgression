@@ -24,6 +24,14 @@ class RaidDownsTest {
         assertFalse(RaidDowns.canSelfRevive(true, 400L, 0.0), "never during an encounter");
     }
 
+    @Test void selfReviveDelayDependsOnModeAndEncounter() {
+        assertEquals(300L, RaidDowns.selfReviveDelay(true, false, false, false), "outside encounters: 15 s");
+        assertEquals(300L, RaidDowns.selfReviveDelay(false, true, false, false), "revive modes without encounters");
+        assertEquals(1_200L, RaidDowns.selfReviveDelay(true, true, false, false), "dungeon keeping inventory: 60 s");
+        assertEquals(-1L, RaidDowns.selfReviveDelay(true, true, false, true), "strict dungeon: no self-revive");
+        assertEquals(-1L, RaidDowns.selfReviveDelay(true, true, true, false), "raid: no self-revive");
+    }
+
     @Test void spectatorsAreHeldInsideTheLeashSphere() {
         Vec3 point = new Vec3(0, 64, 0);
         Vec3 inside = new Vec3(3, 66, 4);

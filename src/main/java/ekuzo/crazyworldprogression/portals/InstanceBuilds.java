@@ -131,6 +131,33 @@ public final class InstanceBuilds {
         return jobs != null && jobs.containsKey(key);
     }
 
+    /** True while the build still waits for its pocket to be read from disk. */
+    public static boolean loading(MinecraftServer server, String key) {
+        Job job = job(server, key);
+        return job != null && (job.held || !job.order.isDone());
+    }
+
+    /** Fraction of blocks placed, 0 to 1 (1 when not building). */
+    public static double progress(MinecraftServer server, String key) {
+        Job job = job(server, key);
+        return job == null || job.blocks.isEmpty() ? 1.0 : Math.min(0.999, (double) job.next / job.blocks.size());
+    }
+
+    public static long placed(MinecraftServer server, String key) {
+        Job job = job(server, key);
+        return job == null ? 0 : job.next;
+    }
+
+    public static long total(MinecraftServer server, String key) {
+        Job job = job(server, key);
+        return job == null ? 0 : job.blocks.size();
+    }
+
+    private static Job job(MinecraftServer server, String key) {
+        Map<String, Job> jobs = JOBS.get(server);
+        return jobs == null ? null : jobs.get(key);
+    }
+
     /** 0-99 while building, 100 when not building. */
     public static int percent(MinecraftServer server, String key) {
         Map<String, Job> jobs = JOBS.get(server);

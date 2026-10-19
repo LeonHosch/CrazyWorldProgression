@@ -993,7 +993,10 @@ public final class PortalService {
         return PREPARING.getOrDefault(server, Map.of()).containsKey(slot.toString());
     }
 
-    /** The build is done: everyone who asked to enter and is still at the portal is brought in. */
+    /**
+     * The build is done: everyone who asked to enter is brought in at once, wherever they are now. Whether the
+     * party was at the portal was checked before the instance was created.
+     */
     private static void finishPreparing(MinecraftServer server, PortalData.StoredInstance instance) {
         Preparing preparing = PREPARING.getOrDefault(server, new HashMap<>()).remove(instance.slotDimension().toString());
         if (preparing == null) return;
@@ -1001,12 +1004,6 @@ public final class PortalService {
         for (UUID id : preparing.waiting()) {
             ServerPlayer player = server.getPlayerList().getPlayer(id);
             if (player == null || portal == null) continue;
-            if (!stillAtPortal(player.level().dimension().identifier().equals(portal.dimension()),
-                    portal.isNear(player.position().add(0.0, 0.9, 0.0), GROUP_ENTRY_DISTANCE))) {
-                player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.instance.ready_elsewhere",
-                        "Your instance is ready. Walk into the portal to enter."));
-                continue;
-            }
             try {
                 teleportInto(server, player, portal, instance);
             } catch (RuntimeException exception) {
@@ -1015,23 +1012,23 @@ public final class PortalService {
         }
     }
 
-    /** Only players who are still at the portal are pulled in when their instance is ready. */
-    static boolean stillAtPortal(boolean sameDimension, boolean nearPortal) {
-        return sameDimension && nearPortal;
-    }
-
     /** Progress on the action bar of everyone waiting for an instance. */
     private static void tickPreparing(MinecraftServer server) {
         Map<String, Preparing> preparing = PREPARING.get(server);
         if (preparing == null || preparing.isEmpty() || server.getTickCount() % 10 != 0) return;
         preparing.keySet().removeIf(slot -> !PortalData.get(server).instances().containsKey(slot));
         for (Map.Entry<String, Preparing> entry : preparing.entrySet()) {
-            int percent = InstanceBuilds.percent(server, entry.getKey());
+            Component message = InstanceBuilds.loading(server, entry.getKey())
+                    ? Component.translatableWithFallback("message.crazy-world-progression.instance.loading",
+                            "Your instance is being prepared… loading the pocket")
+                    : Component.translatableWithFallback("message.crazy-world-progression.instance.preparing_detail",
+                            "Your instance is being prepared… %s%% (%s of %s blocks)",
+                            String.format(java.util.Locale.ROOT, "%.1f", InstanceBuilds.progress(server, entry.getKey()) * 100),
+                            String.format(java.util.Locale.ROOT, "%,d", InstanceBuilds.placed(server, entry.getKey())),
+                            String.format(java.util.Locale.ROOT, "%,d", InstanceBuilds.total(server, entry.getKey())));
             for (UUID id : entry.getValue().waiting()) {
                 ServerPlayer player = server.getPlayerList().getPlayer(id);
-                if (player != null) player.sendOverlayMessage(Component.translatableWithFallback(
-                        "message.crazy-world-progression.instance.preparing",
-                        "Your instance is being prepared… %s%%", percent));
+                if (player != null) player.sendOverlayMessage(message);
             }
         }
     }
@@ -1050,6 +1047,11 @@ public final class PortalService {
                 .map(PortalData.StoredInstance::slotDimension).collect(java.util.stream.Collectors.toSet()));
         for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
             if (instance.admittedPlayers().isEmpty()) continue;
+            // Still being built: nobody can be inside yet and its scripts have not started.
+            if (preparing(server, instance.slotDimension())) {
+                emptySince.remove(instance.slotDimension());
+                continue;
+            }
             ServerLevel level = server.getLevel(dimensionKey(instance.slotDimension()));
             if (level == null) continue;
             if (!level.players().isEmpty() || RaidService.retainEmpty(server, instance)) {

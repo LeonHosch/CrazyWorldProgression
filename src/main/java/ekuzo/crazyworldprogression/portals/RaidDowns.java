@@ -9,8 +9,12 @@ import net.minecraft.world.phys.Vec3;
 final class RaidDowns {
     /** Spectators stay inside a sphere of this radius around their revive point. */
     static final double LEASH_RADIUS = 10.0;
-    /** Outside an encounter, a downed player may self-revive after this many ticks (5 seconds). */
-    static final long SELF_REVIVE_DELAY_TICKS = 100L;
+    /** A downed player may self-revive after this many ticks (15 seconds), where self-revive is allowed. */
+    static final long SELF_REVIVE_DELAY_TICKS = 300L;
+    /** Player Revive mode: a downed player is sent out after this many ticks (1 minute) without a revive. */
+    static final long PLAYER_REVIVE_WINDOW_TICKS = 1_200L;
+    /** Reviving someone takes this many ticks (2 seconds) of staying at their marker. */
+    static final long REVIVE_DURATION_TICKS = 40L;
     /** Flying within this distance of the revive point counts as touching it. */
     static final double REVIVE_TOUCH_DISTANCE = 1.0;
     /** Dying again this soon after a revive moves the revive point to the checkpoint spawn. */
@@ -29,7 +33,7 @@ final class RaidDowns {
         return ticksSinceRevive <= QUICK_DEATH_TICKS || voidOrDrowning && ticksSinceRevive <= QUICK_HAZARD_DEATH_TICKS;
     }
 
-    /** Self-revive needs: no active encounter, 5 seconds down, and touching the revive point. */
+    /** Self-revive needs: no active encounter, 15 seconds down, and touching the revive point. */
     static boolean canSelfRevive(boolean inEncounter, long ticksDown, double distanceToPoint) {
         return !inEncounter && ticksDown >= SELF_REVIVE_DELAY_TICKS && distanceToPoint <= REVIVE_TOUCH_DISTANCE;
     }

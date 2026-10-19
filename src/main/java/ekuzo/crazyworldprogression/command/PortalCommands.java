@@ -323,7 +323,7 @@ public final class PortalCommands {
         try {
             PortalService.update(context.getSource().getServer(), portal.withAdmission(portal.admission().withAccess(
                     privateMode ? PortalDefinition.Mode.PRIVATE : PortalDefinition.Mode.PUBLIC, max)));
-            return success(context, "Set " + portal.id() + " to " + (privateMode ? "dungeon, max party " + max : "public"));
+            return success(context, "Set " + portal.id() + " to " + (privateMode ? "private, max party " + max : "public"));
         } catch (RuntimeException exception) {
             return failure(context, exception);
         }

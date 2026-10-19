@@ -128,10 +128,17 @@ public final class RaidService {
     private static boolean down(ServerPlayer player, net.minecraft.world.damagesource.DamageSource source) {
         MinecraftServer server = player.level().getServer();
         Identifier slot = player.level().dimension().identifier();
-        if (!isRaid(server, slot)) return false;
         PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot.toString());
+        PortalDefinition portal = portalOf(server, slot);
+        if (instance == null || portal == null) return false;
         String playerId = player.getUUID().toString();
-        if (instance == null || !instance.admittedPlayers().contains(playerId)) return false;
+        // Private instances only handle their own party; public ones everyone inside.
+        if (!instance.admittedPlayers().isEmpty() && !instance.admittedPlayers().contains(playerId)) return false;
+        PortalDefinition.InstanceMode instanceMode = portal.instanceMode();
+        if (instanceMode == PortalDefinition.InstanceMode.NO_REVIVE) {
+            kickOut(player, portal, "You died and were sent out of the instance.");
+            return true;
+        }
         player.setHealth(player.getMaxHealth());
         if (player.isSpectator()) return true;
         ServerLevel level = player.level();
@@ -170,12 +177,89 @@ public final class RaidService {
         } else {
             spawnMarker(player, spot);
             boolean teammatesOnly = encounter && strictEncounters(server, slot);
-            player.sendSystemMessage(Component.translatableWithFallback(teammatesOnly
-                    ? "message.crazy-world-progression.raid.down_encounter" : "message.crazy-world-progression.raid.down",
+            if (instanceMode == PortalDefinition.InstanceMode.PLAYER_REVIVE)
+                player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.down_player",
+                        "You are down. Another player can revive you at your marker within 60 seconds."));
+            else player.sendSystemMessage(Component.translatableWithFallback(teammatesOnly
+                    ? "message.crazy-world-progression.raid.down_encounter" : "message.crazy-world-progression.raid.down_15",
                     teammatesOnly ? "You are down. A teammate can revive you at your marker."
-                            : "You are down. Fly into your revive point after 5 seconds to get back up."));
+                            : "You are down. Fly into your revive point after 15 seconds, or let a teammate revive you."));
         }
         return true;
+    }
+
+    /** Someone reviving a downed player: who, at which marker, since when. */
+    private record Channel(UUID target, Entity marker, long started) { }
+    private static final Map<MinecraftServer, Map<UUID, Channel>> CHANNELS = new java.util.WeakHashMap<>();
+
+    /** Reviving takes 2 seconds of staying within 5 blocks of the marker. */
+    private static void startRevive(ServerPlayer reviver, UUID target, Entity marker) {
+        MinecraftServer server = reviver.level().getServer();
+        Map<UUID, Channel> channels = CHANNELS.computeIfAbsent(server, ignored -> new HashMap<>());
+        Channel current = channels.get(reviver.getUUID());
+        if (current != null && current.target().equals(target)) return;
+        if (reviver.isSpectator()) {
+            reviver.sendOverlayMessage(Component.literal("Only a living teammate can revive"));
+            return;
+        }
+        channels.put(reviver.getUUID(), new Channel(target, marker, server.getTickCount()));
+        ServerPlayer downed = server.getPlayerList().getPlayer(target);
+        if (downed != null) downed.sendOverlayMessage(Component.literal(reviver.getGameProfile().name() + " is reviving you…"));
+    }
+
+    private static void tickRevives(MinecraftServer server, long now) {
+        Map<UUID, Channel> channels = CHANNELS.get(server);
+        if (channels == null || channels.isEmpty()) return;
+        for (var entry : List.copyOf(channels.entrySet())) {
+            ServerPlayer reviver = server.getPlayerList().getPlayer(entry.getKey());
+            Channel channel = entry.getValue();
+            if (reviver == null || reviver.isSpectator() || reviver.isDeadOrDying() || channel.marker().isRemoved()
+                    || reviver.level() != channel.marker().level() || reviver.distanceToSqr(channel.marker()) > 25.0) {
+                channels.remove(entry.getKey());
+                if (reviver != null) reviver.sendOverlayMessage(Component.literal("Revive cancelled"));
+                continue;
+            }
+            long elapsed = now - channel.started();
+            if (elapsed < RaidDowns.REVIVE_DURATION_TICKS) {
+                reviver.sendOverlayMessage(Component.literal(String.format(java.util.Locale.ROOT, "Reviving… %.1f s",
+                        (RaidDowns.REVIVE_DURATION_TICKS - elapsed) / 20.0)));
+                continue;
+            }
+            channels.remove(entry.getKey());
+            try { revive(reviver, channel.target(), channel.marker()); }
+            catch (RuntimeException exception) { reviver.sendOverlayMessage(Component.literal(exception.getMessage())); }
+        }
+    }
+
+    /**
+     * No Revive deaths, and Player Revive downs nobody revived in time: the player leaves the instance with full
+     * health. Without keep-inventory their items stay where they died.
+     */
+    private static void kickOut(ServerPlayer player, PortalDefinition portal, String message) {
+        MinecraftServer server = player.level().getServer();
+        Identifier slot = player.level().dimension().identifier();
+        String mode = null;
+        RaidData data = RaidData.get(server);
+        RaidData.Attempt before = data.get(slot.toString());
+        if (before != null) {
+            Map<String, String> modes = new HashMap<>(before.originalModes());
+            mode = modes.remove(player.getUUID().toString());
+            Map<String, RaidData.Spot> deaths = new HashMap<>(before.deaths());
+            deaths.remove(player.getUUID().toString());
+            data.put(slot.toString(), new RaidData.Attempt(before.number(), deaths, before.spentRevives(),
+                    before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive()));
+        }
+        downs(server).remove(player.getUUID());
+        removeMarker(player.level(), player.getUUID());
+        if (player.isSpectator()) restoreMode(player, mode);
+        player.setHealth(player.getMaxHealth());
+        player.clearFire();
+        player.removeAllEffects();
+        player.setAirSupply(player.getMaxAirSupply());
+        player.resetFallDistance();
+        if (!portal.keepInventory()) player.getInventory().dropAll();
+        PortalService.sendOut(player);
+        player.sendSystemMessage(Component.literal(message));
     }
 
     private static void reviveSelf(ServerPlayer player, Down down) {
@@ -212,8 +296,11 @@ public final class RaidService {
     private static void tickDowns(MinecraftServer server) {
         long now = server.getTickCount();
         Map<UUID, Down> downs = downs(server);
+        tickRevives(server, now);
         for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
-            if (!isRaid(server, instance.slotDimension())) continue;
+            PortalDefinition portal = portalOf(server, instance.slotDimension());
+            if (portal == null || portal.instanceMode() == PortalDefinition.InstanceMode.NO_REVIVE) continue;
+            PortalDefinition.InstanceMode instanceMode = portal.instanceMode();
             ServerLevel level = level(server, instance.slotDimension());
             if (level == null) continue;
             boolean encounter = inEncounter(server, instance.slotDimension());
@@ -235,9 +322,16 @@ public final class RaidService {
                 Vec3 clamped = RaidDowns.leash(down.point(), player.position(), RaidDowns.LEASH_RADIUS);
                 if (clamped != player.position())
                     player.teleportTo(level, clamped.x, clamped.y, clamped.z, Set.of(), player.getYRot(), player.getXRot(), false);
-                boolean strict = strictEncounters(server, instance.slotDimension());
-                if (encounter && strict) continue;
                 long ticksDown = now - down.downedTick();
+                if (instanceMode == PortalDefinition.InstanceMode.PLAYER_REVIVE) {
+                    long left = RaidDowns.PLAYER_REVIVE_WINDOW_TICKS - ticksDown;
+                    if (left <= 0) kickOut(player, portal, "Nobody revived you in time; you were sent out of the instance.");
+                    else if (now % 10L == 0L) player.sendOverlayMessage(Component.translatableWithFallback(
+                            "message.crazy-world-progression.raid.revive_wait", "Waiting for a revive… %s s", (left + 19L) / 20L));
+                    continue;
+                }
+                boolean strict = strictEncounters(server, instance.slotDimension());
+                if (instanceMode.encounters() && encounter && strict) continue;
                 double distance = player.position().distanceTo(down.point());
                 if (RaidDowns.canSelfRevive(false, ticksDown, distance)) {
                     reviveSelf(player, down);
@@ -278,8 +372,7 @@ public final class RaidService {
             }
             String tag = entity.entityTags().stream().filter(value -> value.startsWith(MARKER)).findFirst().orElse(null);
             if (tag == null) return InteractionResult.PASS;
-            try { revive(reviver, UUID.fromString(tag.substring(MARKER.length())), entity); }
-            catch (RuntimeException exception) { reviver.sendOverlayMessage(Component.literal(exception.getMessage())); }
+            startRevive(reviver, UUID.fromString(tag.substring(MARKER.length())), entity);
             return InteractionResult.SUCCESS;
         });
     }
@@ -384,7 +477,7 @@ public final class RaidService {
     }
 
     public static boolean isRaidPortal(PortalDefinition portal) {
-        return portal != null && (portal.raidMode() || portal.admission().mode() == PortalDefinition.Mode.PRIVATE);
+        return portal != null && portal.instanceMode().encounters();
     }
 
     private static PortalDefinition portalOf(MinecraftServer server, Identifier dimension) {
@@ -583,15 +676,20 @@ public final class RaidService {
     private static void revive(ServerPlayer reviver, UUID targetId, Entity marker) {
         MinecraftServer server = reviver.level().getServer();
         Identifier slot = reviver.level().dimension().identifier();
-        if (!inEncounter(server, slot)) throw new IllegalStateException("This marker is not in an active encounter");
+        PortalDefinition portal = portalOf(server, slot);
+        if (portal == null || portal.instanceMode() == PortalDefinition.InstanceMode.NO_REVIVE)
+            throw new IllegalStateException("Nobody can be revived here");
         RaidData data = RaidData.get(server);
         RaidData.Attempt before = data.get(slot.toString());
+        if (before == null) before = RaidData.Attempt.first();
         String reviverId = reviver.getUUID().toString(), targetKey = targetId.toString();
-        if (before == null || before.deaths().containsKey(reviverId) || reviver.isSpectator())
+        if (before.deaths().containsKey(reviverId) || reviver.isSpectator())
             throw new IllegalStateException("Only a living teammate can revive");
-        boolean strict = strictEncounters(server, slot);
+        boolean strict = inEncounter(server, slot) && strictEncounters(server, slot);
         if (strict && before.spentRevives().contains(reviverId)) throw new IllegalStateException("Your revive is already spent this attempt");
-        RaidData.Spot spot = before.deaths().get(targetKey);
+        Down down = downs(server).get(targetId);
+        RaidData.Spot spot = down != null ? new RaidData.Spot(down.point().x, down.point().y, down.point().z)
+                : before.deaths().get(targetKey);
         if (spot == null) throw new IllegalStateException("That teammate is no longer down");
         ServerPlayer target = server.getPlayerList().getPlayer(targetId);
         if (target == null || target.isDeadOrDying() || !target.isSpectator()
@@ -610,7 +708,8 @@ public final class RaidService {
                 before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive()));
         marker.discard();
         finishRevive(target, new Vec3(spot.x(), spot.y(), spot.z()), mode);
-        reviver.sendSystemMessage(Component.literal("Revived " + target.getGameProfile().name() + ". Your revive is spent."));
+        reviver.sendSystemMessage(Component.literal("Revived " + target.getGameProfile().name()
+                + (strict ? ". Your revive is spent." : ".")));
         target.sendSystemMessage(Component.literal("You were revived by " + reviver.getGameProfile().name()));
     }
 

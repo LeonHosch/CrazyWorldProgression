@@ -238,9 +238,53 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
 
     public boolean baseActive() { return admission.baseActive(); }
 
-    public boolean raidMode() { return admission.raidMode(); }
+    /** True for the Raid instance mode. */
+    public boolean raidMode() { return admission.instanceMode() == InstanceMode.RAID; }
 
-    public PortalDefinition withRaidMode(boolean enabled) { return withAdmission(admission.withRaidMode(enabled)); }
+    public InstanceMode instanceMode() { return admission.instanceMode(); }
+
+    public PortalDefinition withInstanceMode(InstanceMode mode) { return withAdmission(admission.withInstanceMode(mode)); }
+
+    public PortalDefinition withRaidMode(boolean enabled) {
+        return withInstanceMode(enabled ? InstanceMode.RAID : InstanceMode.defaultFor(admission.mode()));
+    }
+
+    /** What happens when a player dies inside an instance of this portal. */
+    public enum InstanceMode {
+        /** Death sends the player out of the instance at once. */
+        NO_REVIVE("No Revive"),
+        /** Down for up to a minute; another player can revive, otherwise the player is sent out. */
+        PLAYER_REVIVE("Player Revive"),
+        /** Down; other players can revive, and the player can revive themselves after the cooldown. */
+        UNLIMITED_REVIVE("Unlimited Revive"),
+        /** Private only: encounters, wipes and checkpoints; unlimited revives when keeping inventory. */
+        DUNGEON("Dungeon"),
+        /** Private only: like Dungeon, but strict encounters (one revive each, no self-revive). */
+        RAID("Raid");
+
+        private final String displayName;
+
+        InstanceMode(String displayName) { this.displayName = displayName; }
+
+        public String displayName() { return displayName; }
+
+        public String serializedName() { return name().toLowerCase(Locale.ROOT); }
+
+        /** Dungeon and Raid need private access. */
+        public boolean privateOnly() { return this == DUNGEON || this == RAID; }
+
+        /** Encounters, wipes and checkpoints (the established Dungeon and Raid mechanics). */
+        public boolean encounters() { return privateOnly(); }
+
+        /** Accepts the saved name or the display name ("Player Revive"). */
+        public static InstanceMode parse(String value) {
+            String normalized = value.trim().toUpperCase(Locale.ROOT).replace(' ', '_');
+            return valueOf(normalized);
+        }
+
+        /** The mode portals had before instance modes existed. */
+        public static InstanceMode defaultFor(Mode access) { return access == Mode.PRIVATE ? DUNGEON : NO_REVIVE; }
+    }
 
     public PortalDefinition withBaseActive(boolean active) { return withAdmission(admission.withBaseActive(active)); }
 
@@ -306,7 +350,7 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
 
     public record Admission(Mode mode, int maxPlayers, boolean allowBuilding, Destination destination,
                             Environment environment, Optional<CoordinateTarget> coordinateTarget, boolean baseActive,
-                            boolean raidMode, boolean keepInventory, boolean showOtherPlayers) {
+                            InstanceMode instanceMode, boolean keepInventory, boolean showOtherPlayers) {
         private static final Codec<Mode> MODE_CODEC = Codec.STRING.xmap(Mode::parse, Mode::serializedName);
         private static final Codec<Destination> DESTINATION_CODEC = Codec.STRING.xmap(
                 Destination::parse, Destination::serializedName);
@@ -321,24 +365,39 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
                 CoordinateTarget.CODEC.optionalFieldOf("coordinate_target")
                         .forGetter(Admission::coordinateTarget),
                 Codec.BOOL.optionalFieldOf("base_active", true).forGetter(Admission::baseActive),
-                Codec.BOOL.optionalFieldOf("raid_mode", false).forGetter(Admission::raidMode),
+                Codec.BOOL.optionalFieldOf("raid_mode", false).forGetter(admission -> admission.instanceMode() == InstanceMode.RAID),
+                Codec.STRING.optionalFieldOf("instance_mode", "").forGetter(admission -> admission.instanceMode().serializedName()),
                 Codec.BOOL.optionalFieldOf("keep_inventory", true).forGetter(Admission::keepInventory),
                 Codec.BOOL.optionalFieldOf("show_other_players", true).forGetter(Admission::showOtherPlayers)
-        ).apply(instance, Admission::new));
+        ).apply(instance, Admission::decode));
+
+        /** Saves from before instance modes only have raid_mode: raid, else Dungeon for private, No Revive for public. */
+        private static Admission decode(Mode mode, int maxPlayers, boolean allowBuilding, Destination destination,
+                                        Environment environment, Optional<CoordinateTarget> coordinateTarget,
+                                        boolean baseActive, boolean legacyRaid, String instanceMode,
+                                        boolean keepInventory, boolean showOtherPlayers) {
+            InstanceMode resolved = !instanceMode.isBlank() ? InstanceMode.parse(instanceMode)
+                    : legacyRaid ? InstanceMode.RAID : InstanceMode.defaultFor(mode);
+            if (resolved.privateOnly() && mode != Mode.PRIVATE) resolved = InstanceMode.NO_REVIVE;
+            return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget, baseActive,
+                    resolved, keepInventory, showOtherPlayers);
+        }
 
         public Admission {
             if (mode == null || destination == null || environment == null || coordinateTarget == null
                     || maxPlayers < 1 || maxPlayers > 100) {
                 throw new IllegalArgumentException("Portal group size must be between 1 and 100");
             }
-            if (raidMode && mode != Mode.PRIVATE) throw new IllegalArgumentException("Raid mode requires dungeon access");
+            if (instanceMode == null) instanceMode = InstanceMode.defaultFor(mode);
+            if (instanceMode.privateOnly() && mode != Mode.PRIVATE)
+                throw new IllegalArgumentException(instanceMode.displayName() + " needs private access");
         }
 
         public Admission(Mode mode, int maxPlayers, boolean allowBuilding, Destination destination,
                          Environment environment, Optional<CoordinateTarget> coordinateTarget, boolean baseActive,
                          boolean raidMode, boolean keepInventory) {
             this(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget,
-                    baseActive, raidMode, keepInventory, true);
+                    baseActive, raidMode ? InstanceMode.RAID : InstanceMode.defaultFor(mode), keepInventory, true);
         }
 
         public Admission(Mode mode, int maxPlayers, boolean allowBuilding, Destination destination,
@@ -363,6 +422,9 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
                     baseActive, raidMode, true);
         }
 
+        /** Before instance modes: was this a raid. */
+        public boolean raidMode() { return instanceMode == InstanceMode.RAID; }
+
         public Admission(Mode mode, int maxPlayers, boolean allowBuilding, Destination destination) {
             this(mode, maxPlayers, allowBuilding, destination, Environment.defaults());
         }
@@ -370,41 +432,43 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
         public Admission(Mode mode, int maxPlayers) { this(mode, maxPlayers, true, Destination.POCKET); }
 
         public Admission withAccess(Mode mode, int maxPlayers) {
-            return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget, baseActive, raidMode, keepInventory, showOtherPlayers);
+            // Dungeon and Raid only exist for private access; going public falls back to No Revive.
+            InstanceMode kept = instanceMode.privateOnly() && mode != Mode.PRIVATE ? InstanceMode.NO_REVIVE : instanceMode;
+            return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget, baseActive, kept, keepInventory, showOtherPlayers);
         }
 
         public Admission withAllowBuilding(boolean value) {
-            return new Admission(mode, maxPlayers, value, destination, environment, coordinateTarget, baseActive, raidMode, keepInventory, showOtherPlayers);
+            return new Admission(mode, maxPlayers, value, destination, environment, coordinateTarget, baseActive, instanceMode, keepInventory, showOtherPlayers);
         }
 
         public Admission withDestination(Destination value) {
-            return new Admission(mode, maxPlayers, allowBuilding, value, environment, coordinateTarget, baseActive, raidMode, keepInventory, showOtherPlayers);
+            return new Admission(mode, maxPlayers, allowBuilding, value, environment, coordinateTarget, baseActive, instanceMode, keepInventory, showOtherPlayers);
         }
 
         public Admission withEnvironment(Environment value) {
-            return new Admission(mode, maxPlayers, allowBuilding, destination, value, coordinateTarget, baseActive, raidMode, keepInventory, showOtherPlayers);
+            return new Admission(mode, maxPlayers, allowBuilding, destination, value, coordinateTarget, baseActive, instanceMode, keepInventory, showOtherPlayers);
         }
 
         public Admission withCoordinateTarget(Optional<CoordinateTarget> value) {
-            return new Admission(mode, maxPlayers, allowBuilding, destination, environment, value, baseActive, raidMode, keepInventory, showOtherPlayers);
+            return new Admission(mode, maxPlayers, allowBuilding, destination, environment, value, baseActive, instanceMode, keepInventory, showOtherPlayers);
         }
 
         public Admission withBaseActive(boolean value) {
-            return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget, value, raidMode, keepInventory, showOtherPlayers);
+            return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget, value, instanceMode, keepInventory, showOtherPlayers);
         }
 
-        public Admission withRaidMode(boolean value) {
+        public Admission withInstanceMode(InstanceMode value) {
             return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget, baseActive, value, keepInventory, showOtherPlayers);
         }
 
         public Admission withKeepInventory(boolean value) {
             return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget,
-                    baseActive, raidMode, value, showOtherPlayers);
+                    baseActive, instanceMode, value, showOtherPlayers);
         }
 
         public Admission withShowOtherPlayers(boolean value) {
             return new Admission(mode, maxPlayers, allowBuilding, destination, environment, coordinateTarget,
-                    baseActive, raidMode, keepInventory, value);
+                    baseActive, instanceMode, keepInventory, value);
         }
 
         public static Admission publicPortal() { return new Admission(Mode.PUBLIC, 4); }
@@ -418,12 +482,12 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
 
     public enum Mode {
         PUBLIC, PRIVATE;
-        /** "Dungeon" is the player-facing name of PRIVATE; the saved value stays "private". */
+        /** Older admin pages called PRIVATE "Dungeon"; that name is still accepted. */
         public static Mode parse(String value) {
             String normalized = value.trim().toUpperCase(Locale.ROOT);
             return valueOf(normalized.equals("DUNGEON") ? "PRIVATE" : normalized);
         }
-        public String displayName() { return this == PRIVATE ? "Dungeon" : "Public"; }
+        public String displayName() { return this == PRIVATE ? "Private" : "Public"; }
         public String serializedName() { return name().toLowerCase(Locale.ROOT); }
     }
 

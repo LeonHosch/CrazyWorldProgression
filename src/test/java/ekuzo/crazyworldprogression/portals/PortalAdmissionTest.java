@@ -37,7 +37,28 @@ class PortalAdmissionTest {
         assertEquals(raid, PortalDefinition.CODEC.parse(JsonOps.INSTANCE, encoded).getOrThrow());
         assertTrue(raid.withAllowBuilding(false).raidMode());
         assertThrows(IllegalArgumentException.class, () -> raid.withAdmission(
-                new PortalDefinition.Admission(PortalDefinition.Mode.PUBLIC, 0).withRaidMode(true)));
+                new PortalDefinition.Admission(PortalDefinition.Mode.PUBLIC, 2)
+                        .withInstanceMode(PortalDefinition.InstanceMode.RAID)));
+    }
+
+    @Test void instanceModesRoundTripAndOldSavesKeepTheirBehaviour() {
+        for (PortalDefinition.InstanceMode mode : PortalDefinition.InstanceMode.values()) {
+            PortalDefinition portal = definition().withInstanceMode(mode);
+            JsonObject json = PortalDefinition.CODEC.encodeStart(JsonOps.INSTANCE, portal).getOrThrow().getAsJsonObject();
+            assertEquals(mode, PortalDefinition.CODEC.parse(JsonOps.INSTANCE, json).getOrThrow().instanceMode());
+        }
+        JsonObject old = PortalDefinition.CODEC.encodeStart(JsonOps.INSTANCE, definition()).getOrThrow().getAsJsonObject();
+        old.remove("instance_mode");
+        old.addProperty("raid_mode", false);
+        assertEquals(PortalDefinition.InstanceMode.DUNGEON,
+                PortalDefinition.CODEC.parse(JsonOps.INSTANCE, old).getOrThrow().instanceMode(), "old private portal");
+        old.addProperty("raid_mode", true);
+        assertEquals(PortalDefinition.InstanceMode.RAID,
+                PortalDefinition.CODEC.parse(JsonOps.INSTANCE, old).getOrThrow().instanceMode(), "old raid portal");
+        assertEquals(PortalDefinition.InstanceMode.NO_REVIVE, definition().withRaidMode(true)
+                .withAdmission(definition().admission().withAccess(PortalDefinition.Mode.PUBLIC, 3)).instanceMode(),
+                "going public drops Dungeon and Raid");
+        assertEquals(PortalDefinition.InstanceMode.PLAYER_REVIVE, PortalDefinition.InstanceMode.parse("Player Revive"));
     }
 
     @Test void privateSettingsRoundTripAndSurviveEdits() {

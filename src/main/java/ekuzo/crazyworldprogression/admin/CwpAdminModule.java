@@ -82,7 +82,7 @@ public final class CwpAdminModule {
     private static final List<String> PORTAL_COLORS = Arrays.stream(PortalDefinition.PortalColor.values())
             .map(color -> PortalDefinition.PortalColor.displayName(color.rgb())).toList();
     private static final List<String> ENTRY_POLICIES = List.of("Repeatable", "Once per instance", "Once per attempt", "Once ever");
-    private static final List<String> ACCESS_MODES = List.of("Public", "Dungeon");
+    private static final List<String> ACCESS_MODES = List.of("Public", "Private");
     private static final List<String> DAYTIMES = List.of("Dawn", "Morning", "Noon", "Dusk", "Night", "Midnight");
     private static final List<String> WEATHER_STATES = List.of("Clear", "Rain", "Thunder");
     private static final List<String> DIFFICULTIES = List.of("1 skull", "2 skulls", "3 skulls", "4 skulls", "5 skulls");
@@ -585,20 +585,25 @@ public final class CwpAdminModule {
                 "Choose whether a player may revisit this portal.",
                 List.of(AdminPanelRegistry.AdminField.select("portal_entry_policy", "Entry policy",
                         creating ? "Repeatable" : entryPolicyLabel(portal.entryPolicy()), ENTRY_POLICIES)), List.of()));
+        boolean privateAccess = !creating && portal.admission().mode() == PortalDefinition.Mode.PRIVATE;
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Instance access",
-                "Public uses one shared instance for everyone. A Dungeon gives each party its own instance; the party limit applies only there.",
-                creating || portal.admission().mode() == PortalDefinition.Mode.PRIVATE
-                        ? List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
-                                        creating ? "Public" : "Dungeon", ACCESS_MODES),
-                                textField("portal_max_players", "Dungeon party limit (ignored for public)",
-                                        Integer.toString(creating ? 4 : portal.admission().maxPlayers()), "4", 3,
-                                        List.of()))
-                        : List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
-                                "Public", ACCESS_MODES)), List.of()));
-        entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Raid attempt",
-                "Raids are dungeons with strict encounters: one revive each, and a wipe resets the encounter for another try.",
-                List.of(AdminPanelRegistry.AdminField.select("portal_raid_mode", "Raid mode",
-                        !creating && portal.raidMode() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+                "Public uses one shared instance for everyone. Private gives each party its own instance; the party "
+                        + "limit applies only there, and entering sets the party's size limit to it.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_access_mode", "Access",
+                                privateAccess ? "Private" : "Public", ACCESS_MODES),
+                        textField("portal_max_players", "Party limit (private only)",
+                                Integer.toString(creating ? 4 : portal.admission().maxPlayers()), "4", 3, List.of())),
+                List.of()));
+        List<String> instanceModes = java.util.Arrays.stream(PortalDefinition.InstanceMode.values())
+                .filter(mode -> privateAccess || !mode.privateOnly())
+                .map(PortalDefinition.InstanceMode::displayName).toList();
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Instance mode",
+                "What happens when a player dies. No Revive: sent out at once. Player Revive: others have 1 minute to "
+                        + "revive. Unlimited Revive: also self-revive after 15 s. Dungeon and Raid (private only, save "
+                        + "Private first): encounters, wipes and checkpoints; Raid allows one revive each.",
+                List.of(AdminPanelRegistry.AdminField.select("portal_instance_mode", "Instance mode",
+                        creating ? PortalDefinition.InstanceMode.NO_REVIVE.displayName()
+                                : portal.instanceMode().displayName(), instanceModes)), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Building",
                 "Allow players to place and break blocks in instances opened by this portal.",
                 List.of(AdminPanelRegistry.AdminField.select("portal_allow_building", "Build in instance",
@@ -1220,7 +1225,7 @@ public final class CwpAdminModule {
                 parseYesNo(required(values, "portal_allow_building")), PortalDefinition.Destination.POCKET));
         portal = portal.withEnvironment(portalEnvironment(values));
         portal = portal.withBaseActive(parseYesNo(required(values, "portal_base_active")));
-        portal = portal.withRaidMode(parseYesNo(required(values, "portal_raid_mode")));
+        portal = portal.withInstanceMode(instanceMode(values, PortalDefinition.InstanceMode.NO_REVIVE, access));
         portal = portal.withKeepInventory(portal.isExit() || portal.isCoordinates()
                 || parseYesNo(required(values, "portal_keep_inventory")));
         portal = portal.withShowOtherPlayers(parseYesNo(values.getOrDefault("portal_show_players", "Yes")));
@@ -1230,6 +1235,18 @@ public final class CwpAdminModule {
     }
 
     // Apply all portal editor fields to one fixed portal identifier while preserving its schedule and dimension.
+    /** The chosen instance mode; Dungeon and Raid only for private access (a public portal falls back to No Revive). */
+    private static PortalDefinition.InstanceMode instanceMode(Map<String, String> values,
+                                                              PortalDefinition.InstanceMode current,
+                                                              PortalDefinition.Mode access) {
+        if (!values.containsKey("portal_instance_mode"))
+            return current.privateOnly() && access != PortalDefinition.Mode.PRIVATE ? PortalDefinition.InstanceMode.NO_REVIVE : current;
+        PortalDefinition.InstanceMode chosen = PortalDefinition.InstanceMode.parse(required(values, "portal_instance_mode"));
+        if (chosen.privateOnly() && access != PortalDefinition.Mode.PRIVATE)
+            throw new IllegalArgumentException(chosen.displayName() + " is only available for private instances");
+        return chosen;
+    }
+
     private static AdminPanelRegistry.ActionResult updatePortal(ServerPlayer player, Identifier id,
                                                                  Map<String, String> values) {
         MinecraftServer server = player.level().getServer();
@@ -1253,7 +1270,7 @@ public final class CwpAdminModule {
                 parseYesNo(required(values, "portal_allow_building")), PortalDefinition.Destination.POCKET));
         updated = updated.withEnvironment(portalEnvironment(values));
         updated = updated.withBaseActive(parseYesNo(required(values, "portal_base_active")));
-        updated = updated.withRaidMode(parseYesNo(required(values, "portal_raid_mode")));
+        updated = updated.withInstanceMode(instanceMode(values, current.instanceMode(), access));
         updated = updated.withKeepInventory(updated.isExit() || updated.isCoordinates()
                 || parseYesNo(required(values, "portal_keep_inventory")));
         updated = updated.withShowOtherPlayers(values.containsKey("portal_show_players")
@@ -1306,8 +1323,8 @@ public final class CwpAdminModule {
                 PortalDefinition.Destination.POCKET, current.environment(), current.coordinateTarget(),
                 values.containsKey("portal_base_active")
                         ? parseYesNo(required(values, "portal_base_active")) : current.baseActive(),
-                values.containsKey("portal_raid_mode")
-                        ? parseYesNo(required(values, "portal_raid_mode")) : current.raidMode()));
+                false));
+        updated = updated.withInstanceMode(instanceMode(values, current.instanceMode(), access));
         updated = updated.withKeepInventory(updated.isExit() || updated.isCoordinates()
                 || (values.containsKey("portal_keep_inventory")
                 ? parseYesNo(required(values, "portal_keep_inventory")) : current.keepInventory()));

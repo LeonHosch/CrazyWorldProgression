@@ -28,7 +28,17 @@ Every party has a hidden ID. A dungeon instance belongs to the party that opened
 
 Pocket portals keep each player's inventory on death by default. The portal editor can turn **Keep inventory on death** off for a pocket destination. That portal then shows a prominent red item-loss warning and requires a second entry confirmation. Every member of a private group must confirm before the group enters. This setting applies to the instance opened by that portal; ordinary worlds retain their own gamerule.
 
-Enable **Raid mode** on a private pocket portal and set its group limit to the team size (for example, six). Raid members who die respawn as spectators at the pocket rally spawn. A death marker appears at their death location. A living teammate can interact with the marker to revive them; each teammate has one revive charge per attempt. Spectators do not count in script event boxes or use encounter portals.
+Every pocket portal has an **instance mode** that decides what happens when a player dies inside:
+
+| Mode | Death | Revive |
+| --- | --- | --- |
+| No Revive | Sent out of the instance at once (items drop where they died unless the portal keeps inventory) | — |
+| Player Revive | Down as a spectator at a marker | Another player revives them within 1 minute, otherwise they are sent out |
+| Unlimited Revive | Down as a spectator at a marker | Other players can revive; after 15 seconds they can revive themselves by flying into their revive point |
+| Dungeon (private only) | Down | Encounters, wipes and checkpoints; unlimited revives when keeping inventory |
+| Raid (private only) | Down | Like Dungeon with strict encounters: one revive each, no self-revive during encounters |
+
+Reviving takes 2 seconds: right-click the marker and stay within 5 blocks. Self-revive anywhere it is allowed needs 15 seconds down. Old portals keep their behaviour: raids become Raid, other private portals Dungeon, public portals No Revive. Entering a private portal sets the party's size limit to the portal's party limit. For a raid, choose **Raid** and set the party limit to the team size (for example, six). A living teammate can interact with a marker to revive; spectators do not count in script event boxes or use encounter portals.
 
 When every online participant in the instance is down, the attempt wipes. Players return to the pocket rally spawn, revive charges and `once_per_attempt` portal records clear, pocket scripts restart, script spawned mobs are removed, and script placed portal locations reset. The instance remains available for the retry. Add a **Raid complete** step to the encounter script to reset charges and entry records after a successful attempt. A portal with **Coordinates** and **Once per attempt** makes a prompt free lobby entrance that each player can use once until a wipe or completion. Raid instances still obey their lease lifetime. Empty private raid instances expire once no player or pending respawn remains inside.
 

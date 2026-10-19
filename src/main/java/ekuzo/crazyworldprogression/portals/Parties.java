@@ -326,9 +326,24 @@ public final class Parties {
         if (removed.isEmpty()) return removed;
         save(server);
         notifyParty(server, party, String.join(", ", removed) + (removed.size() == 1 ? " was" : " were")
-                + " offline and removed from the party when the dungeon started.");
+                + " offline and removed from the party when the instance started.");
         refresh(server);
         return removed;
+    }
+
+    /**
+     * Entering a private activity with a player limit: the leader's party size limit becomes that limit (when the
+     * party is not already bigger, which the entry refuses anyway).
+     */
+    public static void limitTo(MinecraftServer server, UUID leader, int limit) {
+        PartyBook book = book(server);
+        PartyBook.Party party = book.partyOf(leader);
+        if (party == null || !party.leader().equals(leader) || party.maxSize() == limit
+                || party.members().size() > limit) return;
+        book.setMaxSize(leader, limit);
+        save(server);
+        notifyParty(server, party, "The party limit is now " + limit + ", the limit of this activity.");
+        refresh(server);
     }
 
     /** /party join <leader>: joins (public) or asks to join (semi-private) the party that player leads or is in. */

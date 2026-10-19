@@ -212,7 +212,7 @@ public final class PortalService {
         if (old == null) throw new IllegalArgumentException("Unknown portal: " + portal.id());
         if ((!old.templateId().equals(portal.templateId())
                 || old.admission().mode() != portal.admission().mode()
-                || old.raidMode() != portal.raidMode())
+                || old.instanceMode() != portal.instanceMode())
                 && PortalData.get(server).instances().values().stream()
                         .anyMatch(instance -> instance.portalId().equals(portal.id()))) {
             throw new IllegalStateException("Expire this portal's active instances before changing its destination");
@@ -338,7 +338,7 @@ public final class PortalService {
                 && portal.admission().mode() == PortalDefinition.Mode.PRIVATE
                 && playerInstance(server, portal.id(), player.getUUID()) == null
                 && !groupRisk && !PortalGroups.leader(server, player.getUUID()).equals(player.getUUID())) {
-            player.sendOverlayMessage(Component.literal("Your party leader must start the dungeon"));
+            player.sendOverlayMessage(Component.literal("Your party leader must start the instance"));
             return;
         }
         if (groupRisk) {
@@ -846,12 +846,14 @@ public final class PortalService {
             return;
         }
         UUID leader = PortalGroups.leader(server, player.getUUID());
-        if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your party leader can start this dungeon");
+        if (!leader.equals(player.getUUID())) throw new IllegalStateException("Only your party leader can start this instance");
         // Offline members never hold a start up: they leave the party (and can be invited again later).
         Parties.removeOffline(server, leader);
+        // The party can grow only up to this activity's player limit.
+        Parties.limitTo(server, leader, portal.admission().maxPlayers());
         List<UUID> members = PortalGroups.members(server, leader);
         if (members.size() > portal.admission().maxPlayers()) {
-            throw new IllegalStateException("your party is larger than this dungeon's " + portal.admission().maxPlayers() + " player limit");
+            throw new IllegalStateException("your party is larger than this instance's " + portal.admission().maxPlayers() + " player limit");
         }
         // Every online party member has to be at the portal before the instance is set up.
         List<String> missing = new ArrayList<>();

@@ -18,10 +18,10 @@ class RaidDownsTest {
     }
 
     @Test void selfReviveNeedsFiveSecondsTouchingThePointAndNoEncounter() {
-        assertTrue(RaidDowns.canSelfRevive(false, 100L, 0.5));
-        assertFalse(RaidDowns.canSelfRevive(false, 99L, 0.5), "too early");
-        assertFalse(RaidDowns.canSelfRevive(false, 200L, 1.5), "not at the point");
-        assertFalse(RaidDowns.canSelfRevive(true, 200L, 0.0), "never during an encounter");
+        assertTrue(RaidDowns.canSelfRevive(false, 300L, 0.5));
+        assertFalse(RaidDowns.canSelfRevive(false, 299L, 0.5), "too early: 15 seconds");
+        assertFalse(RaidDowns.canSelfRevive(false, 400L, 1.5), "not at the point");
+        assertFalse(RaidDowns.canSelfRevive(true, 400L, 0.0), "never during an encounter");
     }
 
     @Test void spectatorsAreHeldInsideTheLeashSphere() {

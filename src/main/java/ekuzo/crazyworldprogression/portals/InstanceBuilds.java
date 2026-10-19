@@ -115,6 +115,17 @@ public final class InstanceBuilds {
         if (jobs != null) jobs.remove(key);
     }
 
+    /** Running builds and the blocks they still have to place, for the performance view. */
+    public static int pending(MinecraftServer server) {
+        Map<String, Job> jobs = JOBS.get(server);
+        return jobs == null ? 0 : jobs.size();
+    }
+
+    public static long remainingBlocks(MinecraftServer server) {
+        Map<String, Job> jobs = JOBS.get(server);
+        return jobs == null ? 0 : jobs.values().stream().mapToLong(job -> job.blocks.size() - job.next).sum();
+    }
+
     public static boolean building(MinecraftServer server, String key) {
         Map<String, Job> jobs = JOBS.get(server);
         return jobs != null && jobs.containsKey(key);

@@ -47,6 +47,8 @@ public final class TickBudget {
         double ownAverageNanos;
         double scriptAverageNanos;
         long budgetNanos;
+        /** Per priority, averaged over roughly the last 100 ticks, for the performance view. */
+        final double[] averageNanos = new double[Priority.values().length];
     }
 
     /** One piece of block work. Call {@link #more(int)} in the loop and {@link #close()} at the end. */
@@ -89,6 +91,8 @@ public final class TickBudget {
             // Averages over roughly the last 100 ticks, like the server's own average tick time.
             state.ownAverageNanos += (own - state.ownAverageNanos) / 100.0;
             state.scriptAverageNanos += (state.spent[Priority.SCRIPT.ordinal()] - state.scriptAverageNanos) / 20.0;
+            for (int i = 0; i < state.spent.length; i++)
+                state.averageNanos[i] += (state.spent[i] - state.averageNanos[i]) / 100.0;
             java.util.Arrays.fill(state.spent, 0L);
             state.tick = tick;
             long baseNanos = Math.max(0L, server.getAverageTickTimeNanos() - (long) state.ownAverageNanos);
@@ -121,6 +125,16 @@ public final class TickBudget {
 
     private static long allowed(State state, Priority priority) {
         return allowed(state.budgetNanos, state.spent, state.scriptAverageNanos, priority);
+    }
+
+    /** Current budget and average time per priority, in milliseconds, for the performance view. */
+    public record Stats(double budgetMs, double scriptMs, double creationMs, double cleanupMs) { }
+
+    public static Stats stats(MinecraftServer server) {
+        State state = STATES.get(server);
+        if (state == null) return new Stats(0, 0, 0, 0);
+        return new Stats(state.budgetNanos / 1e6, state.averageNanos[Priority.SCRIPT.ordinal()] / 1e6,
+                state.averageNanos[Priority.CREATION.ordinal()] / 1e6, state.averageNanos[Priority.CLEANUP.ordinal()] / 1e6);
     }
 
     /** True when this priority still has time left in the current tick. */

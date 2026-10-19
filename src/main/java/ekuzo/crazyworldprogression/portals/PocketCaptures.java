@@ -87,6 +87,11 @@ public final class PocketCaptures {
         ServerLifecycleEvents.SERVER_STOPPED.register(JOBS::remove);
     }
 
+    public static int count(MinecraftServer server) {
+        Map<Identifier, Job> jobs = JOBS.get(server);
+        return jobs == null ? 0 : jobs.size();
+    }
+
     public static boolean capturing(MinecraftServer server, Identifier id) {
         Map<Identifier, Job> jobs = JOBS.get(server);
         return jobs != null && jobs.containsKey(id);

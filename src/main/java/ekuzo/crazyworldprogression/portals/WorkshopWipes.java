@@ -65,6 +65,11 @@ public final class WorkshopWipes {
         CrazyWorldProgression.LOGGER.info("Resetting pocket workshop {} ({} chunks)", slot, packed.length);
     }
 
+    public static int count(MinecraftServer server) {
+        Map<Integer, Wipe> wipes = WIPES.get(server);
+        return wipes == null ? 0 : wipes.size();
+    }
+
     static boolean wiping(MinecraftServer server, int slot) {
         Map<Integer, Wipe> wipes = WIPES.get(server);
         return wipes != null && wipes.containsKey(slot);

@@ -67,6 +67,7 @@ public final class PortalService {
         WorkshopWipes.initialize();
         PocketCaptures.initialize();
         ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
+        ekuzo.crazyworldprogression.cleanup.PerformanceMonitor.initialize();
         StressPocket.initialize();
         Parties.initialize();
         EncounterBanner.initialize();
@@ -1165,6 +1166,14 @@ public final class PortalService {
                     live.put(entry.getKey(), new CleanupTask(task.instance(), next, buildingIndex));
                 }
             }
+        }
+    }
+
+    /** Instances still being cleared, for the performance view. */
+    public static int cleanupCount(MinecraftServer server) {
+        synchronized (CLEANUPS) {
+            Map<Identifier, CleanupTask> tasks = CLEANUPS.get(server);
+            return tasks == null ? 0 : tasks.size();
         }
     }
 

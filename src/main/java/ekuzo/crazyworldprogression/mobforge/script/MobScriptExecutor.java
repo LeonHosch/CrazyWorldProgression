@@ -150,6 +150,8 @@ public final class MobScriptExecutor {
 			run.portalUses.merge(portalId, 1L, Long::sum);
 	}
 
+	public int activeRunCount() { return active.size(); }
+
 	public int activeRuns(String scriptId) {
 		return (int) active.values().stream().filter(run -> run.script.id().equals(scriptId)).count();
 	}

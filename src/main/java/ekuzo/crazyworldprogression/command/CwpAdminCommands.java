@@ -57,6 +57,11 @@ public final class CwpAdminCommands {
                 .executes(CwpAdminCommands::status)
                 .then(Commands.literal("admin").executes(CwpAdminCommands::openAdminPanel))
                 .then(Commands.literal("status").executes(CwpAdminCommands::status))
+                .then(Commands.literal("performance").executes(context -> {
+                    for (var line : ekuzo.crazyworldprogression.admin.AdminPerformance.chat(context.getSource().getServer()))
+                        context.getSource().sendSystemMessage(line);
+                    return 1;
+                }))
                 .then(Commands.literal("help").executes(CwpAdminCommands::help))
                 .then(eventsBranch())
                 .then(currenciesBranch())
@@ -167,6 +172,7 @@ public final class CwpAdminCommands {
         header(context.getSource(), "CWP admin commands");
         line(context.getSource(), "/cwp admin - open the modular administration panel", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp status - framework health overview", ChatFormatting.GRAY);
+        line(context.getSource(), "/cwp performance - tick time, CWP block work, queues and the slowest worlds", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp events list|active|blackouts|info|start|stop", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp currencies list|info", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp skilltrees list|info", ChatFormatting.GRAY);

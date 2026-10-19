@@ -99,6 +99,7 @@ public final class CwpAdminModule {
             new AdminPanelRegistry.AdminTab(MOB_MOBS, "Mobs", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(MOB_SCRIPTS, "Scripts", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot pools", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(AdminPerformance.PAGE, "Performance", AdminPanelRegistry.LOGS),
             new AdminPanelRegistry.AdminTab(LOGS, "Server log", AdminPanelRegistry.LOGS),
             new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill trees", AdminPanelRegistry.LOGS),
             new AdminPanelRegistry.AdminTab(OVERVIEW, "CWP status", AdminPanelRegistry.LOGS));
@@ -161,6 +162,7 @@ public final class CwpAdminModule {
         return switch (pageId) {
             case PLAYERS -> playersPage(player);
             case LOGS -> logsPage(player);
+            case AdminPerformance.PAGE -> AdminPerformance.page(player, TABS);
             case POCKETS -> pocketsPage(player);
             case PORTALS -> portalsPage(player);
             case BUILDINGS -> buildingsPage(player);

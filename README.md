@@ -485,6 +485,7 @@ CWP generates commands from every registered currency. In these examples, `renow
 | `/skill` | Player | Open the skill-tree screen |
 | `/cwp admin` | Game master | Open the administration panel: **Moderate** (players, instances, events, kingdom, Veil), **Build** (pockets, portals, buildings, mobs and scripts, loot pools, currencies, skill trees, anomalies, advancements) and **Logs** (recent server log, status pages) |
 | `/cwp` or `/cwp status` | Game master | Show loaded currencies, trees, stat functions, events, handlers, active events, and blackout state |
+| `/cwp performance` | Game master | Tick time (average, 95th percentile, slowest), CWP's own block work per priority, waiting builds/cleanups/saves/scripts, and the slowest worlds with their entity and chunk counts. The admin panel shows the same under Logs → Performance |
 | `/cwp help` | Game master | Show the available CWP administration branches |
 | `/cwp events` | Game master | Summarize the random-event scheduler |
 | `/cwp events list [page]` | Game master | List loaded event IDs, triggers, chances, handlers, and active markers |

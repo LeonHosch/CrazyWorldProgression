@@ -630,6 +630,16 @@ public final class CwpAdminModule {
                                 title(environment.weather().serializedName()), WEATHER_STATES),
                         AdminPanelRegistry.AdminField.select("portal_weather_cycle", "Weather cycle",
                                 environment.weatherCycle() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Environment", "Distances",
+                "In chunks, 2 to 32; empty uses the server's setting. View distance: how far players see (their own "
+                        + "render distance still caps it). Simulation distance: how far around players mobs move, "
+                        + "redstone runs and crops grow. Script timelines run regardless, but spawned mobs only act "
+                        + "within it.",
+                List.of(textField("portal_view_distance", "View distance",
+                                environment.viewDistance() == 0 ? "" : Integer.toString(environment.viewDistance()), "server", 2, List.of()),
+                        textField("portal_simulation_distance", "Simulation distance",
+                                environment.simulationDistance() == 0 ? "" : Integer.toString(environment.simulationDistance()),
+                                "server", 2, List.of())), List.of()));
         if (!creating) addScheduleEditor(entries, schedule);
         String saveAction = creating ? "portal.create" : "";
         entries.add(AdminPanelRegistry.AdminEntry.editor("Actions",
@@ -1339,7 +1349,10 @@ public final class CwpAdminModule {
                 values.containsKey("portal_weather")
                         ? PortalDefinition.Weather.parse(required(values, "portal_weather")) : environment.weather(),
                 values.containsKey("portal_weather_cycle")
-                        ? parseYesNo(required(values, "portal_weather_cycle")) : environment.weatherCycle()));
+                        ? parseYesNo(required(values, "portal_weather_cycle")) : environment.weatherCycle(),
+                values.containsKey("portal_view_distance") ? distance(values, "portal_view_distance") : environment.viewDistance(),
+                values.containsKey("portal_simulation_distance")
+                        ? distance(values, "portal_simulation_distance") : environment.simulationDistance()));
         if (updated.isCoordinates() || values.containsKey("portal_target_x")
                 || values.containsKey("portal_target_y") || values.containsKey("portal_target_z")) {
             PortalDefinition.CoordinateTarget base = current.coordinateTarget().orElseGet(() ->
@@ -1358,7 +1371,16 @@ public final class CwpAdminModule {
                 PortalDefinition.Daytime.parse(required(values, "portal_daytime")),
                 parseYesNo(required(values, "portal_day_night_cycle")),
                 PortalDefinition.Weather.parse(required(values, "portal_weather")),
-                parseYesNo(required(values, "portal_weather_cycle")));
+                parseYesNo(required(values, "portal_weather_cycle")),
+                distance(values, "portal_view_distance"), distance(values, "portal_simulation_distance"));
+    }
+
+    /** Empty means the server's setting (0). */
+    private static int distance(Map<String, String> values, String key) {
+        String value = values.getOrDefault(key, "").trim();
+        if (value.isEmpty()) return 0;
+        try { return Integer.parseInt(value); }
+        catch (NumberFormatException exception) { throw new IllegalArgumentException("Distances are whole numbers of chunks"); }
     }
 
     private static PortalDefinition.CoordinateTarget coordinateTarget(Map<String, String> values) {

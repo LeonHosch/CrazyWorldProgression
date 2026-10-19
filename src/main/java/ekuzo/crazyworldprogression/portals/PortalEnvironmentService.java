@@ -34,7 +34,46 @@ public final class PortalEnvironmentService {
         }
     }
 
+    /**
+     * View and simulation distance of the instance's world: the portal's values, or the server's own settings
+     * (also used when the slot is released).
+     */
+    static void applyDistances(MinecraftServer server, net.minecraft.resources.Identifier slot, Environment environment) {
+        ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, slot));
+        if (level == null) return;
+        int view = environment != null && environment.viewDistance() > 0 ? environment.viewDistance()
+                : server.getPlayerList().getViewDistance();
+        int simulation = environment != null && environment.simulationDistance() > 0 ? environment.simulationDistance()
+                : server.getPlayerList().getSimulationDistance();
+        int[] current = DISTANCES.get(slot);
+        if (current != null && current[0] == view && current[1] == simulation) return;
+        level.getChunkSource().setViewDistance(view);
+        level.getChunkSource().setSimulationDistance(simulation);
+        if (view == server.getPlayerList().getViewDistance() && simulation == server.getPlayerList().getSimulationDistance())
+            DISTANCES.remove(slot);
+        else DISTANCES.put(slot, new int[] {view, simulation});
+        for (ServerPlayer player : level.players()) syncDistances(player, level);
+    }
+
+    static void clearDistances() { DISTANCES.clear(); }
+
+    /** Distances CWP set on instance worlds that differ from the server's; Minecraft has no getter for them. */
+    private static final java.util.Map<net.minecraft.resources.Identifier, int[]> DISTANCES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * A player's client only learns the view and simulation distance when it logs in, so it is told again when
+     * entering a world whose distances differ (an instance, or back out of one).
+     */
+    static void syncDistances(ServerPlayer player, ServerLevel level) {
+        MinecraftServer server = level.getServer();
+        int[] distances = DISTANCES.getOrDefault(level.dimension().identifier(),
+                new int[] {server.getPlayerList().getViewDistance(), server.getPlayerList().getSimulationDistance()});
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetChunkCacheRadiusPacket(distances[0]));
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetSimulationDistancePacket(distances[1]));
+    }
+
     static void restore(MinecraftServer server, PortalService.ActiveInstance instance, Environment environment) {
+        applyDistances(server, instance.slotDimension(), environment);
         Holder<WorldClock> clock = clock(server, instance);
         if (server.clockManager().getTotalTicks(clock) == 0L) applyTime(server, instance, environment);
         ServerLevel level = instance.world(server);

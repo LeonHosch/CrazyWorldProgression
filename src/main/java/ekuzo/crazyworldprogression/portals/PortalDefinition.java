@@ -316,18 +316,30 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
         }
     }
 
-    public record Environment(Daytime daytime, boolean dayNightCycle, Weather weather, boolean weatherCycle) {
+    /** viewDistance and simulationDistance are in chunks; 0 means the server's own setting. */
+    public record Environment(Daytime daytime, boolean dayNightCycle, Weather weather, boolean weatherCycle,
+                              int viewDistance, int simulationDistance) {
         private static final Codec<Environment> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.optionalFieldOf("daytime", Daytime.NOON.serializedName())
                         .xmap(Daytime::parse, Daytime::serializedName).forGetter(Environment::daytime),
                 Codec.BOOL.optionalFieldOf("day_night_cycle", true).forGetter(Environment::dayNightCycle),
                 Codec.STRING.optionalFieldOf("weather", Weather.CLEAR.serializedName())
                         .xmap(Weather::parse, Weather::serializedName).forGetter(Environment::weather),
-                Codec.BOOL.optionalFieldOf("weather_cycle", true).forGetter(Environment::weatherCycle)
+                Codec.BOOL.optionalFieldOf("weather_cycle", true).forGetter(Environment::weatherCycle),
+                Codec.INT.optionalFieldOf("view_distance", 0).forGetter(Environment::viewDistance),
+                Codec.INT.optionalFieldOf("simulation_distance", 0).forGetter(Environment::simulationDistance)
         ).apply(instance, Environment::new));
 
         public Environment {
             if (daytime == null || weather == null) throw new IllegalArgumentException("Portal environment is incomplete");
+            if (viewDistance != 0 && (viewDistance < 2 || viewDistance > 32))
+                throw new IllegalArgumentException("View distance must be between 2 and 32 chunks (empty for the server's)");
+            if (simulationDistance != 0 && (simulationDistance < 2 || simulationDistance > 32))
+                throw new IllegalArgumentException("Simulation distance must be between 2 and 32 chunks (empty for the server's)");
+        }
+
+        public Environment(Daytime daytime, boolean dayNightCycle, Weather weather, boolean weatherCycle) {
+            this(daytime, dayNightCycle, weather, weatherCycle, 0, 0);
         }
 
         public static Environment defaults() { return new Environment(Daytime.NOON, true, Weather.CLEAR, true); }

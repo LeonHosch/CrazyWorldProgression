@@ -66,6 +66,8 @@ public final class PortalService {
         InstanceBuilds.initialize();
         WorkshopWipes.initialize();
         PocketCaptures.initialize();
+        net.fabricmc.fabric.api.entity.event.v1.ServerEntityLevelChangeEvents.AFTER_PLAYER_CHANGE_LEVEL.register(
+                (player, origin, destination) -> PortalEnvironmentService.syncDistances(player, destination));
         ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
         ekuzo.crazyworldprogression.cleanup.PerformanceMonitor.initialize();
         StressPocket.initialize();
@@ -80,6 +82,7 @@ public final class PortalService {
             }
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            PortalEnvironmentService.clearDistances();
             PocketEditorService.clearAutoSaves(server);
             synchronized (PORTALS_BY_DIMENSION) {
                 PORTALS_BY_DIMENSION.remove(server);
@@ -231,6 +234,7 @@ public final class PortalService {
                         || old.environment().weatherCycle() != portal.environment().weatherCycle()) {
                     PortalEnvironmentService.applyWeather(server, instance, portal.environment());
                 }
+                PortalEnvironmentService.applyDistances(server, instance.slotDimension(), portal.environment());
             }
         }
         PortalNetworking.broadcast(server);
@@ -966,6 +970,7 @@ public final class PortalService {
         if (RaidService.isRaidPortal(portal)) RaidService.prepare(server, instance);
         PortalEnvironmentService.applyTime(server, view(instance), portal.environment());
         PortalEnvironmentService.applyWeather(server, view(instance), portal.environment());
+        PortalEnvironmentService.applyDistances(server, instance.slotDimension(), portal.environment());
         PREPARING.computeIfAbsent(server, ignored -> new HashMap<>())
                 .put(slot.toString(), new Preparing(portal.id(), new java.util.LinkedHashSet<>()));
         PortalTemplateService.reconstructThen(server, destination, template.id(), origin, () -> {
@@ -1164,6 +1169,7 @@ public final class PortalService {
                     if (last && portal != null && portal.entryPolicy() == PortalDefinition.EntryPolicy.ONCE_PER_INSTANCE) {
                         PortalData.get(server).clearPlayerEntries(portalId);
                     }
+                    PortalEnvironmentService.applyDistances(server, task.instance().slotDimension(), null);
                     CrazyWorldProgression.LOGGER.info("Finished cleanup and released portal slot {}",
                             task.instance().slotDimension());
                 } else {

@@ -43,6 +43,7 @@ public final class PortalEnvironmentService {
         if (level == null) return;
         if (environment != null && !environment.randomTicks()) NO_RANDOM_TICKS.add(slot); else NO_RANDOM_TICKS.remove(slot);
         if (environment != null && !environment.fireSpread()) NO_FIRE_SPREAD.add(slot); else NO_FIRE_SPREAD.remove(slot);
+        if (environment != null && environment.mobSpawns()) MOB_SPAWNS_ON.add(slot); else MOB_SPAWNS_ON.remove(slot);
         int view = environment != null && environment.viewDistance() > 0 ? environment.viewDistance()
                 : server.getPlayerList().getViewDistance();
         int simulation = environment != null && environment.simulationDistance() > 0 ? environment.simulationDistance()
@@ -85,6 +86,17 @@ public final class PortalEnvironmentService {
         DISTANCES.clear();
         NO_RANDOM_TICKS.clear();
         NO_FIRE_SPREAD.clear();
+        MOB_SPAWNS_ON.clear();
+    }
+
+    private static final java.util.Set<net.minecraft.resources.Identifier> MOB_SPAWNS_ON = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Instance worlds spawn no vanilla mobs unless their portal allows it. Other worlds are not affected. */
+    public static boolean mobSpawnsOff(ServerLevel level) {
+        net.minecraft.resources.Identifier dimension = level.dimension().identifier();
+        // Runs for every chunk of every world each tick, so only a cheap name check here (slots are portal_instance_N).
+        return dimension.getNamespace().equals(ekuzo.crazyworldprogression.CrazyWorldProgression.MOD_ID)
+                && dimension.getPath().startsWith("portal_instance_") && !MOB_SPAWNS_ON.contains(dimension);
     }
 
     private static final java.util.Set<net.minecraft.resources.Identifier> NO_RANDOM_TICKS = java.util.concurrent.ConcurrentHashMap.newKeySet();

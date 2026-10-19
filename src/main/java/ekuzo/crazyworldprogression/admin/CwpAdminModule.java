@@ -641,13 +641,15 @@ public final class CwpAdminModule {
                                 environment.simulationDistance() == 0 ? "" : Integer.toString(environment.simulationDistance()),
                                 "server", 2, List.of())), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Environment", "World behaviour",
-                "Random ticks: crops growing, grass and mycelium spreading, leaves decaying, ice and snow melting, lava "
+                "Vanilla mob spawns: natural spawning like in the main world (script mobs always spawn). Random ticks: crops growing, grass and mycelium spreading, leaves decaying, ice and snow melting, lava "
                         + "lighting fires. Fire spread: fire spreading and burning blocks away. Turning both off saves "
                         + "work in instances that do not need them.",
                 List.of(AdminPanelRegistry.AdminField.select("portal_random_ticks", "Random ticks",
                                 environment.randomTicks() ? "Yes" : "No", List.of("Yes", "No")),
                         AdminPanelRegistry.AdminField.select("portal_fire_spread", "Fire spread",
-                                environment.fireSpread() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
+                                environment.fireSpread() ? "Yes" : "No", List.of("Yes", "No")),
+                        AdminPanelRegistry.AdminField.select("portal_mob_spawns", "Vanilla mob spawns",
+                                environment.mobSpawns() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
         if (!creating) addScheduleEditor(entries, schedule);
         String saveAction = creating ? "portal.create" : "";
         entries.add(AdminPanelRegistry.AdminEntry.editor("Actions",
@@ -1364,7 +1366,9 @@ public final class CwpAdminModule {
                 values.containsKey("portal_random_ticks")
                         ? parseYesNo(required(values, "portal_random_ticks")) : environment.randomTicks(),
                 values.containsKey("portal_fire_spread")
-                        ? parseYesNo(required(values, "portal_fire_spread")) : environment.fireSpread()));
+                        ? parseYesNo(required(values, "portal_fire_spread")) : environment.fireSpread(),
+                values.containsKey("portal_mob_spawns")
+                        ? parseYesNo(required(values, "portal_mob_spawns")) : environment.mobSpawns()));
         if (updated.isCoordinates() || values.containsKey("portal_target_x")
                 || values.containsKey("portal_target_y") || values.containsKey("portal_target_z")) {
             PortalDefinition.CoordinateTarget base = current.coordinateTarget().orElseGet(() ->
@@ -1386,7 +1390,8 @@ public final class CwpAdminModule {
                 parseYesNo(required(values, "portal_weather_cycle")),
                 distance(values, "portal_view_distance"), distance(values, "portal_simulation_distance"),
                 parseYesNo(values.getOrDefault("portal_random_ticks", "Yes")),
-                parseYesNo(values.getOrDefault("portal_fire_spread", "Yes")));
+                parseYesNo(values.getOrDefault("portal_fire_spread", "Yes")),
+                parseYesNo(values.getOrDefault("portal_mob_spawns", "No")));
     }
 
     /** Empty means the server's setting (0). */

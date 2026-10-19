@@ -4,6 +4,7 @@
   "mixins": [
     "BlockMixin",
     "InstanceFireSpreadMixin",
+    "InstanceMobSpawnMixin",
     "InstanceRandomTickMixin",
     "LevelLightEngineBatchMixin",
     "LivingEntityMixin",

@@ -902,11 +902,19 @@ public final class PortalService {
 
     private static void teleportInto(MinecraftServer server, ServerPlayer player, PortalDefinition portal,
                                      PortalData.StoredInstance instance) {
+        teleportInto(server, player, portal, instance, null);
+    }
+
+    /** returnPoint: where leaving brings the player back to; null means where they stand now. */
+    private static void teleportInto(MinecraftServer server, ServerPlayer player, PortalDefinition portal,
+                                     PortalData.StoredInstance instance, ReturnPoint returnPoint) {
         Preparing waiting = PREPARING.getOrDefault(server, Map.of()).get(instance.slotDimension().toString());
         if (waiting != null) {
+            // Remember where they entered the portal: that is where leaving the instance brings them back.
+            waiting.returns().putIfAbsent(player.getUUID(), returnPointAt(player, portal));
             if (waiting.waiting().add(player.getUUID())) player.sendSystemMessage(Component.translatableWithFallback(
                     "message.crazy-world-progression.instance.preparing_chat",
-                    "Your instance is being prepared. You will be brought in when it is ready; stay near the portal."));
+                    "Your instance is being prepared. You will be brought in when it is ready."));
             return;
         }
         boolean sourceRaid = RaidService.isRaid(server, player.level().dimension().identifier());
@@ -917,9 +925,7 @@ public final class PortalService {
         Vec3 entry = moved != null ? new Vec3(moved.x(), moved.y(), moved.z())
                 : new Vec3(instance.originX() + template.spawnX() + 0.5,
                 instance.originY() + template.spawnY(), instance.originZ() + template.spawnZ() + 0.5);
-        pushReturn(server, player, new ReturnPoint(player.level().dimension().identifier(),
-                portal.safeReturnPosition(player.position(), player.position().add(0.0, 0.9, 0.0),
-                        player.getDeltaMovement()), player.getYRot(), player.getXRot()));
+        pushReturn(server, player, returnPoint != null ? returnPoint : returnPointAt(player, portal));
         player.stopRiding();
         if (!player.teleportTo(destination, entry.x, entry.y, entry.z, Set.of(),
                 player.getYRot(), player.getXRot(), false)) {
@@ -936,6 +942,12 @@ public final class PortalService {
         }
         PortalData.get(server).putInstance(instance.withVisitor(player.getUUID()));
         player.resetFallDistance();
+    }
+
+    private static ReturnPoint returnPointAt(ServerPlayer player, PortalDefinition portal) {
+        return new ReturnPoint(player.level().dimension().identifier(),
+                portal.safeReturnPosition(player.position(), player.position().add(0.0, 0.9, 0.0),
+                        player.getDeltaMovement()), player.getYRot(), player.getXRot());
     }
 
     // Lease a free registered dimension slot and reconstruct the linked template at its fixed origin.
@@ -972,7 +984,7 @@ public final class PortalService {
         PortalEnvironmentService.applyWeather(server, view(instance), portal.environment());
         PortalEnvironmentService.applyDistances(server, instance.slotDimension(), portal.environment());
         PREPARING.computeIfAbsent(server, ignored -> new HashMap<>())
-                .put(slot.toString(), new Preparing(portal.id(), new java.util.LinkedHashSet<>()));
+                .put(slot.toString(), new Preparing(portal.id(), new java.util.LinkedHashSet<>(), new HashMap<>()));
         PortalTemplateService.reconstructThen(server, destination, template.id(), origin, () -> {
             PortalData.StoredInstance live = PortalData.get(server).instances().get(slot.toString());
             if (live == null || live.createdEpochMillis() != created) return;
@@ -993,7 +1005,8 @@ public final class PortalService {
     }
 
     /** Players waiting for an instance that is still being built. */
-    private record Preparing(Identifier portalId, java.util.Set<UUID> waiting) { }
+    /** waiting: who is brought in when the build is done; returns: where each of them entered the portal. */
+    private record Preparing(Identifier portalId, java.util.Set<UUID> waiting, Map<UUID, ReturnPoint> returns) { }
     private static final Map<MinecraftServer, Map<String, Preparing>> PREPARING = new WeakHashMap<>();
 
     public static boolean preparing(MinecraftServer server, Identifier slot) {
@@ -1012,7 +1025,7 @@ public final class PortalService {
             ServerPlayer player = server.getPlayerList().getPlayer(id);
             if (player == null || portal == null) continue;
             try {
-                teleportInto(server, player, portal, instance);
+                teleportInto(server, player, portal, instance, preparing.returns().get(id));
             } catch (RuntimeException exception) {
                 player.sendOverlayMessage(Component.literal("Portal unavailable: " + exception.getMessage()));
             }

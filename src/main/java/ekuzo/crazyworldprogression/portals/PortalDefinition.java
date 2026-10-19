@@ -322,7 +322,8 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
      * keeps fire from spreading and burning blocks away.
      */
     public record Environment(Daytime daytime, boolean dayNightCycle, Weather weather, boolean weatherCycle,
-                              int viewDistance, int simulationDistance, boolean randomTicks, boolean fireSpread) {
+                              int viewDistance, int simulationDistance, boolean randomTicks, boolean fireSpread,
+                              boolean mobSpawns) {
         private static final Codec<Environment> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.optionalFieldOf("daytime", Daytime.NOON.serializedName())
                         .xmap(Daytime::parse, Daytime::serializedName).forGetter(Environment::daytime),
@@ -333,7 +334,8 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
                 Codec.INT.optionalFieldOf("view_distance", 0).forGetter(Environment::viewDistance),
                 Codec.INT.optionalFieldOf("simulation_distance", 0).forGetter(Environment::simulationDistance),
                 Codec.BOOL.optionalFieldOf("random_ticks", true).forGetter(Environment::randomTicks),
-                Codec.BOOL.optionalFieldOf("fire_spread", true).forGetter(Environment::fireSpread)
+                Codec.BOOL.optionalFieldOf("fire_spread", true).forGetter(Environment::fireSpread),
+                Codec.BOOL.optionalFieldOf("mob_spawns", false).forGetter(Environment::mobSpawns)
         ).apply(instance, Environment::new));
 
         public Environment {
@@ -351,6 +353,13 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
         public Environment(Daytime daytime, boolean dayNightCycle, Weather weather, boolean weatherCycle,
                            int viewDistance, int simulationDistance) {
             this(daytime, dayNightCycle, weather, weatherCycle, viewDistance, simulationDistance, true, true);
+        }
+
+        /** Vanilla mob spawning is off unless a portal turns it on. */
+        public Environment(Daytime daytime, boolean dayNightCycle, Weather weather, boolean weatherCycle,
+                           int viewDistance, int simulationDistance, boolean randomTicks, boolean fireSpread) {
+            this(daytime, dayNightCycle, weather, weatherCycle, viewDistance, simulationDistance, randomTicks,
+                    fireSpread, false);
         }
 
         public static Environment defaults() { return new Environment(Daytime.NOON, true, Weather.CLEAR, true); }

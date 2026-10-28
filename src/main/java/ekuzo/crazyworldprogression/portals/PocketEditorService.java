@@ -28,7 +28,8 @@ import java.util.stream.Stream;
 
 /** Allocates one persistent, isolated build dimension for every pocket. */
 public final class PocketEditorService {
-    public static final int MAX_POCKETS = 32;
+    /** Workshop worlds, as many as config/crazy-world-progression.yml asks for (GeneratedWorlds makes them). */
+    public static final int MAX_POCKETS = ekuzo.crazyworldprogression.config.CwpConfig.get().workshops();
     private static final BlockPos ORIGIN = new BlockPos(0, 64, 0);
     private static final long SAVE_DELAY_TICKS = 200L;
     private static final long MAX_SAVE_DELAY_TICKS = 1_200L;

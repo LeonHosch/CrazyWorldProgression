@@ -91,7 +91,7 @@ public final class BloodPact {
                 else LUST_STACKS.put(player.getUUID(), stacks);
                 SkillStatRegistry.refresh(player);
                 if (ServerPlayNetworking.canSend(player, LustPayload.TYPE))
-                    ServerPlayNetworking.send(player, new LustPayload(stacks));
+                    ekuzo.crazyworldprogression.CwpPayloads.send(player, new LustPayload(stacks));
             }
             if (particles && stacks > 0 && !player.isInvisible() && !player.isSpectator())
                 player.level().sendParticles(BLOOD, player.getX(), player.getY() + player.getBbHeight() * 0.5,

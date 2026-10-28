@@ -126,7 +126,7 @@ public final class AdminPanelNetworking {
         }
         LAST_LOCATION.put(player.getUUID(), new PanelLocation(selectedModule,
                 page == null ? EMPTY_SELECTION : page.id()));
-        ServerPlayNetworking.send(player, new PanelSnapshotPayload(GSON.toJson(
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new PanelSnapshotPayload(GSON.toJson(
                 new PanelSnapshot(modules, selectedModule, page, notice, error, navigation))));
     }
 

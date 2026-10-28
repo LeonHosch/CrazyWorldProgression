@@ -2,16 +2,9 @@ package ekuzo.crazyworldprogression.cleanup;
 
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
-import java.util.Properties;
 import java.util.WeakHashMap;
 
 /**
@@ -24,12 +17,12 @@ import java.util.WeakHashMap;
  *   <li>Instance deletion and other cleanup get what is left, but at least {@code cleanup_floor_ms}.</li>
  * </ul>
  * The server's own load is its average tick time minus the time this budget handed out, so the budget does not
- * shrink because of its own work. Settings live in config/crazy-world-progression-performance.properties.
+ * shrink because of its own work. Settings live under performance in config/crazy-world-progression.yml.
  */
 public final class TickBudget {
     public enum Priority { SCRIPT, CREATION, CLEANUP }
 
-    /** Defaults; overridden by the config file. */
+    /** Defaults; replaced by the config file's values. */
     static double bufferMs = 10.0, minMs = 2.0, maxMs = 30.0, scriptMaxMs = 30.0, cleanupFloorMs = 1.0;
     private static final Map<MinecraftServer, State> STATES = new WeakHashMap<>();
     private static final int CHECK_EVERY = 128;
@@ -145,40 +138,11 @@ public final class TickBudget {
     static long ms(double millis) { return (long) (millis * 1_000_000.0); }
 
     private static void load() {
-        Path file = FabricLoader.getInstance().getConfigDir().resolve("crazy-world-progression-performance.properties");
-        Properties values = new Properties();
-        if (Files.isRegularFile(file)) {
-            try (InputStream stream = Files.newInputStream(file)) {
-                values.load(stream);
-                bufferMs = number(values, "tick_buffer_ms", bufferMs);
-                minMs = number(values, "min_budget_ms", minMs);
-                maxMs = number(values, "max_budget_ms", maxMs);
-                scriptMaxMs = number(values, "script_max_ms", scriptMaxMs);
-                cleanupFloorMs = number(values, "cleanup_floor_ms", cleanupFloorMs);
-                return;
-            } catch (IOException | NumberFormatException exception) {
-                CrazyWorldProgression.LOGGER.warn("Could not read {}; using defaults", file, exception);
-            }
-        }
-        values.setProperty("tick_buffer_ms", Double.toString(bufferMs));
-        values.setProperty("min_budget_ms", Double.toString(minMs));
-        values.setProperty("max_budget_ms", Double.toString(maxMs));
-        values.setProperty("script_max_ms", Double.toString(scriptMaxMs));
-        values.setProperty("cleanup_floor_ms", Double.toString(cleanupFloorMs));
-        try {
-            Files.createDirectories(file.getParent());
-            try (OutputStream stream = Files.newOutputStream(file)) {
-                values.store(stream, "CWP block work time budget per server tick (milliseconds). "
-                        + "Budget = tick length - server load - tick_buffer_ms, between min and max. "
-                        + "Scripts may always use up to script_max_ms.");
-            }
-        } catch (IOException exception) {
-            CrazyWorldProgression.LOGGER.warn("Could not write {}", file, exception);
-        }
-    }
-
-    private static double number(Properties values, String key, double fallback) {
-        String value = values.getProperty(key);
-        return value == null ? fallback : Math.max(0.0, Double.parseDouble(value.trim()));
+        ekuzo.crazyworldprogression.config.CwpConfig config = ekuzo.crazyworldprogression.config.CwpConfig.get();
+        bufferMs = config.tickBufferMs();
+        minMs = config.minBudgetMs();
+        maxMs = config.maxBudgetMs();
+        scriptMaxMs = config.scriptMaxMs();
+        cleanupFloorMs = config.cleanupFloorMs();
     }
 }

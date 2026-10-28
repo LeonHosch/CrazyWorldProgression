@@ -68,8 +68,6 @@ public final class PortalService {
         PocketCaptures.initialize();
         net.fabricmc.fabric.api.entity.event.v1.ServerEntityLevelChangeEvents.AFTER_PLAYER_CHANGE_LEVEL.register(
                 (player, origin, destination) -> PortalEnvironmentService.syncDistances(player, destination));
-        ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
-        ekuzo.crazyworldprogression.cleanup.PerformanceMonitor.initialize();
         StressPocket.initialize();
         Parties.initialize();
         EncounterBanner.initialize();

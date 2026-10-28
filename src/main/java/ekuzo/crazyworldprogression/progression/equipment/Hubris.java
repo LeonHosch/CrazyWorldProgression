@@ -120,7 +120,7 @@ public final class Hubris {
 
     private static void sendDownfall(ServerPlayer player, int stacks, int ticks) {
         if (ServerPlayNetworking.canSend(player, DownfallPayload.TYPE))
-            ServerPlayNetworking.send(player, new DownfallPayload(stacks, ticks, DOWNFALL_TICKS));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new DownfallPayload(stacks, ticks, DOWNFALL_TICKS));
     }
 
     private record Downfall(int stacks, long fades) { }
@@ -252,7 +252,7 @@ public final class Hubris {
         // Both countdowns drop by 10 per update; only resend when one jumps, starts or stops (the client counts).
         if (previous != null && previous.active() == active && previous.stacks() == stacks
                 && counted(previous.next(), next) && counted(previous.idle(), idle)) return;
-        if (ServerPlayNetworking.canSend(player, Payload.TYPE)) ServerPlayNetworking.send(player, payload);
+        if (ServerPlayNetworking.canSend(player, Payload.TYPE)) ekuzo.crazyworldprogression.CwpPayloads.send(player, payload);
     }
 
     private static boolean counted(int before, int after) {

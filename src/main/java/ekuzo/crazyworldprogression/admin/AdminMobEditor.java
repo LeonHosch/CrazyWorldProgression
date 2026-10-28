@@ -122,7 +122,7 @@ final class AdminMobEditor {
         rows.add(row("Abilities", "Abilities", "Default abilities: the abilities its mob type comes with (e.g. the Leshen's). "
                         + "Extra abilities are used on top, comma separated. Available: " + abilityList() + ".",
                 List.of(yesNo("default_abilities", "Default abilities", v),
-                        text("abilities", "Extra abilities", "echelon-core:crow_swarm", v, 512)), List.of(), null));
+                        text("abilities", "Extra abilities", "mymod:crow_swarm", v, 512)), List.of(), null));
         rows.add(row("AI", "Extra settings", "Additional AI options as a JSON object (advanced).",
                 List.of(text("ai_settings", "Settings", "{}", v, 1024)), List.of(), null));
 

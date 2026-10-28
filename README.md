@@ -1,8 +1,10 @@
 # Crazy World Progression
 
-Crazy World Progression (CWP) is a Fabric framework for server-authoritative currencies, YAML-defined skill trees, persistent random-event scheduling, temporary template-backed portal dimensions, and MobForge mob encounters. It provides storage, validation, commands, networking, and client editors while leaving game-specific content to dependent mods.
+Crazy World Progression (CWP) is a modular RPG and MMO framework for Fabric servers and content mods. It covers progression (YAML skill trees, skill levels and proficiency, equipment sets), crafting (item quality, craftsmanship, reforging, fletching, farming, cooking, fishing), template-backed portal instances for dungeons and raids, parties, friends and clans, MobForge mobs with scripted encounters, currencies, storage features and more, with server-side validation, commands, networking and an in-game admin panel.
 
-CWP intentionally ships without currencies, skill trees, earning rules, roles, or world mechanics. [EchelonCore](https://github.com/LeonHosch/EchelonCore) is the reference implementation.
+Every part can be switched on or off in `config/crazy-world-progression.yml` ([configuration](docs/configuration.md)), so a mod that needs only skill trees can run CWP with everything else off.
+
+CWP intentionally ships without currencies, skill trees, earning rules, roles, or world content of its own. [EchelonCore](https://github.com/LeonHosch/EchelonCore) is the reference implementation.
 
 See [performance design and profiling](docs/performance.md) for tick budgets, cache rules, server validation, and known costs to measure before release.
 
@@ -59,6 +61,8 @@ For a normal Minecraft instance, place these files in the instance's `mods` dire
 3. At least one content mod that uses CWP, such as EchelonCore
 
 Use the same CWP and content-mod versions on the client and server.
+
+Every part of CWP can be switched on or off in `config/crazy-world-progression.yml`, which also sets how many instance and workshop worlds exist and the tick time budget. A mod that only needs, say, skill trees can turn everything else off. See [configuration](docs/configuration.md).
 
 MobForge is built into the CWP JAR. Remove the old `mobforge-<version>.jar` from client and server `mods` folders when upgrading; keep existing `config/mobforge/templates/` and `config/mobforge/scripts/` files. The **MobForge** tab in `/cwp admin` edits scripts directly in the admin panel, including all supported step types; mobs are edited there too (also opened by `/mobforge editor`), and the `/mobforge` commands remain available. Scripts now save as Python-like `.mfs` files; existing YAML scripts still load. See the [scripting manual](docs/mobforge-scripting.md) and [MobForge commands](docs/mobforge.md).
 
@@ -448,7 +452,7 @@ Calendar and periodic gates are independent and combine with logical AND. For ex
 
 This portal is eligible on Fridays from 14:00 until 21:00 Berlin time, but within that range it only opens for 60 minutes in every 360-minute cycle. Quote IANA zones, clock values, and comma-separated weekday lists because they contain command punctuation, for example `"MONDAY,WEDNESDAY,FRIDAY"`. The first periodic window begins when the periodic command is executed. Overnight calendar windows are supported; equal start and end means the selected complete weekday. Add or remove either setting in the admin panel, or use `clear-calendar` or `clear-periodic`. With neither setting, entry is available at any time.
 
-Minecraft cannot safely add and remove registry-backed dimensions while a server is already running. CWP therefore ships eight registered empty void dimensions and leases them as reusable instance slots. A public portal shares one running instance for all entrants regardless of group and stays active when empty. Its lifetime may be zero, meaning no automatic expiry. A dungeon portal requires a positive lifetime and creates a separate instance for each party (or solo player); an empty dungeon waits 5 minutes for its party unless its scripts have finished. On first entry, CWP reconstructs the linked template in a free slot and remembers each player's source position. Return points are stacked for travel through multiple instances. When a positive real-time lifetime expires—even if it elapsed while the server was offline—CWP closes entry, evacuates every player, removes non-player entities, clears the reconstructed blocks in batches of 8,192 per tick, and releases the slot for a fresh reconstruction. Up to eight portal instances can therefore be active concurrently; the number of stored templates and placed portals is not limited by the slot count. See [public portals, dungeons and parties](docs/portal-groups.md).
+Minecraft cannot safely add and remove registry-backed dimensions while a server is already running. CWP therefore creates empty void dimensions at startup (8 by default, set by `worlds.instances` in the [configuration](docs/configuration.md)) and leases them as reusable instance slots. A public portal shares one running instance for all entrants regardless of group and stays active when empty. Its lifetime may be zero, meaning no automatic expiry. A dungeon portal requires a positive lifetime and creates a separate instance for each party (or solo player); an empty dungeon waits 5 minutes for its party unless its scripts have finished. On first entry, CWP reconstructs the linked template in a free slot and remembers each player's source position. Return points are stacked for travel through multiple instances. When a positive real-time lifetime expires—even if it elapsed while the server was offline—CWP closes entry, evacuates every player, removes non-player entities, clears the reconstructed blocks in batches of 8,192 per tick, and releases the slot for a fresh reconstruction. Up to that many portal instances can therefore be active concurrently; the number of stored templates and placed portals is not limited by the slot count. See [public portals, dungeons and parties](docs/portal-groups.md).
 
 Players may intentionally leave an active instance with `/portal leave`. This returns them to their remembered entry position and clears any respawn point aimed at an instance slot. A player who disconnects inside a slot is returned when reconnecting, preventing an offline profile from becoming stranded in a cleared or subsequently reused instance. After a restart, when the runtime return position is unavailable, evacuation safely falls back to the overworld spawn.
 
@@ -585,7 +589,7 @@ Clone the repository and run commands from its root:
 .\gradlew.bat runServer
 ```
 
-Build output is written to `build/libs/crazy-world-progression-1.1.0.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
+Build output is written to `build/libs/crazy-world-progression-0.5.0.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
 
 The repository includes the Gradle wrapper, so a separate Gradle installation is not required. A Java 25 JDK must be available.
 

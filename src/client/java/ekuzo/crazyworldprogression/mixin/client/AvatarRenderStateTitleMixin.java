@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.Unique;
 
 @Mixin(AvatarRenderState.class)
 public abstract class AvatarRenderStateTitleMixin implements TitleRenderState {
-    @Unique private Component echelon$title;
-    @Override public void echelon$setTitle(Component title) { echelon$title = title; }
-    @Override public Component echelon$getTitle() { return echelon$title; }
+    @Unique private Component cwp$title;
+    @Override public void cwp$setTitle(Component title) { cwp$title = title; }
+    @Override public Component cwp$getTitle() { return cwp$title; }
 }

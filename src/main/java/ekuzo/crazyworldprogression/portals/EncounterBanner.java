@@ -58,7 +58,7 @@ public final class EncounterBanner {
         Payload payload = new Payload(kind.name(), argument == null ? "" : argument);
         for (ServerPlayer player : players) {
             if (ServerPlayNetworking.canSend(player, Payload.TYPE)) {
-                ServerPlayNetworking.send(player, payload);
+                ekuzo.crazyworldprogression.CwpPayloads.send(player, payload);
                 continue;
             }
             player.connection.send(new ClientboundSetTitlesAnimationPacket(6, 50, 14));

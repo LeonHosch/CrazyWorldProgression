@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(EntityRenderDispatcher.class)
 public abstract class EntityVisibilityMixin {
     @Inject(method = "shouldRender", at = @At("HEAD"), cancellable = true)
-    private void echelon$hidePlayers(Entity entity, Frustum frustum, double x, double y, double z,
+    private void cwp$hidePlayers(Entity entity, Frustum frustum, double x, double y, double z,
                                      CallbackInfoReturnable<Boolean> result) {
         if (entity instanceof Player player && PortalPlayerVisibility.hide(player)) result.setReturnValue(false);
     }

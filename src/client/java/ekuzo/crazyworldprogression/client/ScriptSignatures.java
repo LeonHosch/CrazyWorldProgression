@@ -262,9 +262,9 @@ final class ScriptSignatures {
                 + "Optional max_iterations=<1..100000> after the condition, default 1000.",
                 "while kills(\"adds\") < 6, max_iterations=1000:");
         command("achievement", "Completes an advancement for the players in a list variable, or everyone in the world.",
-                List.of(text("achievement_id", "Advancement ID, e.g. echelon-core:mysteries/root").values("advancement")),
+                List.of(text("achievement_id", "Advancement ID, e.g. mymod:story/root").values("advancement")),
                 List.of(text("player", "Player list variable or UUID; omit for everyone").values("script_var")),
-                "achievement(achievement_id=\"echelon-core:mysteries/root\", player=\"entered\")");
+                "achievement(achievement_id=\"mymod:story/root\", player=\"entered\")");
         command("building", "Pastes a saved building with its minimum corner here, or clears the pasted range.",
                 List.of(text("build_id", "Saved building ID, e.g. cwp:bridge").values("building"),
                         value("action", "\"add\"", "add or delete"),

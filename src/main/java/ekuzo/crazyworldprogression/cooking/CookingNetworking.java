@@ -75,7 +75,7 @@ public final class CookingNetworking {
     static void sendState(ServerPlayer player, CookingMenu menu, String message, boolean error) {
         if (!ServerPlayNetworking.canSend(player, StatePayload.TYPE)) return;
         String json = menu.atStation((level, pos) -> state(player, menu.station(), level, pos, menu, message, error));
-        ServerPlayNetworking.send(player, new StatePayload(json));
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new StatePayload(json));
     }
 
     /** Station, cooking level, whether the station works, the dish the ingredients make, and the last message. */

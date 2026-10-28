@@ -43,7 +43,7 @@ public final class CharacterSheet {
         PayloadTypeRegistry.serverboundPlay().register(RequestPayload.TYPE, RequestPayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(Payload.TYPE, Payload.CODEC);
         ServerPlayNetworking.registerGlobalReceiver(RequestPayload.TYPE, (payload, context) ->
-                context.server().execute(() -> ServerPlayNetworking.send(context.player(),
+                context.server().execute(() -> ekuzo.crazyworldprogression.CwpPayloads.send(context.player(),
                         new Payload(GSON.toJson(create(context.player()))))));
     }
 

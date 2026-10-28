@@ -61,10 +61,10 @@ public final class PortalNetworking {
     // Send the current render snapshot to one joining player.
     public static void send(ServerPlayer player) {
         if (ServerPlayNetworking.canSend(player, PortalSnapshotPayload.TYPE)) {
-            ServerPlayNetworking.send(player, new PortalSnapshotPayload(GSON.toJson(snapshot(player.level().getServer()))));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new PortalSnapshotPayload(GSON.toJson(snapshot(player.level().getServer()))));
         }
         if (ServerPlayNetworking.canSend(player, PortalVisibilityPayload.TYPE)) {
-            ServerPlayNetworking.send(player, new PortalVisibilityPayload(GSON.toJson(hiddenPlayerDimensions(player.level().getServer()))));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new PortalVisibilityPayload(GSON.toJson(hiddenPlayerDimensions(player.level().getServer()))));
         }
     }
 
@@ -84,10 +84,10 @@ public final class PortalNetworking {
         PortalVisibilityPayload visibility = new PortalVisibilityPayload(GSON.toJson(hiddenDimensions));
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (ServerPlayNetworking.canSend(player, PortalSnapshotPayload.TYPE)) {
-                ServerPlayNetworking.send(player, payload);
+                ekuzo.crazyworldprogression.CwpPayloads.send(player, payload);
             }
             if (ServerPlayNetworking.canSend(player, PortalVisibilityPayload.TYPE)) {
-                ServerPlayNetworking.send(player, visibility);
+                ekuzo.crazyworldprogression.CwpPayloads.send(player, visibility);
             }
         }
     }
@@ -141,7 +141,7 @@ public final class PortalNetworking {
                               boolean existingInstance) {
         if (RaidService.isRaidPortal(portal)) sendCheckpoint(player, portal.id());
         if (ServerPlayNetworking.canSend(player, PortalEntryPromptPayload.TYPE)) {
-            ServerPlayNetworking.send(player, new PortalEntryPromptPayload(portal.id().toString(),
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new PortalEntryPromptPayload(portal.id().toString(),
                     portal.effectiveDisplayName(), portal.description(), secondsRemaining, existingInstance,
                     portal.entryPolicy().serializedName(), portal.difficulty(),
                     portal.admission().mode().serializedName(), portal.admission().maxPlayers(),
@@ -155,7 +155,7 @@ public final class PortalNetworking {
         RaidCheckpoints.Checkpoint checkpoint = RaidCheckpoints.checkpoint(player.level().getServer(), player.getUUID(), portalId);
         long secondsLeft = checkpoint == null ? 0L
                 : Math.max(0L, (checkpoint.expiresEpochMillis() - java.time.Instant.now().toEpochMilli()) / 1000L);
-        ServerPlayNetworking.send(player, new RaidCheckpointPayload(portalId.toString(),
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new RaidCheckpointPayload(portalId.toString(),
                 checkpoint == null ? 0 : checkpoint.encounters(), secondsLeft));
     }
 

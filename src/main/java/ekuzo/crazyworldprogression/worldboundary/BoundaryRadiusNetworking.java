@@ -24,7 +24,7 @@ public final class BoundaryRadiusNetworking {
     }
 
     public static void send(ServerPlayer player) {
-        ServerPlayNetworking.send(player, new RadiusSnapshotPayload(GSON.toJson(
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new RadiusSnapshotPayload(GSON.toJson(
                 AdvancedWorldBoundary.currentRadii(player.level().getServer()))));
     }
 

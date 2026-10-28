@@ -75,7 +75,7 @@ public final class SocialScreen extends Screen {
 
     private static void send(String action, String argument) {
         if (ClientPlayNetworking.canSend(SocialNetworking.ActionPayload.TYPE))
-            ClientPlayNetworking.send(new SocialNetworking.ActionPayload(action, argument));
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new SocialNetworking.ActionPayload(action, argument));
     }
 
     private void update(JsonObject received) {

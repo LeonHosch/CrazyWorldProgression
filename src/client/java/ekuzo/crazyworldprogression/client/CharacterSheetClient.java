@@ -77,7 +77,7 @@ public final class CharacterSheetClient {
     private static void request() {
         sinceRequest = 0;
         if (ClientPlayNetworking.canSend(CharacterSheet.RequestPayload.TYPE))
-            ClientPlayNetworking.send(new CharacterSheet.RequestPayload());
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new CharacterSheet.RequestPayload());
     }
 
     /** The panel's x, y, width and height, or null while closed. */

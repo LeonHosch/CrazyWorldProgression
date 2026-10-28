@@ -27,7 +27,7 @@ import java.util.stream.Stream;
  *
  * <pre>
  * name: Wanderer's Set
- * pieces: [echelon-core:wanderer_helmet, echelon-core:wanderer_ring, ...]
+ * pieces: [mymod:wanderer_helmet, mymod:wanderer_ring, ...]
  * bonuses:
  *   - pieces: 2
  *     stats: [addMovementSpeed(20)]

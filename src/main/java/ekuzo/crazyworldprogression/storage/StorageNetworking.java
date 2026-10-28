@@ -94,7 +94,7 @@ public final class StorageNetworking {
                 player.setAttached(Quicksort.SETTINGS, new Quicksort.Settings(categories, payload.fill(), payload.on()));
             }
             Quicksort.Settings settings = player.getAttachedOrCreate(Quicksort.SETTINGS);
-            ServerPlayNetworking.send(player, new QuicksortPayload(String.join(",", settings.categories()), settings.fill(),
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new QuicksortPayload(String.join(",", settings.categories()), settings.fill(),
                     settings.on(), payload.open()));
         });
         ServerTickEvents.END_SERVER_TICK.register(server -> {
@@ -112,13 +112,13 @@ public final class StorageNetworking {
     public static void sendFilterInfo(ServerPlayer player, Level level, BlockPos pos) {
         if (!(level.getBlockEntity(pos) instanceof ChestBlockEntity chest) || !ServerPlayNetworking.canSend(player, FilterInfoPayload.TYPE)) return;
         Set<String> filter = ChestFilters.filter(chest);
-        ServerPlayNetworking.send(player, new FilterInfoPayload(pos, filter == null ? "" : String.join(",", filter)));
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new FilterInfoPayload(pos, filter == null ? "" : String.join(",", filter)));
     }
 
     /** Quicksort put items into a chest: they fly there for the player, and the lid opens silently for half a second. */
     static void showSort(ServerPlayer player, ServerLevel level, BlockPos chest, List<ItemStack> items) {
         if (ServerPlayNetworking.canSend(player, SortedPayload.TYPE))
-            ServerPlayNetworking.send(player, new SortedPayload(player.position().add(0, 1.0, 0), chest,
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new SortedPayload(player.position().add(0, 1.0, 0), chest,
                     items.stream().filter(stack -> !stack.isEmpty()).limit(3).map(ItemStack::copy).toList()));
         // A block event opens the lid on clients without the chest's open sound.
         for (BlockPos half : ChestFilters.halves(level, chest)) {

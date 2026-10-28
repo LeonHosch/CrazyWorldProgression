@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression;
 
+import ekuzo.crazyworldprogression.config.CwpModule;
 import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.admin.AdminPanelNetworking;
 import ekuzo.crazyworldprogression.admin.CwpAdminModule;
@@ -50,81 +51,109 @@ public class CrazyWorldProgression implements ModInitializer {
 
 		LOGGER.info("Initializing Crazy World Progression");
 
-		// Gameplay systems listen for server events, while commands expose progression state to players and admins.
+		// Items, menus, effects and saved-data types are registered whether or not their part is on, so worlds that
+		// used a part that is now switched off still load (and get everything back when it is switched on again).
+		CwpContent.register();
+
+		// The framework itself: stats, the admin panel, area selection and the tick time budget.
 		SkillStatRegistry.initialize();
-		ekuzo.crazyworldprogression.worldboundary.AdvancedWorldBoundary.initialize();
-		ekuzo.crazyworldprogression.worldboundary.BoundaryRadiusNetworking.register();
-		ekuzo.crazyworldprogression.worldboundary.restriction.RestrictionNetworking.registerPayloadType();
-		ekuzo.crazyworldprogression.worldboundary.restriction.RestrictionService.initialize();
-		ekuzo.crazyworldprogression.accessory.Accessories.initialize();
-		ekuzo.crazyworldprogression.accessory.BuffFood.initialize();
-		ekuzo.crazyworldprogression.collectibles.Collectibles.initialize();
-		ekuzo.crazyworldprogression.loot.MobLoot.initialize();
-		ekuzo.crazyworldprogression.progression.equipment.EquipmentSetService.initialize();
-		ekuzo.crazyworldprogression.progression.equipment.ProtectionStats.initialize();
-		ekuzo.crazyworldprogression.worldboundary.bonus.BonusAreas.initialize();
-		ekuzo.crazyworldprogression.progression.equipment.AllyHealing.initialize();
-		ekuzo.crazyworldprogression.progression.equipment.Hubris.initialize();
-		ekuzo.crazyworldprogression.progression.equipment.BloodPact.initialize();
-		ekuzo.crazyworldprogression.progression.equipment.StaticCharge.initialize();
-		ekuzo.crazyworldprogression.progression.equipment.DrawSpeed.initialize();
-		ekuzo.crazyworldprogression.loot.FishingJournal.initialize();
-		ekuzo.crazyworldprogression.reforge.ReforgeNetworking.initialize();
-		ekuzo.crazyworldprogression.reforge.ResearchService.initialize();
-		ekuzo.crazyworldprogression.smithing.SmithingNetworking.initialize();
-		ekuzo.crazyworldprogression.smithing.ChestQuality.initialize();
-		ekuzo.crazyworldprogression.storage.StorageNetworking.initialize();
-		ekuzo.crazyworldprogression.fletching.Fletching.initialize();
-		ekuzo.crazyworldprogression.ammo.AmmoPouch.initialize();
-		ekuzo.crazyworldprogression.social.Social.initialize();
-		ekuzo.crazyworldprogression.divine.DivineProtectionNetworking.initialize();
-		ekuzo.crazyworldprogression.respawn.RespawnFeedback.initialize();
-		ekuzo.crazyworldprogression.farming.CrossbreedingNetworking.initialize();
-		ekuzo.crazyworldprogression.farming.FarmingLevels.initialize();
-		ekuzo.crazyworldprogression.farming.ProduceQuality.initialize();
-		ekuzo.crazyworldprogression.farming.AnimalProduce.initialize();
-		ekuzo.crazyworldprogression.cooking.CookingNetworking.initialize();
-		ekuzo.crazyworldprogression.skills.Skills.initialize();
-		RandomEventService.initialize();
-		PortalNetworking.registerPayloadType();
-		TitleNetworking.initialize();
-		ekuzo.crazyworldprogression.portals.PortalPreviewNetworking.registerPayloadType();
-		ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.registerPayloadType();
-		PortalNetworking.registerServerReceiver();
-		PortalService.initialize();
-		PostmasterService.initialize();
-		PortalBuildProtection.initialize();
+		ekuzo.crazyworldprogression.cleanup.TickBudget.initialize();
+		ekuzo.crazyworldprogression.cleanup.PerformanceMonitor.initialize();
 		AreaSelectionNetworking.registerPayloadType();
 		AreaSelectionNetworking.registerServerReceiver();
 		AreaSelectionService.initialize();
 		AdminPanelNetworking.registerPayloadTypes();
 		AdminPanelNetworking.registerServerReceivers();
 		CwpAdminModule.register();
-		SkillTreeNetworking.registerPayloadTypes();
-		SkillTreeNetworking.registerServerReceivers();
-		ekuzo.crazyworldprogression.progression.skilltrees.CharacterSheet.initialize();
-		MobForge.initialize();
-		PortalService.registerMaintenanceTick();
 		AreaSelectionService.registerMaintenanceTick();
+
+		// Each part of config/crazy-world-progression.yml that is on (CwpModule).
+		if (CwpModule.WORLD_BOUNDARY.enabled()) {
+			ekuzo.crazyworldprogression.worldboundary.AdvancedWorldBoundary.initialize();
+			ekuzo.crazyworldprogression.worldboundary.BoundaryRadiusNetworking.register();
+			ekuzo.crazyworldprogression.worldboundary.restriction.RestrictionNetworking.registerPayloadType();
+			ekuzo.crazyworldprogression.worldboundary.restriction.RestrictionService.initialize();
+			ekuzo.crazyworldprogression.worldboundary.bonus.BonusAreas.initialize();
+		}
+		if (CwpModule.ACCESSORIES.enabled()) {
+			ekuzo.crazyworldprogression.accessory.Accessories.initialize();
+			ekuzo.crazyworldprogression.accessory.BuffFood.initialize();
+		}
+		if (CwpModule.COLLECTIBLES.enabled()) ekuzo.crazyworldprogression.collectibles.Collectibles.initialize();
+		if (CwpModule.MOB_LOOT.enabled()) ekuzo.crazyworldprogression.loot.MobLoot.initialize();
+		if (CwpModule.EQUIPMENT.enabled()) {
+			ekuzo.crazyworldprogression.progression.equipment.EquipmentSetService.initialize();
+			ekuzo.crazyworldprogression.progression.equipment.ProtectionStats.initialize();
+			ekuzo.crazyworldprogression.progression.equipment.AllyHealing.initialize();
+			ekuzo.crazyworldprogression.progression.equipment.Hubris.initialize();
+			ekuzo.crazyworldprogression.progression.equipment.BloodPact.initialize();
+			ekuzo.crazyworldprogression.progression.equipment.StaticCharge.initialize();
+			ekuzo.crazyworldprogression.progression.equipment.DrawSpeed.initialize();
+		}
+		if (CwpModule.FISHING.enabled()) ekuzo.crazyworldprogression.loot.FishingJournal.initialize();
+		if (CwpModule.REFORGE.enabled()) {
+			ekuzo.crazyworldprogression.reforge.ReforgeNetworking.initialize();
+			ekuzo.crazyworldprogression.reforge.ResearchService.initialize();
+		}
+		if (CwpModule.SMITHING.enabled()) ekuzo.crazyworldprogression.smithing.SmithingNetworking.initialize();
+		if (CwpModule.STORAGE.enabled()) {
+			ekuzo.crazyworldprogression.smithing.ChestQuality.initialize();
+			ekuzo.crazyworldprogression.storage.StorageNetworking.initialize();
+		}
+		if (CwpModule.FLETCHING.enabled()) ekuzo.crazyworldprogression.fletching.Fletching.initialize();
+		if (CwpModule.AMMO.enabled()) ekuzo.crazyworldprogression.ammo.AmmoPouch.initialize();
+		if (CwpModule.SOCIAL.enabled()) ekuzo.crazyworldprogression.social.Social.initialize();
+		if (CwpModule.DIVINE_PROTECTION.enabled()) ekuzo.crazyworldprogression.divine.DivineProtectionNetworking.initialize();
+		if (CwpModule.RESPAWN.enabled()) ekuzo.crazyworldprogression.respawn.RespawnFeedback.initialize();
+		if (CwpModule.FARMING.enabled()) {
+			ekuzo.crazyworldprogression.farming.CrossbreedingNetworking.initialize();
+			ekuzo.crazyworldprogression.farming.FarmingLevels.initialize();
+			ekuzo.crazyworldprogression.farming.ProduceQuality.initialize();
+			ekuzo.crazyworldprogression.farming.AnimalProduce.initialize();
+		}
+		if (CwpModule.COOKING.enabled()) ekuzo.crazyworldprogression.cooking.CookingNetworking.initialize();
+		if (CwpModule.SKILLS.enabled()) ekuzo.crazyworldprogression.skills.Skills.initialize();
+		if (CwpModule.RANDOM_EVENTS.enabled()) RandomEventService.initialize();
+		if (CwpModule.TITLES.enabled()) TitleNetworking.initialize();
+		if (CwpModule.PORTALS.enabled()) {
+			PortalNetworking.registerPayloadType();
+			ekuzo.crazyworldprogression.portals.PortalPreviewNetworking.registerPayloadType();
+			ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.registerPayloadType();
+			PortalNetworking.registerServerReceiver();
+			PortalService.initialize();
+			PortalBuildProtection.initialize();
+			PortalService.registerMaintenanceTick();
+		}
+		if (CwpModule.POSTMASTER.enabled()) PostmasterService.initialize();
+		if (CwpModule.SKILL_TREES.enabled()) {
+			SkillTreeNetworking.registerPayloadTypes();
+			SkillTreeNetworking.registerServerReceivers();
+		}
+		if (CwpModule.CHARACTER_SHEET.enabled()) ekuzo.crazyworldprogression.progression.skilltrees.CharacterSheet.initialize();
+		if (CwpModule.MOBFORGE.enabled()) MobForge.initialize();
 
 		// Load authoritative YAML only when a server starts, so remote clients never depend on local copies.
 		ServerLifecycleEvents.SERVER_STARTING.register(server -> {
 			BaselineStatRegistry.reload();
-			SkillTreeManager.initialize();
-			ekuzo.crazyworldprogression.progression.equipment.EquipmentSetRegistry.reload();
-			RandomEventManager.reload();
+			if (CwpModule.SKILL_TREES.enabled()) SkillTreeManager.initialize();
+			if (CwpModule.EQUIPMENT.enabled()) ekuzo.crazyworldprogression.progression.equipment.EquipmentSetRegistry.reload();
+			if (CwpModule.RANDOM_EVENTS.enabled()) RandomEventManager.reload();
 		});
 
 		// Register all server commands through one callback while keeping startup ownership in this entrypoint.
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-			BalanceCommands.register(dispatcher);
-			CurrencyCommands.register(dispatcher);
-			SkillTreeCommands.register(dispatcher);
 			CwpAdminCommands.register(dispatcher);
-			PortalCommands.registerPlayer(dispatcher);
-			ekuzo.crazyworldprogression.command.PartyCommands.register(dispatcher);
-			PostmasterCommands.register(dispatcher);
-			TitleCommands.register(dispatcher);
+			if (CwpModule.CURRENCY.enabled()) {
+				BalanceCommands.register(dispatcher);
+				CurrencyCommands.register(dispatcher);
+			}
+			if (CwpModule.SKILL_TREES.enabled()) SkillTreeCommands.register(dispatcher);
+			if (CwpModule.PORTALS.enabled()) {
+				PortalCommands.registerPlayer(dispatcher);
+				ekuzo.crazyworldprogression.command.PartyCommands.register(dispatcher);
+			}
+			if (CwpModule.POSTMASTER.enabled()) PostmasterCommands.register(dispatcher);
+			if (CwpModule.TITLES.enabled()) TitleCommands.register(dispatcher);
 		});
 	}
 

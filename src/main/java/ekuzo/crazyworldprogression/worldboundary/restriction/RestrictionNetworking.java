@@ -28,7 +28,7 @@ public final class RestrictionNetworking {
     // Send one complete authoritative snapshot to a connected player.
     static void send(ServerPlayer player, int boundaryLevel, List<Restriction> restrictions) {
         WireSnapshot snapshot = new WireSnapshot(boundaryLevel, restrictions.stream().map(WireRestriction::from).toList());
-        ServerPlayNetworking.send(player, new RestrictionSnapshotPayload(GSON.toJson(snapshot)));
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new RestrictionSnapshotPayload(GSON.toJson(snapshot)));
     }
 
     // Decode a received snapshot for client rendering and prediction.
@@ -92,7 +92,7 @@ public final class RestrictionNetworking {
         public static final StreamCodec<RegistryFriendlyByteBuf, RestrictionSnapshotPayload> CODEC = StreamCodec.composite(
                 ByteBufCodecs.stringUtf8(1_048_576), RestrictionSnapshotPayload::json, RestrictionSnapshotPayload::new);
 
-        // Return the payload type registered by EchelonCore.
+        // Return the payload type registered by CWP.
         @Override
         public Type<? extends CustomPacketPayload> type() {
             return TYPE;

@@ -61,7 +61,7 @@ public final class BuildingPreviewNetworking {
             String key = dimension + "|" + json;
             if (key.equals(LAST_SENT.get(player.getUUID()))) continue;
             if (ServerPlayNetworking.canSend(player, Payload.TYPE)) {
-                ServerPlayNetworking.send(player, new Payload(json));
+                ekuzo.crazyworldprogression.CwpPayloads.send(player, new Payload(json));
                 LAST_SENT.put(player.getUUID(), key);
             }
         }

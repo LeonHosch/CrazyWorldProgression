@@ -23,14 +23,14 @@ public final class AreaSelectionClient {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> active = false);
         AttackBlockCallback.EVENT.register((player, level, hand, pos, direction) -> {
             if (!active || !(player instanceof LocalPlayer)) return InteractionResult.PASS;
-            ClientPlayNetworking.send(new AreaSelectionNetworking.SelectionPointPayload(
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new AreaSelectionNetworking.SelectionPointPayload(
                     pos.getX(), pos.getY(), pos.getZ(), true));
             return InteractionResult.FAIL;
         });
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
             if (!active || !(player instanceof LocalPlayer)) return InteractionResult.PASS;
             var pos = hit.getBlockPos();
-            ClientPlayNetworking.send(new AreaSelectionNetworking.SelectionPointPayload(
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new AreaSelectionNetworking.SelectionPointPayload(
                     pos.getX(), pos.getY(), pos.getZ(), false));
             return InteractionResult.FAIL;
         });

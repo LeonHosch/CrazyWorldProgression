@@ -55,6 +55,6 @@ final class ChestLockClient {
         for (int i = 0; i < ORDER.length; i++) if (ORDER[i].equals(info.mode())) index = i;
         String mode = ORDER[(index + 1) % ORDER.length];
         if (mode.equals("CLAN") && !info.inClan()) mode = ORDER[0];
-        ClientPlayNetworking.send(new ChestLockNetworking.SetPayload(info.pos(), mode));
+        ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new ChestLockNetworking.SetPayload(info.pos(), mode));
     }
 }

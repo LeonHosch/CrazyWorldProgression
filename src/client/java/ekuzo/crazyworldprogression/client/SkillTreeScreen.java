@@ -1213,7 +1213,7 @@ public final class SkillTreeScreen extends Screen {
 
     // Send a clicked node to the server for authoritative validation and deduction.
     private static void purchase(String treeId, String skillId) {
-        ClientPlayNetworking.send(new SkillTreeNetworking.PurchaseSkillPayload(treeId, skillId));
+        ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new SkillTreeNetworking.PurchaseSkillPayload(treeId, skillId));
     }
 
     // Return the node currently under the cursor inside the clipped canvas.

@@ -1,6 +1,6 @@
 package ekuzo.crazyworldprogression.mixin.client;
 
-import ekuzo.crazyworldprogression.client.EchelonClientSettings;
+import ekuzo.crazyworldprogression.client.CwpClientSettings;
 import ekuzo.crazyworldprogression.client.TitleClient;
 import ekuzo.crazyworldprogression.client.TitleRenderState;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -20,24 +20,24 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class AvatarTitleMixin {
     @Inject(method = "extractRenderState(Lnet/minecraft/world/entity/Avatar;Lnet/minecraft/client/renderer/entity/state/AvatarRenderState;F)V",
             at = @At("TAIL"))
-    private void echelon$addTitle(Avatar entity, AvatarRenderState state, float partialTick, CallbackInfo callback) {
-        ((TitleRenderState) state).echelon$setTitle(null);
+    private void cwp$addTitle(Avatar entity, AvatarRenderState state, float partialTick, CallbackInfo callback) {
+        ((TitleRenderState) state).cwp$setTitle(null);
         if (!(entity instanceof Player player) || state.nameTag == null) return;
         var display = TitleClient.get(player.getUUID());
         if (display != null) {
             state.nameTag = Component.literal(player.getName().getString()).withColor(TitleClient.color(display));
-            if (EchelonClientSettings.showTitles)
-                ((TitleRenderState) state).echelon$setTitle(Component.literal(display.title())
+            if (CwpClientSettings.showTitles)
+                ((TitleRenderState) state).cwp$setTitle(Component.literal(display.title())
                         .withColor(TitleClient.color(display)));
         }
-        if (!EchelonClientSettings.showPlayerNames) state.nameTag = null;
+        if (!CwpClientSettings.showPlayerNames) state.nameTag = null;
     }
 
     @Inject(method = "submitNameDisplay(Lnet/minecraft/client/renderer/entity/state/AvatarRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V",
             at = @At("TAIL"))
-    private void echelon$renderTitle(AvatarRenderState state, PoseStack poseStack, SubmitNodeCollector collector,
+    private void cwp$renderTitle(AvatarRenderState state, PoseStack poseStack, SubmitNodeCollector collector,
                                      CameraRenderState camera, CallbackInfo callback) {
-        Component title = ((TitleRenderState) state).echelon$getTitle();
+        Component title = ((TitleRenderState) state).cwp$getTitle();
         if (title == null || state.nameTagAttachment == null) return;
         poseStack.pushPose();
         poseStack.translate(0.0F, -0.259F, 0.0F);

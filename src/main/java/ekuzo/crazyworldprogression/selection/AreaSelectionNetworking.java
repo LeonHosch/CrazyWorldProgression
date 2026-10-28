@@ -34,7 +34,7 @@ public final class AreaSelectionNetworking {
     // Tell one client whether left/right block clicks belong to the area selector.
     static void send(ServerPlayer player, boolean active) {
         if (ServerPlayNetworking.canSend(player, SelectionModePayload.TYPE)) {
-            ServerPlayNetworking.send(player, new SelectionModePayload(active));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new SelectionModePayload(active));
         }
     }
 

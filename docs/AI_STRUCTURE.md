@@ -34,7 +34,7 @@ Client UI/rendering lives in `src/client/java/ekuzo/crazyworldprogression/client
 
 ## Resources and mutable data
 
-- `src/main/resources/data/crazy-world-progression/dimension/` contains 32 persistent pocket editor dimensions, eight reusable portal instance dimensions, and one inaccessible legacy workshop dimension for old saves. `PocketEditorData` persistently binds pocket IDs to editor dimensions; retired editor slots are not reassigned.
+- `config/GeneratedWorlds` writes the pocket editor (workshop) dimensions, the reusable portal instance dimensions and one inaccessible legacy workshop dimension for old saves into a data pack at startup, as many as `config/crazy-world-progression.yml` asks for (templates in `src/main/resources/cwp-worlds/`). `config/CwpModule` and `config/CwpConfig` switch the framework's parts on and off. `PocketEditorData` persistently binds pocket IDs to editor dimensions; retired editor slots are not reassigned.
 - `src/main/resources/assets/crazy-world-progression/` contains language strings, icon, and GUI textures.
 - `src/main/resources/crazy-world-progression.mixins.json` and `mobforge.mixins.json` configure common mixins.
 - `config/mobforge/templates/` and `config/mobforge/scripts/` are runtime YAML directories in a Minecraft installation, not bundled source definitions.

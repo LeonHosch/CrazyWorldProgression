@@ -68,7 +68,7 @@ public final class ChestLockNetworking {
         LockRegistry registry = LockRegistry.get(server);
         String usage = "Private and Friends chests: " + registry.personal(server, player.getUUID()) + "/" + LockRegistry.PLAYER_LIMIT
                 + (clan == null ? "" : " · Clan chests: " + registry.clan(server, clan.id()) + "/" + LockRegistry.clanLimit(clan));
-        ServerPlayNetworking.send(player, new InfoPayload(pos, lock == null ? "PUBLIC" : lock.mode().name(),
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new InfoPayload(pos, lock == null ? "PUBLIC" : lock.mode().name(),
                 ChestLocks.describe(server, lock), ChestLocks.mayManage(player, level, pos), clan != null, usage, error));
     }
 }

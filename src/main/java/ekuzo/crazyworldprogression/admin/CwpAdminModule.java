@@ -1,5 +1,7 @@
 package ekuzo.crazyworldprogression.admin;
 
+import ekuzo.crazyworldprogression.config.CwpConfig;
+import ekuzo.crazyworldprogression.config.CwpModule;
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.buildings.BuildingService;
 import ekuzo.crazyworldprogression.currency.CurrencyDefinition;
@@ -87,32 +89,54 @@ public final class CwpAdminModule {
     private static final List<String> DIFFICULTIES = List.of("1 skull", "2 skulls", "3 skulls", "4 skulls", "5 skulls");
     private static final String PLAYERS = "players";
     private static final String LOGS = "logs";
-    private static final List<AdminPanelRegistry.AdminTab> TABS = List.of(
-            new AdminPanelRegistry.AdminTab(PLAYERS, "Players", AdminPanelRegistry.MODERATE),
-            new AdminPanelRegistry.AdminTab(POCKET_INSTANCES, "Instances", AdminPanelRegistry.MODERATE),
-            new AdminPanelRegistry.AdminTab(EVENTS, "Events", AdminPanelRegistry.MODERATE),
-            new AdminPanelRegistry.AdminTab(CURRENCIES, "Currencies", AdminPanelRegistry.MODERATE),
-            AdminPanelRegistry.AdminTab.dynamic(AdminReforgeEditor.ROOT,
-                    () -> ekuzo.crazyworldprogression.reforge.ReforgeBranding.get().name(), AdminPanelRegistry.MODERATE),
-            AdminPanelRegistry.AdminTab.dynamic(AdminSmithingEditor.ROOT,
-                    () -> ekuzo.crazyworldprogression.smithing.SmithingBranding.get().name(), AdminPanelRegistry.MODERATE),
-            new AdminPanelRegistry.AdminTab(AdminCrossbreedingEditor.ROOT, "Crossbreeding", AdminPanelRegistry.MODERATE),
-            new AdminPanelRegistry.AdminTab(AdminCookingEditor.ROOT, "Cooking", AdminPanelRegistry.MODERATE),
-            new AdminPanelRegistry.AdminTab(AdminFletchingEditor.ROOT, "Fletching", AdminPanelRegistry.MODERATE),
-            new AdminPanelRegistry.AdminTab(POCKETS, "Pockets", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(PORTALS, "Portals", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(BUILDINGS, "Buildings", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(MOB_MOBS, "Mobs", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(MOB_SCRIPTS, "Scripts", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot pools", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.MOBS, "Mob drops", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(AdminFishingEditor.ROOT, "Fishing", AdminPanelRegistry.BUILD),
-            new AdminPanelRegistry.AdminTab(AdminPerformance.PAGE, "Performance", AdminPanelRegistry.LOGS),
-            new AdminPanelRegistry.AdminTab(LOGS, "Server log", AdminPanelRegistry.LOGS),
-            new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill trees", AdminPanelRegistry.LOGS),
-            new AdminPanelRegistry.AdminTab(OVERVIEW, "CWP status", AdminPanelRegistry.LOGS));
+    /** The admin pages of parts that are switched off are left out (CwpModule). */
+    private static final List<AdminPanelRegistry.AdminTab> TABS = java.util.stream.Stream.of(
+            tab(null, new AdminPanelRegistry.AdminTab(PLAYERS, "Players", AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.PORTALS, new AdminPanelRegistry.AdminTab(POCKET_INSTANCES, "Instances", AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.RANDOM_EVENTS, new AdminPanelRegistry.AdminTab(EVENTS, "Events", AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.CURRENCY, new AdminPanelRegistry.AdminTab(CURRENCIES, "Currencies", AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.REFORGE, AdminPanelRegistry.AdminTab.dynamic(AdminReforgeEditor.ROOT,
+                    () -> ekuzo.crazyworldprogression.reforge.ReforgeBranding.get().name(), AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.SMITHING, AdminPanelRegistry.AdminTab.dynamic(AdminSmithingEditor.ROOT,
+                    () -> ekuzo.crazyworldprogression.smithing.SmithingBranding.get().name(), AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.FARMING, new AdminPanelRegistry.AdminTab(AdminCrossbreedingEditor.ROOT, "Crossbreeding", AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.COOKING, new AdminPanelRegistry.AdminTab(AdminCookingEditor.ROOT, "Cooking", AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.FLETCHING, new AdminPanelRegistry.AdminTab(AdminFletchingEditor.ROOT, "Fletching", AdminPanelRegistry.MODERATE)),
+            tab(CwpModule.PORTALS, new AdminPanelRegistry.AdminTab(POCKETS, "Pockets", AdminPanelRegistry.BUILD)),
+            tab(CwpModule.PORTALS, new AdminPanelRegistry.AdminTab(PORTALS, "Portals", AdminPanelRegistry.BUILD)),
+            tab(CwpModule.PORTALS, new AdminPanelRegistry.AdminTab(BUILDINGS, "Buildings", AdminPanelRegistry.BUILD)),
+            tab(CwpModule.MOBFORGE, new AdminPanelRegistry.AdminTab(MOB_MOBS, "Mobs", AdminPanelRegistry.BUILD)),
+            tab(CwpModule.MOBFORGE, new AdminPanelRegistry.AdminTab(MOB_SCRIPTS, "Scripts", AdminPanelRegistry.BUILD)),
+            tab(null, new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot pools", AdminPanelRegistry.BUILD)),
+            tab(CwpModule.MOB_LOOT, new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.MOBS, "Mob drops", AdminPanelRegistry.BUILD)),
+            tab(CwpModule.FISHING, new AdminPanelRegistry.AdminTab(AdminFishingEditor.ROOT, "Fishing", AdminPanelRegistry.BUILD)),
+            tab(null, new AdminPanelRegistry.AdminTab(AdminPerformance.PAGE, "Performance", AdminPanelRegistry.LOGS)),
+            tab(null, new AdminPanelRegistry.AdminTab(LOGS, "Server log", AdminPanelRegistry.LOGS)),
+            tab(CwpModule.SKILL_TREES, new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill trees", AdminPanelRegistry.LOGS)),
+            tab(null, new AdminPanelRegistry.AdminTab(OVERVIEW, "CWP status", AdminPanelRegistry.LOGS))).filter(java.util.Objects::nonNull).toList();
     /** Per admin: whether the server log shows only warnings and errors. */
     private static final Map<java.util.UUID, Boolean> LOG_PROBLEMS_ONLY = new java.util.HashMap<>();
+
+    private static AdminPanelRegistry.AdminTab tab(CwpModule module, AdminPanelRegistry.AdminTab tab) {
+        return module == null || module.enabled() ? tab : null;
+    }
+
+    /** The part a page belongs to, or null for the framework's own pages. */
+    private static CwpModule moduleOf(String pageId) {
+        if (pageId.startsWith(POCKETS) || pageId.startsWith(PORTALS) || pageId.startsWith(BUILDINGS)) return CwpModule.PORTALS;
+        if (pageId.startsWith(MOBFORGE)) return CwpModule.MOBFORGE;
+        if (pageId.startsWith(EVENTS)) return CwpModule.RANDOM_EVENTS;
+        if (pageId.startsWith(CURRENCIES)) return CwpModule.CURRENCY;
+        if (pageId.startsWith(SKILL_TREES)) return CwpModule.SKILL_TREES;
+        if (AdminLootPoolEditor.owns(pageId) && pageId.startsWith(AdminLootPoolEditor.MOBS)) return CwpModule.MOB_LOOT;
+        if (AdminReforgeEditor.owns(pageId)) return CwpModule.REFORGE;
+        if (AdminSmithingEditor.owns(pageId)) return CwpModule.SMITHING;
+        if (AdminCrossbreedingEditor.owns(pageId)) return CwpModule.FARMING;
+        if (AdminCookingEditor.owns(pageId)) return CwpModule.COOKING;
+        if (AdminFletchingEditor.owns(pageId)) return CwpModule.FLETCHING;
+        if (AdminFishingEditor.owns(pageId)) return CwpModule.FISHING;
+        return null;
+    }
 
     // Prevent construction of the native module registrar.
     private CwpAdminModule() {
@@ -140,6 +164,8 @@ public final class CwpAdminModule {
 
     // Route a requested tab to a fresh server-authoritative page.
     private static AdminPanelRegistry.AdminPage page(ServerPlayer player, String pageId) {
+        CwpModule module = moduleOf(pageId);
+        if (module != null && !module.enabled()) return overviewPage(player);
         if (AdminCategories.owns(pageId)) return AdminCategories.page(player, pageId, TABS);
         if (AdminLootPoolEditor.owns(pageId)) return AdminLootPoolEditor.page(player, pageId, TABS);
         if (AdminFishingEditor.owns(pageId)) return AdminFishingEditor.page(player, pageId, TABS);
@@ -228,7 +254,7 @@ public final class CwpAdminModule {
                 AdminPanelRegistry.PageLayout.EDITOR);
     }
 
-    /** Recent server log lines: warnings and errors from everything, normal messages from CWP and Echelon. */
+    /** Recent server log lines: warnings and errors from everything, normal messages from CWP and mods built on it. */
     private static AdminPanelRegistry.AdminPage logsPage(ServerPlayer player) {
         boolean problemsOnly = LOG_PROBLEMS_ONLY.getOrDefault(player.getUUID(), false);
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
@@ -253,23 +279,30 @@ public final class CwpAdminModule {
     // Assemble the framework health overview and its safe refresh control.
     private static AdminPanelRegistry.AdminPage overviewPage(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
-        int activeInstances = PortalService.activeInstances(server).size();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(AdminPanelRegistry.AdminEntry.info("Registered currencies",
+        if (CwpModule.CURRENCY.enabled()) entries.add(AdminPanelRegistry.AdminEntry.info("Registered currencies",
                 CurrencyRegistry.values().size() + " reusable currency definition(s)"));
-        entries.add(AdminPanelRegistry.AdminEntry.info("Skill trees",
+        if (CwpModule.SKILL_TREES.enabled()) entries.add(AdminPanelRegistry.AdminEntry.info("Skill trees",
                 SkillTreeManager.getSkillTrees().size() + " tree(s), "
                         + SkillStatRegistry.registeredFunctions().size() + " stat function(s)"));
-        entries.add(new AdminPanelRegistry.AdminEntry("Pocket dimensions",
-                activeInstances + " of " + PortalRegistry.instanceSlots().size() + " slots active",
-                activeInstances == PortalRegistry.instanceSlots().size() ? WARNING : GOOD, List.of()));
-        entries.add(new AdminPanelRegistry.AdminEntry("Random events",
+        if (CwpModule.PORTALS.enabled()) {
+            int activeInstances = PortalService.activeInstances(server).size();
+            entries.add(new AdminPanelRegistry.AdminEntry("Pocket dimensions",
+                    activeInstances + " of " + PortalRegistry.instanceSlots().size() + " instance worlds in use · "
+                            + PocketEditorService.MAX_POCKETS + " workshop worlds",
+                    activeInstances == PortalRegistry.instanceSlots().size() ? WARNING : GOOD, List.of()));
+        }
+        if (CwpModule.RANDOM_EVENTS.enabled()) entries.add(new AdminPanelRegistry.AdminEntry("Random events",
                 RandomEventManager.definitions().size() + " loaded, "
                         + RandomEventService.activeEvents(server).size() + " active",
                 RandomEventService.isBlackoutActive() ? WARNING : NORMAL, List.of()));
-        entries.add(AdminPanelRegistry.AdminEntry.info("MobForge",
+        if (CwpModule.MOBFORGE.enabled()) entries.add(AdminPanelRegistry.AdminEntry.info("MobForge",
                 MobForge.TEMPLATES.all().size() + " YAML templates · " + MobForge.SCRIPTS.all().size()
                         + " scripts · " + MobForge.mobs().all().size() + " API mobs"));
+        for (Map.Entry<CwpModule, String> part : CwpConfig.get().describe().entrySet())
+            entries.add(in("Parts · config/" + CwpConfig.FILE + " (restart to change)", new AdminPanelRegistry.AdminEntry(
+                    part.getKey().key(), part.getValue() + " · " + part.getKey().description(),
+                    part.getKey().enabled() ? GOOD : NORMAL, List.of())));
         entries.add(new AdminPanelRegistry.AdminEntry("Reload framework data",
                 "Reload baseline stats, skill-tree YAML and random-event YAML, then refresh online players.",
                 NORMAL, List.of(new AdminPanelRegistry.AdminAction("reload", "Reload", false))));
@@ -643,7 +676,7 @@ public final class CwpAdminModule {
                 List.of(AdminPanelRegistry.AdminField.select("portal_keep_inventory", "Keep inventory on death",
                         creating || portal.keepInventory() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Gameplay", "Other players in public instances",
-                "When hidden, each player can still choose to show others in their own ECHELON settings.",
+                "When hidden, each player can still choose to show others in their own settings (pause menu).",
                 List.of(AdminPanelRegistry.AdminField.select("portal_show_players", "Show other players",
                         creating || portal.showOtherPlayers() ? "Yes" : "No", List.of("Yes", "No"))), List.of()));
         PortalDefinition.Environment environment = creating

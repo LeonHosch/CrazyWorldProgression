@@ -29,7 +29,7 @@ public final class AdminPanelClient {
             while (openKey.consumeClick()) {
                 if (client.player != null && client.gui.screen() == null
                         && modifiersDown(client)) {
-                    ClientPlayNetworking.send(new AdminPanelNetworking.RequestPanelPayload("@last", ""));
+                    ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new AdminPanelNetworking.RequestPanelPayload("@last", ""));
                 }
             }
         });

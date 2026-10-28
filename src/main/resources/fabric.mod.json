@@ -3,13 +3,14 @@
 	"id": "crazy-world-progression",
 	"version": "${version}",
 	"name": "Crazy World Progression",
-	"description": "Currency wallets, YAML skill trees, random events, portals, and MobForge mob encounters for Fabric mods.",
+	"description": "A modular RPG and MMO framework for servers and content mods: skill trees and skill levels, item quality and crafting, portals with instanced dungeons and raids, parties, clans, custom mobs with scripted encounters, currencies, storage and more. Every part can be switched off in config/crazy-world-progression.yml.",
 	"authors": [
 		"Leon Hosch"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/LeonHosch/CrazyWorldProgression"
+		"homepage": "https://github.com/LeonHosch/CrazyWorldProgression",
+		"sources": "https://github.com/LeonHosch/CrazyWorldProgression",
+		"issues": "https://github.com/LeonHosch/CrazyWorldProgression/issues"
 	},
 	"license": "AGPL-3.0-only",
 	"icon": "assets/crazy-world-progression/icon.png",
@@ -39,6 +40,7 @@
 		"fabric-api": "*"
 	},
 	"suggests": {
-		"voicechat": ">=2.6.0"
+		"voicechat": ">=2.6.0",
+		"journeymap": "*"
 	}
 }

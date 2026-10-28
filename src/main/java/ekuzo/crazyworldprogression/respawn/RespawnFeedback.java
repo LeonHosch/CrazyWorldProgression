@@ -28,6 +28,6 @@ public final class RespawnFeedback {
 
     /** The player came back to life without respawning (a respawn after death is noticed by the client itself). */
     public static void returned(ServerPlayer player) {
-        if (ServerPlayNetworking.canSend(player, ReturnedPayload.TYPE)) ServerPlayNetworking.send(player, new ReturnedPayload());
+        if (ServerPlayNetworking.canSend(player, ReturnedPayload.TYPE)) ekuzo.crazyworldprogression.CwpPayloads.send(player, new ReturnedPayload());
     }
 }

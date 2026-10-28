@@ -32,6 +32,6 @@ public final class CollectiblesClient {
 
     static void send(String action, String id) {
         if (ClientPlayNetworking.canSend(Collectibles.ActionPayload.TYPE))
-            ClientPlayNetworking.send(new Collectibles.ActionPayload(action, id));
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new Collectibles.ActionPayload(action, id));
     }
 }

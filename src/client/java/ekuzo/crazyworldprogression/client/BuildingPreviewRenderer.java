@@ -62,7 +62,7 @@ public final class BuildingPreviewRenderer {
     }
 
     private static void submit(LevelRenderContext context) {
-        if (!EchelonClientSettings.editorPlacementPreviews) return;
+        if (!CwpClientSettings.editorPlacementPreviews) return;
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return;
         String dimension = minecraft.level.dimension().identifier().toString();

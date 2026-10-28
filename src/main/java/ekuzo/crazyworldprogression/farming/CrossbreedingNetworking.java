@@ -71,7 +71,7 @@ public final class CrossbreedingNetworking {
 
     static void sendState(ServerPlayer player, CrossbreedingMenu menu, String message, boolean error) {
         if (ServerPlayNetworking.canSend(player, StatePayload.TYPE))
-            ServerPlayNetworking.send(player, new StatePayload(state(player, menu, message, error)));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new StatePayload(state(player, menu, message, error)));
     }
 
     /**

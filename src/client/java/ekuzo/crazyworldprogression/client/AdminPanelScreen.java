@@ -603,7 +603,7 @@ public final class AdminPanelScreen extends Screen {
             rebuildWidgets();
             return;
         }
-        ClientPlayNetworking.send(new AdminPanelNetworking.ExecuteActionPayload(
+        ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new AdminPanelNetworking.ExecuteActionPayload(
                 snapshot.selectedModule(), snapshot.page().id(), action.id(),
                 AdminPanelNetworking.encodeValues(formValues)));
     }
@@ -623,7 +623,7 @@ public final class AdminPanelScreen extends Screen {
         Map<String, String> values = Map.copyOf(pendingAutoValues);
         pendingAutoValues.clear();
         autoSaveAtMillis = 0L;
-        ClientPlayNetworking.send(new AdminPanelNetworking.ExecuteActionPayload(
+        ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new AdminPanelNetworking.ExecuteActionPayload(
                 snapshot.selectedModule(), snapshot.page().id(), snapshot.page().autoAction(),
                 AdminPanelNetworking.encodeValues(values)));
     }
@@ -1519,7 +1519,7 @@ public final class AdminPanelScreen extends Screen {
 
     // Send one navigation/refresh request through CWP's common transport.
     private static void request(String moduleId, String pageId) {
-        ClientPlayNetworking.send(new AdminPanelNetworking.RequestPanelPayload(moduleId, pageId));
+        ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new AdminPanelNetworking.RequestPanelPayload(moduleId, pageId));
     }
 
     /** Refresh the page after a nested editor saves or deletes MobForge content. */

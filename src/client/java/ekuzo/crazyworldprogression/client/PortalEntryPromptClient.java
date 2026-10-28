@@ -37,10 +37,10 @@ public final class PortalEntryPromptClient {
     // Open the dedicated Minecraft-style portal confirmation screen.
     private static void open(Minecraft client, PortalNetworking.PortalEntryPromptPayload payload) {
         if (payload.keepInventory() && (payload.destinationKind().equals("coordinates")
-                && !EchelonClientSettings.coordinatePortalMenu
-                || payload.destinationKind().equals("exit") && !EchelonClientSettings.exitPortalMenu)) {
+                && !CwpClientSettings.coordinatePortalMenu
+                || payload.destinationKind().equals("exit") && !CwpClientSettings.exitPortalMenu)) {
             if (ClientPlayNetworking.canSend(PortalNetworking.PortalEntryResponsePayload.TYPE)) {
-                ClientPlayNetworking.send(new PortalNetworking.PortalEntryResponsePayload(
+                ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new PortalNetworking.PortalEntryResponsePayload(
                         payload.portalId(), true, false));
             }
             return;
@@ -143,7 +143,7 @@ public final class PortalEntryPromptClient {
                 return;
             }
             if (ClientPlayNetworking.canSend(PortalNetworking.RaidCheckpointResetPayload.TYPE))
-                ClientPlayNetworking.send(new PortalNetworking.RaidCheckpointResetPayload(payload.portalId()));
+                ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new PortalNetworking.RaidCheckpointResetPayload(payload.portalId()));
             resetButton.active = false;
         }
 
@@ -249,7 +249,7 @@ public final class PortalEntryPromptClient {
             answered = true;
             minecraft.gui.setScreen(parent);
             if (ClientPlayNetworking.canSend(PortalNetworking.PortalEntryResponsePayload.TYPE)) {
-                ClientPlayNetworking.send(new PortalNetworking.PortalEntryResponsePayload(
+                ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new PortalNetworking.PortalEntryResponsePayload(
                         payload.portalId(), accepted, accepted && finalRiskStep));
             }
         }

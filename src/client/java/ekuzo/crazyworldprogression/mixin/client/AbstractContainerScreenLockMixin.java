@@ -27,7 +27,7 @@ public abstract class AbstractContainerScreenLockMixin {
     private void cwp$cycleLock(KeyEvent event, CallbackInfoReturnable<Boolean> info) {
         if (!ItemLockClient.key().matches(event) || hoveredSlot == null || !hoveredSlot.hasItem()
                 || !(hoveredSlot.container instanceof Inventory)) return;
-        ClientPlayNetworking.send(new ItemLocks.CyclePayload(hoveredSlot.index));
+        ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new ItemLocks.CyclePayload(hoveredSlot.index));
         info.setReturnValue(true);
     }
 

@@ -38,7 +38,7 @@ public final class DrawSpeed {
             float percent = (float) value;
             Float before = SENT.put(player.getUUID(), percent);
             if ((before == null || before != percent) && ServerPlayNetworking.canSend(player, Payload.TYPE))
-                ServerPlayNetworking.send(player, new Payload(percent));
+                ekuzo.crazyworldprogression.CwpPayloads.send(player, new Payload(percent));
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> SENT.remove(handler.player.getUUID()));
     }

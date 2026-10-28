@@ -54,12 +54,12 @@ public final class BonusAreaNetworking {
     public static void broadcast(MinecraftServer server) {
         String json = GSON.toJson(zones(server));
         for (ServerPlayer player : server.getPlayerList().getPlayers())
-            if (ServerPlayNetworking.canSend(player, Payload.TYPE)) ServerPlayNetworking.send(player, new Payload(json));
+            if (ServerPlayNetworking.canSend(player, Payload.TYPE)) ekuzo.crazyworldprogression.CwpPayloads.send(player, new Payload(json));
     }
 
     private static void send(ServerPlayer player) {
         if (ServerPlayNetworking.canSend(player, Payload.TYPE))
-            ServerPlayNetworking.send(player, new Payload(GSON.toJson(zones(player.level().getServer()))));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new Payload(GSON.toJson(zones(player.level().getServer()))));
     }
 
     static List<Zone> zones(MinecraftServer server) {

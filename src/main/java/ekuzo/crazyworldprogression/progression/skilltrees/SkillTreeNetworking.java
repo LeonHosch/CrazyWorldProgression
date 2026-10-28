@@ -41,7 +41,7 @@ public final class SkillTreeNetworking {
     // Send a fresh snapshot that opens or refreshes the skill-tree screen.
     public static void open(ServerPlayer player) {
         SkillTreeService.SkillTreeSnapshot snapshot = SkillTreeService.createSnapshot(player);
-        ServerPlayNetworking.send(player, new SkillTreeSnapshotPayload(GSON.toJson(snapshot)));
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new SkillTreeSnapshotPayload(GSON.toJson(snapshot)));
     }
 
     // Decode a server snapshot JSON document for the client screen.

@@ -34,8 +34,10 @@ public final class TitleService {
             if (server.getAdvancements().get(achievementId) == null) continue;
             try (var reader = entry.getValue().openAsReader()) {
                 JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-                if (!json.has("echelon_title")) continue;
-                JsonObject title = json.getAsJsonObject("echelon_title");
+                // "echelon_title" is the name used before 0.5.0.
+                String key = json.has("cwp_title") ? "cwp_title" : json.has("echelon_title") ? "echelon_title" : null;
+                if (key == null) continue;
+                JsonObject title = json.getAsJsonObject(key);
                 Identifier id = Identifier.parse(title.get("id").getAsString());
                 String name = title.get("name").getAsString();
                 String color = title.get("color").getAsString();

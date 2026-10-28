@@ -32,7 +32,7 @@ public final class PortalPlayerVisibility {
     public static boolean hide(Player other) {
         Minecraft client = Minecraft.getInstance();
         return client.player != null && other != client.player
-                && !EchelonClientSettings.showPlayersInSemiPrivateInstances
+                && !CwpClientSettings.showPlayersInSemiPrivateInstances
                 && hiddenDimensions.contains(client.player.level().dimension().identifier().toString());
     }
 }

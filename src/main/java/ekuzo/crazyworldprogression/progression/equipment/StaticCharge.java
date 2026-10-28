@@ -118,7 +118,7 @@ public final class StaticCharge {
         if (first instanceof ServerPlayer self) viewers.add(self);
         for (LivingEntity entity : rest) if (entity instanceof ServerPlayer player) viewers.add(player);
         for (ServerPlayer viewer : viewers)
-            if (ServerPlayNetworking.canSend(viewer, ChainPayload.TYPE)) ServerPlayNetworking.send(viewer, payload);
+            if (ServerPlayNetworking.canSend(viewer, ChainPayload.TYPE)) ekuzo.crazyworldprogression.CwpPayloads.send(viewer, payload);
     }
 
     /** One chain lightning: entities in order and their hitbox centers (x, y, z per entity) at the moment it struck. */

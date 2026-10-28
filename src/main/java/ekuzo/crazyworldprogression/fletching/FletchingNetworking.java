@@ -65,7 +65,7 @@ public final class FletchingNetworking {
 
     static void sendState(ServerPlayer player, String message, boolean error) {
         if (ServerPlayNetworking.canSend(player, StatePayload.TYPE))
-            ServerPlayNetworking.send(player, new StatePayload(state(player, message, error)));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new StatePayload(state(player, message, error)));
     }
 
     static String state(ServerPlayer player, String message, boolean error) {

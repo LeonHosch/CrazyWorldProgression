@@ -438,7 +438,7 @@ public final class Parties {
 
     private static void send(ServerPlayer player, boolean open) {
         if (!ServerPlayNetworking.canSend(player, StatePayload.TYPE)) return;
-        ServerPlayNetworking.send(player, new StatePayload(state(player).toString(), open));
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new StatePayload(state(player).toString(), open));
     }
 
     static JsonObject state(ServerPlayer player) {

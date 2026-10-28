@@ -81,7 +81,7 @@ public final class PartyScreen extends Screen {
 
     private static void send(String action, String a, String b) {
         if (ClientPlayNetworking.canSend(Parties.ActionPayload.TYPE))
-            ClientPlayNetworking.send(new Parties.ActionPayload(action, a, b));
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new Parties.ActionPayload(action, a, b));
     }
 
     private void update(JsonObject received) {

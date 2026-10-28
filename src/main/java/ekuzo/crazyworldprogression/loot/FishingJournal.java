@@ -139,11 +139,11 @@ public final class FishingJournal {
         String json = GSON.toJson(snapshot(player));
         String key = Integer.toHexString(json.hashCode()) + ":" + json.length();
         if (key.equals(SENT.get(player.getUUID()))) {
-            ServerPlayNetworking.send(player, new Payload(""));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new Payload(""));
             return;
         }
         SENT.put(player.getUUID(), key);
-        ServerPlayNetworking.send(player, new Payload(json));
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new Payload(json));
     }
 
     static JsonObject snapshot(ServerPlayer player) {

@@ -42,7 +42,7 @@ public final class TitleNetworking {
         }
         Payload payload = new Payload(GSON.toJson(titles));
         for (ServerPlayer player : server.getPlayerList().getPlayers())
-            if (ServerPlayNetworking.canSend(player, Payload.TYPE)) ServerPlayNetworking.send(player, payload);
+            if (ServerPlayNetworking.canSend(player, Payload.TYPE)) ekuzo.crazyworldprogression.CwpPayloads.send(player, payload);
     }
     /** The server stays authoritative: equip requests go through the same unlock check as /titles equip. */
     private static void handleAction(ServerPlayer player, ActionPayload payload) {
@@ -68,7 +68,7 @@ public final class TitleNetworking {
         for (TitleService.Definition definition : TitleService.unlocked(player))
             titles.add(new Option(definition.id().toString(), definition.name(), definition.color(),
                     definition.achievementId().toString()));
-        ServerPlayNetworking.send(player, new OptionsPayload(GSON.toJson(
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new OptionsPayload(GSON.toJson(
                 new Options(equipped == null ? "" : equipped.id().toString(), titles))));
     }
 

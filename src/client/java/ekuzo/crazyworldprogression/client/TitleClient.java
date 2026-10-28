@@ -49,7 +49,7 @@ public final class TitleClient {
     public static void equip(String id) { send("equip", id); }
     public static void clear() { send("clear", ""); }
     private static void send(String action, String id) {
-        if (available()) ClientPlayNetworking.send(new TitleNetworking.ActionPayload(action, id));
+        if (available()) ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new TitleNetworking.ActionPayload(action, id));
     }
     public static int color(String hex) {
         try { return Integer.parseInt(hex.substring(1), 16); }

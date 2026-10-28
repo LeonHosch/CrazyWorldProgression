@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(PlayerTabOverlay.class)
 public abstract class PlayerTabTitleMixin {
     @Inject(method = "getNameForDisplay", at = @At("RETURN"), cancellable = true)
-    private void echelon$colorTabName(PlayerInfo info, CallbackInfoReturnable<Component> result) {
+    private void cwp$colorTabName(PlayerInfo info, CallbackInfoReturnable<Component> result) {
         var display = TitleClient.get(info.getProfile().id());
         if (display != null) result.setReturnValue(Component.literal(result.getReturnValue().getString())
                 .withColor(TitleClient.color(display)));

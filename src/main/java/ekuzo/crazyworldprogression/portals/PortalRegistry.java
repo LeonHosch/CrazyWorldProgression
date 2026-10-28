@@ -13,7 +13,8 @@ public final class PortalRegistry {
     private static final List<InstanceListener> LISTENERS = new ArrayList<>();
 
     static {
-        for (int index = 1; index <= 8; index++) {
+        // As many as config/crazy-world-progression.yml asks for (GeneratedWorlds makes the worlds).
+        for (int index = 1; index <= ekuzo.crazyworldprogression.config.CwpConfig.get().instances(); index++) {
             INSTANCE_SLOTS.add(CrazyWorldProgression.id("portal_instance_" + index));
         }
     }

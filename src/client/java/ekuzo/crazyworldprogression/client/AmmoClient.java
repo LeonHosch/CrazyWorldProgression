@@ -36,7 +36,7 @@ public final class AmmoClient {
             while (cycleKey.consumeClick())
                 if (client.player != null && client.gui.screen() == null) {
                     selected = (selected + 1) % AmmoPouch.SLOTS;
-                    ClientPlayNetworking.send(new AmmoPouch.CyclePayload(1));
+                    ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new AmmoPouch.CyclePayload(1));
                 }
         });
         ClientPlayNetworking.registerGlobalReceiver(AmmoPouch.SelectedPayload.TYPE, (payload, context) -> selected = payload.slot());

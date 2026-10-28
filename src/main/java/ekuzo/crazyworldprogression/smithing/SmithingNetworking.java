@@ -64,7 +64,7 @@ public final class SmithingNetworking {
 
     static void sendState(ServerPlayer player, ItemStack stack, String message, boolean error) {
         if (ServerPlayNetworking.canSend(player, StatePayload.TYPE))
-            ServerPlayNetworking.send(player, new StatePayload(state(player, stack, message, error)));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new StatePayload(state(player, stack, message, error)));
     }
 
     /**

@@ -16,7 +16,7 @@ class AchievementTitleJsonTest {
     @Test void customTitleMetadataKeepsVanillaAdvancementLoadable() throws Exception {
         Path path = Path.of("../EchelonCore/src/main/resources/data/echelon-core/advancement/mysteries/crowned.json");
         var json = JsonParser.parseString(Files.readString(path));
-        assertEquals("echelon-core:crowned", json.getAsJsonObject().getAsJsonObject("echelon_title")
+        assertEquals("echelon-core:crowned", json.getAsJsonObject().getAsJsonObject("cwp_title")
                 .get("id").getAsString());
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();

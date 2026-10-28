@@ -57,7 +57,7 @@ final class StorageClient {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (quicksortKey.consumeClick())
                 if (client.player != null && client.gui.screen() == null)
-                    ClientPlayNetworking.send(new StorageNetworking.QuicksortPayload("", false, false, true));
+                    ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new StorageNetworking.QuicksortPayload("", false, false, true));
             tickFlights(client);
         });
         ClientPlayNetworking.registerGlobalReceiver(StorageNetworking.FilterInfoPayload.TYPE, (payload, context) -> {
@@ -126,7 +126,7 @@ final class StorageClient {
 
     private static void sort(String action) {
         if (ClientPlayNetworking.canSend(ekuzo.crazyworldprogression.storage.SortActions.ActionPayload.TYPE))
-            ClientPlayNetworking.send(new ekuzo.crazyworldprogression.storage.SortActions.ActionPayload(action));
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new ekuzo.crazyworldprogression.storage.SortActions.ActionPayload(action));
     }
 
     static Set<String> categories(String joined) {
@@ -251,7 +251,7 @@ final class StorageClient {
             }).bounds(left + 64, y, 60, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Save"), ignored -> {
                 boolean all = grid.selected.containsAll(grid.all());
-                ClientPlayNetworking.send(new StorageNetworking.SetFilterPayload(pos, all ? "" : String.join(",", grid.selected)));
+                ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new StorageNetworking.SetFilterPayload(pos, all ? "" : String.join(",", grid.selected)));
                 onClose();
             }).bounds(left + width - 140, y, 66, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Cancel"), ignored -> onClose()).bounds(left + width - 70, y, 66, 20).build());
@@ -297,7 +297,7 @@ final class StorageClient {
         }
 
         private void save() {
-            ClientPlayNetworking.send(new StorageNetworking.QuicksortPayload(String.join(",", grid.selected), fill, on, false));
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new StorageNetworking.QuicksortPayload(String.join(",", grid.selected), fill, on, false));
         }
 
         @Override

@@ -81,7 +81,7 @@ public final class SkillTreeClient {
     // Ask the server for authoritative definitions, balances, and unlock state.
     public static void requestOpen() {
         if (ClientPlayNetworking.canSend(SkillTreeNetworking.RequestSkillTreesPayload.TYPE)) {
-            ClientPlayNetworking.send(new SkillTreeNetworking.RequestSkillTreesPayload());
+            ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new SkillTreeNetworking.RequestSkillTreesPayload());
         }
     }
 

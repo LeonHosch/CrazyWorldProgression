@@ -46,10 +46,12 @@ public final class MapData {
     private MapData() { }
 
     public static void initialize() {
-        ClientPlayNetworking.registerGlobalReceiver(BonusAreaNetworking.Payload.TYPE, (payload, context) -> {
-            zones = BonusAreaNetworking.decode(payload.json());
-            version++;
-        });
+        // Bonus areas come with the world boundary part.
+        if (ekuzo.crazyworldprogression.config.CwpModule.WORLD_BOUNDARY.enabled())
+            ClientPlayNetworking.registerGlobalReceiver(BonusAreaNetworking.Payload.TYPE, (payload, context) -> {
+                zones = BonusAreaNetworking.decode(payload.json());
+                version++;
+            });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             zones = List.of();
             version++;
@@ -59,7 +61,7 @@ public final class MapData {
 
     /**
      * Sets where the map is fogged over, per dimension (null: no fog). A content mod calls this in its client
-     * initializer; Echelon fogs everything beyond the current Veil border.
+     * initializer, for example to fog everything beyond a border players have not unlocked yet.
      */
     public static void setFogProvider(Function<ResourceKey<Level>, Fog> provider) { fogProvider = provider; }
 

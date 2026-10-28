@@ -100,7 +100,7 @@ public final class AmmoPouch {
 
     private static void sync(ServerPlayer player) {
         if (ServerPlayNetworking.canSend(player, SelectedPayload.TYPE))
-            ServerPlayNetworking.send(player, new SelectedPayload(selected(player)));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new SelectedPayload(selected(player)));
     }
 
     /** The stored stacks (live: shrinking one uses the ammo up). */

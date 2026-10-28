@@ -16,9 +16,16 @@ import java.util.Locale;
 
 /**
  * Keeps the most recent server log lines for the admin panel's Logs page: warnings and errors from everything,
- * plus normal messages from CWP, MobForge and Echelon. Lines live in memory only.
+ * plus normal messages from CWP, MobForge and every mod that depends on CWP. Lines live in memory only.
  */
 public final class AdminLog {
+    /** Mod ids (and their package-style spelling) of mods that depend on CWP; their normal messages are shown too. */
+    private static final java.util.List<String> DEPENDENTS = net.fabricmc.loader.api.FabricLoader.getInstance().getAllMods()
+            .stream().map(net.fabricmc.loader.api.ModContainer::getMetadata)
+            .filter(mod -> mod.getDependencies().stream().anyMatch(dependency -> dependency.getModId().equals("crazy-world-progression")))
+            .flatMap(mod -> java.util.stream.Stream.of(mod.getId().toLowerCase(Locale.ROOT),
+                    mod.getId().replace("-", "").toLowerCase(Locale.ROOT)))
+            .distinct().toList();
     private static final int CAPACITY = 500;
     private static final Deque<Line> LINES = new ArrayDeque<>();
     private static boolean installed;
@@ -52,7 +59,7 @@ public final class AdminLog {
         String logger = event.getLoggerName() == null ? "" : event.getLoggerName();
         String lower = logger.toLowerCase(Locale.ROOT);
         boolean ours = lower.contains("crazy-world-progression") || lower.contains("crazyworldprogression")
-                || lower.contains("mobforge") || lower.contains("echelon");
+                || lower.contains("mobforge") || DEPENDENTS.stream().anyMatch(lower::contains);
         if (!ours && level.isLessSpecificThan(Level.WARN)) return;
         String message = event.getMessage() == null ? "" : event.getMessage().getFormattedMessage();
         Throwable thrown = event.getThrown();

@@ -24,7 +24,7 @@ All block work (instance building, wipe rebuilds, script building pastes and rem
   1. **Scripts** (building `add`/`delete`, clearing at `encounter_start`/`encounter_end`) always come first and may use up to `script_max_ms` per tick, however busy the server is, so raid and dungeon mechanics never stall.
   2. **Instance creation** and wipe rebuilds (and the building clears they wait for) come next. They keep room for what scripts usually need later in the tick and always get at least `min_budget_ms`.
   3. **Instance deletion** and admin area clearing come last and only use what is left, plus a small `cleanup_floor_ms` so slots are freed eventually.
-- Settings live in `config/crazy-world-progression-performance.properties` (created on first start): `tick_buffer_ms=10`, `min_budget_ms=2`, `max_budget_ms=30`, `script_max_ms=30`, `cleanup_floor_ms=1`. Restart the server after changing them.
+- Settings live under `performance` in `config/crazy-world-progression.yml` ([configuration](configuration.md)): `tick_buffer_ms: 10`, `min_budget_ms: 2`, `max_budget_ms: 30`, `script_max_ms: 30`, `cleanup_floor_ms: 1`. Restart the server after changing them.
 - Loops check the clock every 128 blocks. Some costs appear after the tick (chunk saving, lighting, sending block changes), which is what the buffer and the maximum leave room for.
 
 ## Instance building

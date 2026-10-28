@@ -90,14 +90,14 @@ public final class SocialNetworking {
         JsonObject state = state(player);
         state.addProperty("error", error == null ? "" : error);
         if (ServerPlayNetworking.canSend(player, StatePayload.TYPE))
-            ServerPlayNetworking.send(player, new StatePayload(GSON.toJson(state), false));
+            ekuzo.crazyworldprogression.CwpPayloads.send(player, new StatePayload(GSON.toJson(state), false));
     }
 
     private static void send(ServerPlayer player, boolean open) {
         if (!ServerPlayNetworking.canSend(player, StatePayload.TYPE)) return;
         JsonObject state = state(player);
         state.addProperty("error", "");
-        ServerPlayNetworking.send(player, new StatePayload(GSON.toJson(state), open));
+        ekuzo.crazyworldprogression.CwpPayloads.send(player, new StatePayload(GSON.toJson(state), open));
     }
 
     private static JsonObject state(ServerPlayer player) {

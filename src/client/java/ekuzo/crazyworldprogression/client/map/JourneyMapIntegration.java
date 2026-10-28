@@ -35,7 +35,7 @@ import java.util.Objects;
  *   <li>the bonus areas the player has discovered, as golden circles with their names;</li>
  *   <li>the pocket and exit portals near which the player has been, as markers with their names (coordinate
  *       portals stay hidden);</li>
- *   <li>fog over everything a content mod marks as not mappable (Echelon: beyond the Veil border);</li>
+ *   <li>fog over everything a content mod marks as not mappable (MapData.setFogProvider);</li>
  *   <li>"Navigate here" in the fullscreen map's right-click menu, which points CWP's coordinate guide there.</li>
  * </ul>
  * Pocket instances and pocket editors reuse their dimensions, so after the player leaves one (or disconnects inside

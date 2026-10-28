@@ -27,5 +27,5 @@ Snapshot of the checked-in implementation on 2026-10-16. CWP (`crazy-world-progr
 ## Limits and current scope
 
 - Currency earning and event visual/gameplay effects require content-mod logic.
-- The bundled portal dimension pool permits eight concurrent leases unless another mod registers more predeclared empty slots.
+- The portal dimension pool permits `worlds.instances` concurrent leases (8 by default, config/crazy-world-progression.yml) unless another mod registers more predeclared empty slots.
 - CWP's own repository has no Echelon currency or tree content. The sibling `../EchelonCore` checkout supplies that integration.

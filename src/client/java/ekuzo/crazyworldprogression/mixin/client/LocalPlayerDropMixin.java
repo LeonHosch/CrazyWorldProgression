@@ -1,6 +1,6 @@
 package ekuzo.crazyworldprogression.mixin.client;
 
-import ekuzo.crazyworldprogression.client.EchelonClientSettings;
+import ekuzo.crazyworldprogression.client.CwpClientSettings;
 import ekuzo.crazyworldprogression.portals.PortalRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -13,9 +13,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(LocalPlayer.class)
 public abstract class LocalPlayerDropMixin {
     @Inject(method = "drop", at = @At("HEAD"), cancellable = true)
-    private void echelon$protectInstanceHotbar(boolean wholeStack, CallbackInfoReturnable<Boolean> result) {
+    private void cwp$protectInstanceHotbar(boolean wholeStack, CallbackInfoReturnable<Boolean> result) {
         LocalPlayer player = (LocalPlayer) (Object) this;
-        if (!EchelonClientSettings.protectHotbar
+        if (!CwpClientSettings.protectHotbar
                 || !PortalRegistry.instanceSlots().contains(player.level().dimension().identifier())
                 || player.getInventory().getSelectedItem().isEmpty()) return;
         player.sendOverlayMessage(Component.literal("Hotbar protected in instances. Open inventory and press Q twice on the slot to drop."));

@@ -1,7 +1,9 @@
 {
   "required": true,
+  "plugin": "ekuzo.crazyworldprogression.config.CwpMixinPlugin",
   "package": "ekuzo.crazyworldprogression.mixin",
   "mixins": [
+    "PackRepositoryWorldsMixin",
     "LivingEntityNoLootDropMixin",
     "FishingHookLevelMixin",
     "EntityMountCooldownMixin",
@@ -82,7 +84,7 @@
     "client.UseDurationDrawMixin",
     "client.LocalPlayerDropMixin",
     "client.MultiLineEditBoxAccessor",
-    "client.PauseScreenEchelonMixin",
+    "client.PauseScreenSettingsMixin",
     "client.PlayerTabTitleMixin",
     "client.RenderPipelinesAccessor",
     "client.RenderTypeAccessor"

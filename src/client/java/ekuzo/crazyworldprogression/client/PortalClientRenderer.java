@@ -132,7 +132,7 @@ public final class PortalClientRenderer {
         if (key.equals(contact)) return;
         if (!ClientPlayNetworking.canSend(PortalNetworking.PortalContactPayload.TYPE)) return;
         contact = key;
-        ClientPlayNetworking.send(new PortalNetworking.PortalContactPayload(touching.id(),
+        ekuzo.crazyworldprogression.client.CwpClientPayloads.send(new PortalNetworking.PortalContactPayload(touching.id(),
                 touching.centerX(), touching.centerY(), touching.centerZ()));
     }
 
@@ -164,7 +164,7 @@ public final class PortalClientRenderer {
             Mesh mesh = mesh(portal);
             submitMesh(context, camera, portal, mesh);
         }
-        if (!EchelonClientSettings.editorPlacementPreviews) return;
+        if (!CwpClientSettings.editorPlacementPreviews) return;
         for (PortalNetworking.PortalSnapshot preview : previews) {
             if (!preview.dimension().equals(dimension)
                     || camera.distanceToSqr(preview.centerX(), preview.centerY(), preview.centerZ())
@@ -213,7 +213,7 @@ public final class PortalClientRenderer {
 
     // Spawn a dense client-only ring of white vanilla particles around nearby open portal boundaries.
     private static void spawnBorderParticles(Minecraft minecraft) {
-        if (!EchelonClientSettings.portalParticles) return;
+        if (!CwpClientSettings.portalParticles) return;
         if (minecraft.level == null || minecraft.player == null || ++particleTick % 2 != 0) return;
         String dimension = minecraft.level.dimension().identifier().toString();
         RandomSource random = minecraft.level.getRandom();

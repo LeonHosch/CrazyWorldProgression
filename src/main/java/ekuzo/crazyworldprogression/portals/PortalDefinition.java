@@ -171,6 +171,13 @@ public record PortalDefinition(Identifier id, Identifier dimension, Shape shape,
     }
 
     // Return a copy linked directly to a different captured template.
+    /** The same portal with its original copy standing in another dimension and place. */
+    public PortalDefinition withPlacement(Identifier replacementDimension, net.minecraft.world.phys.Vec3 center) {
+        return new PortalDefinition(id, replacementDimension, shape, plane, center.x, center.y, center.z, width, height,
+                templateId, lifetimeSeconds, colorRgb, displayName, description, difficulty, entryPolicy, schedule,
+                admission);
+    }
+
     public PortalDefinition withTemplate(Identifier replacement) {
         return new PortalDefinition(id, dimension, shape, plane, centerX, centerY, centerZ, width, height,
                 replacement, lifetimeSeconds, colorRgb, displayName, description, difficulty, entryPolicy, schedule, admission);

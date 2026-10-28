@@ -3,6 +3,8 @@ package ekuzo.crazyworldprogression.portals;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import ekuzo.crazyworldprogression.CrazyWorldProgression;
+import ekuzo.crazyworldprogression.accessory.Accessories;
+import ekuzo.crazyworldprogression.divine.DivineProtection;
 import ekuzo.crazyworldprogression.loot.PostmasterService;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -60,7 +62,7 @@ public final class RaidSnapshots extends SavedData {
     /** Players whose inventory went into an orb while they were offline; it is cleared when they log in. */
     private final java.util.Set<String> owed = new java.util.LinkedHashSet<>();
 
-    /** One stored inventory, slot by slot (main, armor, offhand as Inventory numbers them). */
+    /** One stored inventory, slot by slot (main, armor, offhand as Inventory numbers them, then the accessories). */
     record Snapshot(String slot, double x, double y, double z, List<ItemStack> items) {
         Snapshot { items = items.stream().map(ItemStack::copy).toList(); }
     }
@@ -95,8 +97,10 @@ public final class RaidSnapshots extends SavedData {
         if (logout == null || !logout.slot().equals(slot) || logout.instanceCreated() != instanceCreated) return null;
         logouts.remove(id);
         owed.add(id);
-        if (logout.items().stream().allMatch(ItemStack::isEmpty)) return null;
-        Snapshot snapshot = new Snapshot(slot, marker.x(), marker.y(), marker.z(), logout.items());
+        // Protected items stay with the player (they use their charge on login), so the orb leaves them out.
+        List<ItemStack> items = DivineProtection.withoutProtected(logout.items());
+        if (items.stream().allMatch(ItemStack::isEmpty)) return null;
+        Snapshot snapshot = new Snapshot(slot, marker.x(), marker.y(), marker.z(), items);
         orbs.put(id, snapshot);
         return snapshot;
     }
@@ -118,9 +122,7 @@ public final class RaidSnapshots extends SavedData {
                 || !RaidService.inEncounterPublic(server, instance)
                 || !RaidData.get(server).encounterPlayers(instance.slotDimension().toString())
                         .contains(player.getUUID().toString())) return;
-        Inventory inventory = player.getInventory();
-        List<ItemStack> items = new ArrayList<>(inventory.getContainerSize());
-        for (int index = 0; index < inventory.getContainerSize(); index++) items.add(inventory.getItem(index).copy());
+        List<ItemStack> items = carried(player);
         get(server).recordLogout(player.getUUID().toString(), new Logout(instance.slotDimension().toString(),
                 instance.createdEpochMillis(), player.getGameProfile().name(), items));
     }
@@ -142,7 +144,11 @@ public final class RaidSnapshots extends SavedData {
         String id = player.getUUID().toString();
         Return result = data.returning(id);
         if (result == Return.NOTHING) return;
+        List<DivineProtection.Kept> kept = DivineProtection.preserve(player);
         player.getInventory().clearContent();
+        Accessories.clear(player);
+        ekuzo.crazyworldprogression.accessory.BuffFood.clear(player);
+        DivineProtection.restore(player, kept);
         if (result == Return.CLEAR_ORB_WAITING) {
             Snapshot orb = data.orbs.get(id);
             player.sendSystemMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.orb_offline",
@@ -172,16 +178,17 @@ public final class RaidSnapshots extends SavedData {
                     "Your previous inventory orb was destroyed by this wipe.").withStyle(ChatFormatting.RED));
         }
         removeOrbEntity(server, player.getUUID());
-        Inventory inventory = player.getInventory();
-        List<ItemStack> items = new ArrayList<>(inventory.getContainerSize());
-        boolean any = false;
-        for (int index = 0; index < inventory.getContainerSize(); index++) {
-            ItemStack stack = inventory.getItem(index).copy();
-            any |= !stack.isEmpty();
-            items.add(stack);
+        // Divine Protection: protected items stay in the inventory (one charge each) instead of going into the orb.
+        List<DivineProtection.Kept> kept = DivineProtection.preserve(player);
+        List<ItemStack> items = carried(player);
+        if (items.stream().allMatch(ItemStack::isEmpty)) {
+            DivineProtection.restore(player, kept);
+            return;
         }
-        if (!any) return;
-        inventory.clearContent();
+        player.getInventory().clearContent();
+        Accessories.clear(player);
+        ekuzo.crazyworldprogression.accessory.BuffFood.clear(player);
+        DivineProtection.restore(player, kept);
         data.orbs.put(id, new Snapshot(level.dimension().identifier().toString(), marker.x(), marker.y(), marker.z(), items));
         data.setDirty();
         spawnOrb(level, player.getUUID(), player.getGameProfile().name(), marker);
@@ -212,6 +219,16 @@ public final class RaidSnapshots extends SavedData {
         }
     }
 
+    /** Copies of the inventory slots followed by the worn accessories and the buff food slot. */
+    private static List<ItemStack> carried(ServerPlayer player) {
+        Inventory inventory = player.getInventory();
+        List<ItemStack> items = new ArrayList<>(inventory.getContainerSize() + Accessories.SLOTS);
+        for (int index = 0; index < inventory.getContainerSize(); index++) items.add(inventory.getItem(index).copy());
+        for (ItemStack stack : Accessories.worn(player)) items.add(stack.copy());
+        items.add(ekuzo.crazyworldprogression.accessory.BuffFood.get(player).copy());
+        return items;
+    }
+
     static boolean isOrb(Entity entity) {
         return entity.entityTags().stream().anyMatch(tag -> tag.startsWith(ORB_TAG));
     }
@@ -232,11 +249,27 @@ public final class RaidSnapshots extends SavedData {
             return;
         }
         Inventory inventory = player.getInventory();
-        List<ItemStack> slots = new ArrayList<>(inventory.getContainerSize());
-        for (int index = 0; index < inventory.getContainerSize(); index++) slots.add(inventory.getItem(index).copy());
+        List<ItemStack> slots = carried(player);
         List<ItemStack> displaced = restore(slots, snapshot.items());
+        // Only accessories go back into accessory slots (an old or partial snapshot can hold anything there).
+        int food = inventory.getContainerSize() + Accessories.SLOTS;
+        if (!slots.get(food).isEmpty() && !ekuzo.crazyworldprogression.accessory.BuffFood.fits(slots.get(food))) {
+            displaced.add(slots.get(food));
+            slots.set(food, ItemStack.EMPTY);
+        }
+        for (int index = 0; index < Accessories.SLOTS; index++) {
+            int slot = inventory.getContainerSize() + index;
+            if (!Accessories.fits(slots.subList(inventory.getContainerSize(), food), index, slots.get(slot))
+                    && !slots.get(slot).isEmpty()) {
+                displaced.add(slots.get(slot));
+                slots.set(slot, ItemStack.EMPTY);
+            }
+        }
         List<ItemStack> homeless = fillEmpty(slots, displaced);
-        for (int index = 0; index < slots.size(); index++) inventory.setItem(index, slots.get(index));
+        for (int index = 0; index < inventory.getContainerSize(); index++) inventory.setItem(index, slots.get(index));
+        for (int index = 0; index < Accessories.SLOTS; index++)
+            Accessories.set(player, index, slots.get(inventory.getContainerSize() + index));
+        ekuzo.crazyworldprogression.accessory.BuffFood.set(player, slots.get(food));
         List<ItemStack> leftover = new ArrayList<>();
         for (ItemStack stack : homeless) {
             PostmasterService.DepositResult result = PostmasterService.deposit(player, stack);

@@ -51,7 +51,7 @@ The caller supplies the actual `ServerLevel`; MobForge never substitutes the Ove
 
 ## YAML scripts
 
-The existing `config/mobforge/scripts/` runner remains the CWP script engine. Its legacy `spawn` and `sleep` steps still work. New steps use namespaced IDs and explicit, limited capabilities:
+The existing `config/mobforge/scripts/` runner remains the CWP script engine. Its legacy `spawn` step still works. New steps use namespaced IDs and explicit, limited capabilities:
 
 ```yaml
 id: guardian_wave
@@ -81,7 +81,7 @@ Conditions support `dead`, `health_percent` comparisons, and phase equality/ineq
 
 `wait` (formerly `wait_until`) has a 24-hour default timeout and accepts a shorter `timeout` duration. Completed, failed, or canceled runs discard their handles.
 
-The CWP admin panel has a MobForge tab for YAML mob templates and scripts. Its script editor supports Spawn, Sleep, `mob_spawn`, `wait`, `mob_cast`, `mob_phase`, and `trigger`. Entity and ability pickers use identifiers sent by the server. Server validation reports save errors in the editor and keeps rejected changes unsaved. Java-registered MobDefinitions, ability factories, and behaviors appear as read-only registrations; their implementations remain owned by the registering content mod.
+The CWP admin panel has a MobForge tab for YAML mob templates and scripts. Its script editor edits `.mfs` text. Server validation reports save errors in the editor and keeps rejected changes unsaved. Java-registered MobDefinitions, ability factories, and behaviors appear as read-only registrations; their implementations remain owned by the registering content mod.
 
 ## Pocket dimensions and encounters
 

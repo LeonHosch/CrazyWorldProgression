@@ -563,6 +563,22 @@ public final class PortalService {
         return true;
     }
 
+    /** Mark a script-owned instance complete; it is cleaned up as soon as everyone has left. */
+    public static void finishInstance(ServerLevel level, Vec3 spawn) {
+        MinecraftServer server = level.getServer();
+        Identifier slot = level.dimension().identifier();
+        PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot.toString());
+        if (instance == null) throw new IllegalStateException("finish_instance requires a pocket instance");
+        if (RaidService.inEncounterPublic(server, instance)) RaidService.complete(level);
+        // Clan missions: each clan member inside counts once (ClanMissions).
+        PortalDefinition definition = portal(server, instance.portalId());
+        if (!instance.finished())
+            ekuzo.crazyworldprogression.social.ClanMissions.instanceFinished(server, level.players(), definition != null && definition.raidMode());
+        if (spawn != null) RaidService.moveSpawn(level, spawn.x, spawn.y, spawn.z, false);
+        RaidCheckpoints.clearForInstance(server, instance, level);
+        PortalData.get(server).putInstance(instance.withFinished());
+    }
+
     // Process entries and cleanup every tick, then schedules and expiry once per second.
     private static void tick(MinecraftServer server) {
         long tick = server.getTickCount();
@@ -578,7 +594,7 @@ public final class PortalService {
         WorkshopWipes.tick(server);
         tickPreparing(server);
         restoreVehicleMomentum(server, tick);
-        if (tick % 20L == 0L) expireEmptyPrivateInstances(server);
+        if (tick % 20L == 0L) expireEmptyInstances(server);
         if (tick % 20L == 0L) {
             PortalNetworking.broadcastIfChanged(server);
             expireDueInstances(server, Instant.now().toEpochMilli());
@@ -1061,12 +1077,12 @@ public final class PortalService {
         due.forEach(id -> expireInstance(server, id));
     }
 
-    private static void expireEmptyPrivateInstances(MinecraftServer server) {
+    private static void expireEmptyInstances(MinecraftServer server) {
         Map<Identifier, Long> emptySince = EMPTY_SINCE.computeIfAbsent(server, ignored -> new HashMap<>());
         emptySince.keySet().retainAll(PortalData.get(server).instances().values().stream()
                 .map(PortalData.StoredInstance::slotDimension).collect(java.util.stream.Collectors.toSet()));
         for (PortalData.StoredInstance instance : PortalData.get(server).instances().values()) {
-            if (instance.admittedPlayers().isEmpty()) continue;
+            if (instance.admittedPlayers().isEmpty() && !instance.finished()) continue;
             // Still being built: nobody can be inside yet and its scripts have not started.
             if (preparing(server, instance.slotDimension())) {
                 emptySince.remove(instance.slotDimension());
@@ -1081,13 +1097,18 @@ public final class PortalService {
             long since = emptySince.computeIfAbsent(instance.slotDimension(), ignored -> (long) server.getTickCount());
             boolean scriptsFinished = !ekuzo.crazyworldprogression.mobforge.MobForge.SCRIPT_EXECUTOR
                     .hasPocketRuns(instanceId(instance));
-            if (releaseEmpty(scriptsFinished, since, server.getTickCount())) expireInstance(server, instance.slotDimension());
+            if (releaseEmpty(instance.finished(), scriptsFinished, since, server.getTickCount()))
+                expireInstance(server, instance.slotDimension());
         }
     }
 
     /** An empty instance whose scripts are all finished is released at once; otherwise after the grace period. */
     static boolean releaseEmpty(boolean scriptsFinished, long emptySinceTick, long nowTick) {
         return scriptsFinished || graceOver(emptySinceTick, nowTick);
+    }
+
+    static boolean releaseEmpty(boolean finished, boolean scriptsFinished, long emptySinceTick, long nowTick) {
+        return finished || releaseEmpty(scriptsFinished, emptySinceTick, nowTick);
     }
 
     /** An empty private instance is released once its rejoin grace period has passed. */
@@ -1210,10 +1231,13 @@ public final class PortalService {
     // Return a player to their remembered source or the overworld spawn after restart/fallback.
     private static void teleportBack(MinecraftServer server, ServerPlayer player) {
         ReturnPoint point;
+        boolean leavingWorkshop = PocketEditorService.isEditorDimension(player.level().dimension().identifier());
         synchronized (RETURN_POINTS) {
             var points = RETURN_POINTS.computeIfAbsent(server, ignored -> new HashMap<>())
                     .get(player.getUUID());
-            while (points != null && !points.isEmpty() && !validReturnDimension(server, points.peekLast().dimension())) {
+            // A workshop exit always returns outside the workshop chain, even if another workshop was entered from it.
+            while (points != null && !points.isEmpty() && (!validReturnDimension(server, points.peekLast().dimension())
+                    || leavingWorkshop && PocketEditorService.isEditorDimension(points.peekLast().dimension()))) {
                 points.removeLast();
             }
             point = points == null ? null : points.peekLast();

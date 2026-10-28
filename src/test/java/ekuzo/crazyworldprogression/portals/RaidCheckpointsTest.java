@@ -1,6 +1,7 @@
 package ekuzo.crazyworldprogression.portals;
 
 import com.mojang.serialization.JsonOps;
+import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -42,6 +43,18 @@ class RaidCheckpointsTest {
         assertEquals(data.current(PLAYER, RAID, 1L), restored.current(PLAYER, RAID, 1L));
     }
 
+    @Test void finishingClearsEveryParticipantOnlyForThisRaidPortal() {
+        RaidCheckpoints data = new RaidCheckpoints();
+        String second = "00000000-0000-0000-0000-000000000002";
+        data.record(PLAYER, RAID, 2, 0L);
+        data.record(second, RAID, 1, 0L);
+        data.record(PLAYER, "cwp:other", 1, 0L);
+        data.clearForParticipants(RAID, List.of(PLAYER, second));
+        assertNull(data.current(PLAYER, RAID, 1L));
+        assertNull(data.current(second, RAID, 1L));
+        assertEquals(1, data.current(PLAYER, "cwp:other", 1L).encounters());
+    }
+
     @Test void inviteNeedsAFreeSlotUnlessThePlayerAlreadyBelongs() {
         assertTrue(PortalService.hasRoom(List.of("a"), "b", 2));
         assertFalse(PortalService.hasRoom(List.of("a", "b"), "c", 2));
@@ -61,8 +74,19 @@ class RaidCheckpointsTest {
     }
 
     @Test void finishedInstancesCloseAsSoonAsEveryoneLeaves() {
-        assertTrue(PortalService.releaseEmpty(true, 100L, 100L));
-        assertFalse(PortalService.releaseEmpty(false, 100L, 100L));
-        assertTrue(PortalService.releaseEmpty(false, 100L, 100L + PortalService.REJOIN_GRACE_TICKS));
+        assertTrue(PortalService.releaseEmpty(true, false, 100L, 100L));
+        assertFalse(PortalService.releaseEmpty(false, false, 100L, 100L));
+        assertTrue(PortalService.releaseEmpty(false, false, 100L, 100L + PortalService.REJOIN_GRACE_TICKS));
+    }
+
+    @Test void finishedLeaseSurvivesSavingAndPlayerUpdates() {
+        PortalData.StoredInstance lease = new PortalData.StoredInstance(Identifier.parse(RAID),
+                Identifier.parse("cwp:pocket"), Identifier.parse("cwp:instance_1"),
+                1L, 1000L, 0, 64, 0, 16, 16, 16, List.of(PLAYER)).withFinished();
+        lease = lease.withVisitor(java.util.UUID.fromString(PLAYER));
+        var encoded = PortalData.StoredInstance.CODEC.encodeStart(JsonOps.INSTANCE, lease).getOrThrow();
+        assertTrue(PortalData.StoredInstance.CODEC.parse(JsonOps.INSTANCE, encoded).getOrThrow().finished());
+        encoded.getAsJsonObject().remove("finished");
+        assertFalse(PortalData.StoredInstance.CODEC.parse(JsonOps.INSTANCE, encoded).getOrThrow().finished());
     }
 }

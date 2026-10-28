@@ -67,7 +67,7 @@ public final class PortalPreviewNetworking {
                         placement.portalId() + "/" + placement.locationId(), dimension.toString(),
                         preset.shape().serializedName(), preset.plane().serializedName(),
                         placement.position().x(), placement.position().y(), placement.position().z(),
-                        preset.width(), preset.height(), 0xB455F5, true));
+                        preset.width(), preset.height(), 0xB455F5, true, preset.effectiveDisplayName(), "preview"));
             }
         }
         return result;

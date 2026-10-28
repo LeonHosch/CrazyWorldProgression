@@ -19,13 +19,14 @@ public final class MobAiRegistry {
 	public static void register(MobAiController controller) { CONTROLLERS.put(controller.id(), controller); }
 	public static void tick(Mob mob) {
 		if (!(mob.level() instanceof ServerLevel level) || !mob.entityTags().contains(MobForgeEntityData.MARKER)) return;
-		MobForgeEntityData.aiMode(mob).ifPresent(mode -> {
-			VanillaGoalStateManager.applyMode(mob, mode);
-			MobAiController controller = CONTROLLERS.get(mode);
+		MobAiState state = MobAiState.of(mob);
+		if (state.mode != null) {
+			VanillaGoalStateManager.applyMode(mob, state.mode);
+			MobAiController controller = CONTROLLERS.get(state.mode);
 			if (controller != null) controller.tick(level, mob);
-		});
-		if (mob.tickCount % 5 != Math.floorMod(mob.getId(), 5)) return;
-		MobForgeEntityData.definition(mob).flatMap(MobForge.mobs()::get).ifPresent(definition -> {
+		}
+		if (state.definition == null || mob.tickCount % 5 != Math.floorMod(mob.getId(), 5)) return;
+		MobForge.mobs().get(state.definition).ifPresent(definition -> {
 			RegisteredMobHandle handle = new RegisteredMobHandle(mob);
 			for (var id : definition.behaviors()) {
 				String failureTag = "mobforge.behavior_failed." + id;

@@ -33,7 +33,7 @@ public final class SkillTreeClient {
     private SkillTreeClient() {
     }
 
-    // Register the snapshot receiver and add a skill-tree button to the right of the recipe-book button.
+    // Register the snapshot receiver and add the Show stats button (character sheet) right of the recipe-book button.
     public static void initialize() {
         ClientPlayNetworking.registerGlobalReceiver(SkillTreeNetworking.SkillTreeSnapshotPayload.TYPE,
                 (payload, context) -> showSnapshot(
@@ -99,22 +99,22 @@ public final class SkillTreeClient {
     private static final class SkillTreeInventoryButton extends Button {
         private final ItemStack icon;
 
-        // Create a recipe-sized vanilla button carrying an experience-themed item icon.
+        // Create a recipe-sized vanilla button carrying a book icon; it opens and closes the character sheet.
         private SkillTreeInventoryButton(int x, int y) {
             super(
                     x,
                     y,
                     INVENTORY_BUTTON_WIDTH,
                     INVENTORY_BUTTON_HEIGHT,
-                    Component.translatable("tooltip.crazy-world-progression.open_skill_trees"),
-                    ignored -> requestOpen(),
+                    Component.translatable("tooltip.crazy-world-progression.show_stats"),
+                    ignored -> CharacterSheetClient.toggle(),
                     DEFAULT_NARRATION
             );
-            icon = new ItemStack(Items.EXPERIENCE_BOTTLE);
-            setTooltip(Tooltip.create(Component.translatable("tooltip.crazy-world-progression.open_skill_trees")));
+            icon = new ItemStack(Items.WRITABLE_BOOK);
+            setTooltip(Tooltip.create(Component.translatable("tooltip.crazy-world-progression.show_stats")));
         }
 
-        // Draw the experience bottle centrally instead of rendering a text label.
+        // Draw the book centrally instead of rendering a text label.
         @Override
         protected void extractContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
             graphics.blitSprite(

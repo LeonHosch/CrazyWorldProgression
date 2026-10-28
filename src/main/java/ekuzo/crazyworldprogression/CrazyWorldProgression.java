@@ -52,6 +52,39 @@ public class CrazyWorldProgression implements ModInitializer {
 
 		// Gameplay systems listen for server events, while commands expose progression state to players and admins.
 		SkillStatRegistry.initialize();
+		ekuzo.crazyworldprogression.worldboundary.AdvancedWorldBoundary.initialize();
+		ekuzo.crazyworldprogression.worldboundary.BoundaryRadiusNetworking.register();
+		ekuzo.crazyworldprogression.worldboundary.restriction.RestrictionNetworking.registerPayloadType();
+		ekuzo.crazyworldprogression.worldboundary.restriction.RestrictionService.initialize();
+		ekuzo.crazyworldprogression.accessory.Accessories.initialize();
+		ekuzo.crazyworldprogression.accessory.BuffFood.initialize();
+		ekuzo.crazyworldprogression.collectibles.Collectibles.initialize();
+		ekuzo.crazyworldprogression.loot.MobLoot.initialize();
+		ekuzo.crazyworldprogression.progression.equipment.EquipmentSetService.initialize();
+		ekuzo.crazyworldprogression.progression.equipment.ProtectionStats.initialize();
+		ekuzo.crazyworldprogression.worldboundary.bonus.BonusAreas.initialize();
+		ekuzo.crazyworldprogression.progression.equipment.AllyHealing.initialize();
+		ekuzo.crazyworldprogression.progression.equipment.Hubris.initialize();
+		ekuzo.crazyworldprogression.progression.equipment.BloodPact.initialize();
+		ekuzo.crazyworldprogression.progression.equipment.StaticCharge.initialize();
+		ekuzo.crazyworldprogression.progression.equipment.DrawSpeed.initialize();
+		ekuzo.crazyworldprogression.loot.FishingJournal.initialize();
+		ekuzo.crazyworldprogression.reforge.ReforgeNetworking.initialize();
+		ekuzo.crazyworldprogression.reforge.ResearchService.initialize();
+		ekuzo.crazyworldprogression.smithing.SmithingNetworking.initialize();
+		ekuzo.crazyworldprogression.smithing.ChestQuality.initialize();
+		ekuzo.crazyworldprogression.storage.StorageNetworking.initialize();
+		ekuzo.crazyworldprogression.fletching.Fletching.initialize();
+		ekuzo.crazyworldprogression.ammo.AmmoPouch.initialize();
+		ekuzo.crazyworldprogression.social.Social.initialize();
+		ekuzo.crazyworldprogression.divine.DivineProtectionNetworking.initialize();
+		ekuzo.crazyworldprogression.respawn.RespawnFeedback.initialize();
+		ekuzo.crazyworldprogression.farming.CrossbreedingNetworking.initialize();
+		ekuzo.crazyworldprogression.farming.FarmingLevels.initialize();
+		ekuzo.crazyworldprogression.farming.ProduceQuality.initialize();
+		ekuzo.crazyworldprogression.farming.AnimalProduce.initialize();
+		ekuzo.crazyworldprogression.cooking.CookingNetworking.initialize();
+		ekuzo.crazyworldprogression.skills.Skills.initialize();
 		RandomEventService.initialize();
 		PortalNetworking.registerPayloadType();
 		TitleNetworking.initialize();
@@ -69,6 +102,7 @@ public class CrazyWorldProgression implements ModInitializer {
 		CwpAdminModule.register();
 		SkillTreeNetworking.registerPayloadTypes();
 		SkillTreeNetworking.registerServerReceivers();
+		ekuzo.crazyworldprogression.progression.skilltrees.CharacterSheet.initialize();
 		MobForge.initialize();
 		PortalService.registerMaintenanceTick();
 		AreaSelectionService.registerMaintenanceTick();
@@ -77,6 +111,7 @@ public class CrazyWorldProgression implements ModInitializer {
 		ServerLifecycleEvents.SERVER_STARTING.register(server -> {
 			BaselineStatRegistry.reload();
 			SkillTreeManager.initialize();
+			ekuzo.crazyworldprogression.progression.equipment.EquipmentSetRegistry.reload();
 			RandomEventManager.reload();
 		});
 

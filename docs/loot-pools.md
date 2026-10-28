@@ -4,11 +4,15 @@ Open the CWP admin panel and choose **Loot Pools**. The tab works like Pockets, 
 
 In the editor, add entries from the **Add** section at the bottom:
 
-- **Item**: type part of an item's name or ID (for example `sword` or `diamond`). A dropdown lists matching items, including items from other mods, with their icons. Click one, or use the arrow keys and Enter. Set a chance and an amount, either a number like `2` or a range like `1-3`.
+- **Item**: type part of an item's name or ID (for example `sword` or `diamond`). A dropdown lists matching items, including items from other mods, with their icons. Click one, or use the arrow keys and Enter. Set a chance and an amount, either a number like `2` or a range like `1-3`. Optional XP per item and level values are available below the item fields.
 - **Nested pool**: set its chance and click **Add nested pool**. The editor opens the new nested pool so you can fill it. Nested pools can contain more nested pools, up to 16 levels deep.
 - **Currency**: credits a player currency. This row only appears when a player-scoped currency exists.
 
-Each entry row has **Edit** (chance, amount, chat announcement), **↑ / ↓** to reorder, and **Remove**. Nested pool rows also have **Open**. A nested pool's **Back** button returns to the pool that contains it.
+Each entry row has **Edit** (chance, amount, optional stat values, chat announcement), **↑ / ↓** to reorder, and **Remove**. Nested pool rows also have **Open**. A nested pool's **Back** button returns to the pool that contains it.
+
+An item's optional **Level** is a minimum level for the stat associated with the roll. A blank value means no level requirement. Fishing rolls check it against the player's fishing level (the `addFishingLevel` stat from skill trees and sets): entries above it are left out, as if they were not in the pool, so a pick-one pool shares its odds among the rest. Other rolls do not check levels yet.
+
+The **Fishing Journal** (book + any fish) lists every fishing biome or pocket and its fish. Caught fish show as themselves, uncaught ones as a grey fish, and fish above the player's fishing level as a black fish.
 
 How a pool rolls:
 

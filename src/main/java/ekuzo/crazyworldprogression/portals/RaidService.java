@@ -35,6 +35,10 @@ public final class RaidService {
     /** Seconds between a wipe and the encounter reset; an encounter_end in this window is a clutch clear. */
     public static final int WIPE_DELAY_SECONDS = 5;
     private static final java.util.Map<MinecraftServer, java.util.Map<String, Long>> PENDING_WIPES = new java.util.WeakHashMap<>();
+    /** Instances rebuilding after a wipe; their players see the rebuild progress. */
+    private static final java.util.Map<MinecraftServer, java.util.Set<String>> RESETTING = new java.util.WeakHashMap<>();
+    /** Ticks between progress updates while an instance rebuilds after a wipe. */
+    private static final int RESET_PROGRESS_INTERVAL = 10;
 
     /** Tick at which a wipe started at the given tick resets the encounter. */
     static long wipeResetTick(long wipeTick) {
@@ -90,6 +94,7 @@ public final class RaidService {
     }
 
     private static void tickWipes(MinecraftServer server) {
+        if (server.getTickCount() % RESET_PROGRESS_INTERVAL == 0) showResetProgress(server);
         java.util.Map<String, Long> pending = PENDING_WIPES.get(server);
         if (pending == null || pending.isEmpty()) return;
         for (String slot : List.copyOf(pending.keySet())) {
@@ -258,7 +263,12 @@ public final class RaidService {
         player.removeAllEffects();
         player.setAirSupply(player.getMaxAirSupply());
         player.resetFallDistance();
-        if (!portal.keepInventory()) player.getInventory().dropAll();
+        if (!portal.keepInventory()) {
+            // Divine Protection: protected items stay with the player (one charge each).
+            var kept = ekuzo.crazyworldprogression.divine.DivineProtection.preserve(player);
+            player.getInventory().dropAll();
+            ekuzo.crazyworldprogression.divine.DivineProtection.restore(player, kept);
+        }
         PortalService.sendOut(player);
         player.sendSystemMessage(Component.literal(message));
     }
@@ -277,6 +287,7 @@ public final class RaidService {
                     before.portalEntries(), before.pendingRespawn(), modes, before.encounterActive()));
         }
         finishRevive(player, down.point(), mode);
+        ekuzo.crazyworldprogression.respawn.RespawnFeedback.returned(player);
         player.sendOverlayMessage(Component.translatableWithFallback("message.crazy-world-progression.raid.revived",
                 "You got back up."));
     }
@@ -379,7 +390,7 @@ public final class RaidService {
         });
     }
 
-    /** Spawn moved by encounter_end(spawn=...), or null for the template's own spawn. */
+    /** Spawn moved by encounter_end(spawn=...) or finish_instance(spawn=...), or null for the template spawn. */
     static RaidData.Spot spawnPoint(MinecraftServer server, PortalData.StoredInstance instance) {
         return RaidData.get(server).spawn(instance.slotDimension().toString());
     }
@@ -390,7 +401,7 @@ public final class RaidService {
      */
     public static void moveSpawn(ServerLevel level, double x, double y, double z, boolean movePlayers) {
         MinecraftServer server = level.getServer();
-        if (!isRaid(server, level.dimension().identifier())) return;
+        if (!PortalData.get(server).instances().containsKey(level.dimension().identifier().toString())) return;
         RaidData.get(server).spawn(level.dimension().identifier().toString(), new RaidData.Spot(x, y, z));
         if (!movePlayers) return;
         for (ServerPlayer player : List.copyOf(level.players())) {
@@ -720,6 +731,8 @@ public final class RaidService {
     private static void wipe(MinecraftServer server, PortalData.StoredInstance instance, RaidData.Attempt before) {
         ServerLevel level = level(server, instance.slotDimension());
         if (level == null) return;
+        RESETTING.computeIfAbsent(server, ignored -> new java.util.HashSet<>()).add(instance.slotDimension().toString());
+        EncounterBanner.show(onlineParticipants(server, instance), EncounterBanner.Kind.RESETTING, "0");
         clearDowns(server, instance.slotDimension());
         clearEffects(level);
         clearMarkers(level);
@@ -728,6 +741,8 @@ public final class RaidService {
 
     private static void finishWipe(MinecraftServer server, PortalData.StoredInstance instance,
                                    RaidData.Attempt before, ServerLevel level) {
+        java.util.Set<String> resetting = RESETTING.get(server);
+        if (resetting != null) resetting.remove(instance.slotDimension().toString());
         clearDowns(server, instance.slotDimension());
         PortalDefinition portal = PortalService.portal(server, instance.portalId());
         if (portal != null && !portal.keepInventory()) {
@@ -764,6 +779,25 @@ public final class RaidService {
         // Dead players get the banner too; it is still showing when they respawn quickly.
         EncounterBanner.show(onlineParticipants(server, instance), EncounterBanner.Kind.WIPED,
                 Integer.toString(before.number() + 1));
+    }
+
+    /**
+     * Keeps the "Resetting" banner up with the rebuild's progress (0 while the old build is still being cleared).
+     * An instance that was closed during its reset is dropped.
+     */
+    private static void showResetProgress(MinecraftServer server) {
+        java.util.Set<String> resetting = RESETTING.get(server);
+        if (resetting == null || resetting.isEmpty()) return;
+        for (String slot : List.copyOf(resetting)) {
+            PortalData.StoredInstance instance = PortalData.get(server).instances().get(slot);
+            if (instance == null) {
+                resetting.remove(slot);
+                continue;
+            }
+            int percent = InstanceBuilds.building(server, slot) ? InstanceBuilds.percent(server, slot) : 0;
+            EncounterBanner.show(onlineParticipants(server, instance), EncounterBanner.Kind.RESETTING,
+                    Integer.toString(Math.min(99, percent)));
+        }
     }
 
     /** Scripted encounter completion releases entry locks and revive charges without destroying the instance. */
@@ -826,8 +860,10 @@ public final class RaidService {
         });
     }
 
+    /** Removes effects and stops sounds the scripts started, on wipes, encounter ends and instance ends. */
     private static void clearEffects(ServerLevel level) {
         for (ServerPlayer player : List.copyOf(level.players())) player.removeAllEffects();
+        ekuzo.crazyworldprogression.mobforge.MobForge.SCRIPT_EXECUTOR.stopSounds(level);
     }
 
     private static void spawnMarker(ServerPlayer player, RaidData.Spot spot) {

@@ -125,7 +125,8 @@ public final class SkillTreeManager {
             skills.add(new SkillNode(id, name, optionalString(skill, "gname", name), description,
                     optionalString(skill, "beschreibung", description), optionalString(skill, "icon", "minecraft:book"),
                     stringList(file, skill.get("previous"), "previous"), nonNegativeInt(file, skill, "following"),
-                    stringList(file, skill.get("stats"), "stats"), readCosts(file, namespace, skill.get("costs"))));
+                    stringList(file, skill.get("stats"), "stats"), readCosts(file, namespace, skill.get("costs")),
+                    readRequires(file, skill.get("requires"))));
         }
         validateTree(file, skills);
         return new SkillTreeDefinition(treeId, treeName, treeGermanName, treeIcon, type, priority, List.copyOf(skills));
@@ -161,6 +162,25 @@ public final class SkillTreeManager {
     }
 
     // Convert an open YAML costs mapping into registered namespaced currency IDs and non-negative amounts.
+    /** Levels a node needs, such as {@code requires: { fishing: 5 }} (level names from Skills: cooking, fishing, ...). */
+    private static Map<String, Integer> readRequires(Path file, Object rawRequires) {
+        if (rawRequires == null) return Map.of();
+        if (!(rawRequires instanceof Map<?, ?> rawMap)) throw invalid(file, "requires must be a mapping of level to number");
+        Map<String, Integer> requires = new LinkedHashMap<>();
+        stringMap(file, rawMap, "requires").forEach((key, value) -> {
+            ekuzo.crazyworldprogression.skills.Skills.Skill skill;
+            try {
+                skill = ekuzo.crazyworldprogression.skills.Skills.Skill.parse(key);
+            } catch (IllegalArgumentException exception) {
+                throw invalid(file, exception.getMessage());
+            }
+            if (!(value instanceof Number number) || number.intValue() < 0 || number.intValue() > ekuzo.crazyworldprogression.skills.Skills.MAX_LEVEL)
+                throw invalid(file, "requires." + key + " must be a level from 0 to " + ekuzo.crazyworldprogression.skills.Skills.MAX_LEVEL);
+            requires.put(skill.key(), number.intValue());
+        });
+        return requires;
+    }
+
     private static Map<Identifier, Long> readCosts(Path file, String namespace, Object rawCosts) {
         if (rawCosts == null) return Map.of();
         if (!(rawCosts instanceof Map<?, ?> rawMap)) throw invalid(file, "costs must be a mapping");

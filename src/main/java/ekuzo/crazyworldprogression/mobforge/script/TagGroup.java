@@ -23,9 +23,9 @@ final class TagGroup implements ScriptEntityHandle {
         return members.stream().filter(ScriptEntityHandle::isAlive).toList();
     }
 
-    /** Living tagged MobForge mobs, which can cast abilities and change phase. */
+    /** Living tagged mobs, which can cast abilities and change phase (any mob, not only registered MobForge mobs). */
     List<MobForgeHandle> livingMobForge() {
-        return living().stream().filter(MobForgeHandle.class::isInstance).map(MobForgeHandle.class::cast).toList();
+        return living().stream().map(MobScriptExecutor::asCaster).filter(java.util.Objects::nonNull).toList();
     }
 
     String phase() {

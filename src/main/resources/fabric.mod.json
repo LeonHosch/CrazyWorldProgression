@@ -20,6 +20,12 @@
 		],
 		"client": [
 			"ekuzo.crazyworldprogression.client.CrazyWorldProgressionClient"
+		],
+		"voicechat": [
+			"ekuzo.crazyworldprogression.portals.PartyVoiceChatPlugin"
+		],
+		"journeymap": [
+			"ekuzo.crazyworldprogression.client.map.JourneyMapIntegration"
 		]
 	},
 	"mixins": [
@@ -31,5 +37,8 @@
 		"minecraft": "~26.2",
 		"java": ">=25",
 		"fabric-api": "*"
+	},
+	"suggests": {
+		"voicechat": ">=2.6.0"
 	}
 }

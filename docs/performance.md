@@ -47,6 +47,32 @@ This shifts the broad detection loop to each client, while server work occurs on
 
 **Invalidation rule:** any new code path that mutates a building template or linked script must update the compared metadata/object or explicitly invalidate this cache. A raw on-disk structure edit that bypasses those paths is not detected merely because the file changed. Reload the relevant data after external edits and add a targeted invalidation hook if such edits become a supported live workflow. The cache holds serialized previews in memory, so profile its size if editors use many large buildings.
 
+## Client caching of read-mostly data
+
+**Rule: whenever a window or HUD shows data that rarely changes, the client keeps the last copy it received, and the server only rebuilds and resends it when something it depends on changed.** Use this for every new feature where it fits, and move existing features over to it when you touch them.
+
+The pattern, as used by the [fishing journal](../src/main/java/ekuzo/crazyworldprogression/loot/FishingJournal.java):
+
+1. **Pick a cheap change key per player** from everything the data depends on: a revision counter that the shared data bumps on every change (`FishingLootData.REVISION`, bumped from `setDirty()` of the fishing and loot pool data), plus small per-player values (caught count, fishing level). Never hash the data itself to build the key; that costs as much as rebuilding it.
+2. **The server remembers the key it last sent** to each online player and forgets it on disconnect.
+3. **When the key is unchanged**, send an empty "use your copy" message instead of the data. When it changed, rebuild, send, and store the new key.
+4. **The client keeps the last full copy** and drops it on disconnect, so the first open after joining always loads fresh data.
+5. **Keep the server authoritative.** The cache only decides what is displayed. Every action (reforge, repair, study, claim) is still checked on the server with real values, so a stale or tampered cache can never grant anything.
+6. **Split live values from static ones.** Balances, inventory contents and anything that changes every few seconds go in their own small message. Only the slow-changing part is cached.
+
+Candidates that still rebuild and send everything on every open or action:
+
+| System | Sent today | Cacheable part | Change key |
+| --- | --- | --- | --- |
+| [Soulforging / enchanting](../src/main/java/ekuzo/crazyworldprogression/reforge/ReforgeNetworking.java) | Tiers, costs and nested enchantment pools as opening data, and again after every reforge | Tiers, costs, pools | Reforge data revision + enchanting proficiency + research levels |
+| [Anvil smithing](../src/main/java/ekuzo/crazyworldprogression/smithing/SmithingNetworking.java) | All tiers, prices and failure chances plus balances at open and after every repair | Tiers, prices, failure chances | Smithing data revision + smithing proficiency |
+| [Study table](../src/main/java/ekuzo/crazyworldprogression/reforge/ResearchService.java) | The full research list at open and after every study | Research list | Player's research revision (bumped when they study) |
+| Loot pool editor and other admin pages | Full page snapshots | Page content | Data revision of that page's SavedData |
+
+Balances and the item currently in a slot stay live in all of them. Note in this table when a system moves over to caching.
+
+Exception: [crossbreeding](../src/main/java/ekuzo/crazyworldprogression/farming/CrossbreedingNetworking.java) must not send its recipes to the client, since undiscovered results are secret. It sends a small state for the current seed pair whenever the seeds change instead.
+
 ## Known costs to measure before 1.0
 
 - [Building capture and placement](../src/main/java/ekuzo/crazyworldprogression/buildings/BuildingService.java) calls `fillFromWorld` or `placeInWorld` synchronously. Volume limits prevent unlimited input, but a large valid template can still produce a long tick. The cleanup budget does not constrain placement.

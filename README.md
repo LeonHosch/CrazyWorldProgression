@@ -6,6 +6,8 @@ CWP intentionally ships without currencies, skill trees, earning rules, roles, o
 
 See [performance design and profiling](docs/performance.md) for tick budgets, cache rules, server validation, and known costs to measure before release.
 
+Fishing catches can use world-owned loot pools with biome, liquid, weather, and time conditions. Configure them in **/cwp admin → Build → Fishing**; see [fishing loot rules](docs/fishing-loot.md).
+
 ## Requirements
 
 | Component | Version |
@@ -411,9 +413,15 @@ Captured blocks and their block-entity data are saved as world-generated structu
 
 Use `/cwp portals pockets leave` to return to the position from which you entered. Pocket builds persist normally and are never cleared by instance expiry. Existing captured templates receive a private build dimension when first opened for editing. There are 32 registered editor dimensions per world; deleted dimensions remain retired so a new pocket never inherits another pocket's blocks.
 
+### Move a pocket to another world
+
+Build a pocket in singleplayer and move it to a server with **Export** in the pocket's editor (or `/cwp portals pockets export <id>`). It writes one `.cwppocket` file to the `cwp_pockets` folder next to the world folders (in the instance folder in singleplayer, the server folder on a server). The file holds the saved blocks, size and spawn, the attached MobForge scripts, the portals placed inside the pocket and the portal presets its scripts place, and the buildings, mob templates and loot pools those scripts use. Save the pocket first: leave its workshop so pending build changes are written.
+
+Copy the file into the server's `cwp_pockets` folder, then choose it under **Import** on the Create pocket page (or `/cwp portals pockets import <file>`). The workshop is rebuilt where the pocket was built, so script and portal coordinates stay correct. Nothing is overwritten: an existing pocket ID is refused, and a script, portal, building, mob template or loot pool that already exists is reused only when it is identical; otherwise the whole import is refused before anything is written. A portal preset with the same settings that stands elsewhere on the server is kept and only gets the pocket's placements.
+
 The Pockets page in `/cwp admin` lists saved pockets. **Create** allocates a private build dimension; **Edit** opens that pocket's editor; **Delete** removes a pocket only when no portal or live instance refers to it. The **Active instances** button at the top opens a separate running-instance list. Build freely in the pocket dimension and set preferred spawn X/Y/Z in its editor or press **Use my position**. Build and spawn edits save automatically after 10 seconds of inactivity, during long build sessions, on leaving the editor, and when the server stops. CWP scans edited chunks and the previous saved footprint, captures every non-air build block, and picks a solid floor with two clear blocks above the preferred spawn. Empty generated chunks do not count as build chunks. There is no corner selection or spawn-inside-selection check. Re-entering an editor repairs an obstructed or unsupported entry point, creating an emergency platform if needed. Minecraft's dimension height and world border still apply; CWP does not impose an additional placement boundary. The 1,048,576-block template limit remains.
 
-Each pocket editor also has a **Mob scripts** section. Attach any number of existing MobForge scripts, create a new script, edit an attached script in the same admin panel, or remove its attachment without deleting the YAML file. The panel editor supports Spawn wave, Sleep, Spawn entity, Wait until, Mob cast, Set phase, and Trigger event steps; steps can be added, moved, removed, duplicated with the script, saved, or deleted globally. Attached scripts start once when a new temporary portal instance is created and are canceled when that instance expires. Spawn wave and target-position coordinates entered in the pocket's build dimension are translated into the new instance. Pocket script mob spawns snap to a supported floor near their configured point or fall back to the pocket entrance. Named anchors `origin`, `pocket_spawn`, and `arena_center` are supplied to `spawn_entity` steps. Script edits affect new runs; currently running scripts retain the version with which they started. Active script progress is not persisted across server restarts.
+Each pocket editor also has a **Mob scripts** section. Attach any number of existing MobForge scripts, create a new script, edit an attached script in the same admin panel, or remove its attachment without deleting the YAML file. The panel editor supports Spawn wave, Wait duration, Spawn entity, Wait until, Mob cast, Set phase, and Trigger event steps; steps can be added, moved, removed, duplicated with the script, saved, or deleted globally. Attached scripts start once when a new temporary portal instance is created and are canceled when that instance expires. Spawn wave and target-position coordinates entered in the pocket's build dimension are translated into the new instance. Pocket script mob spawns snap to a supported floor near their configured point or fall back to the pocket entrance. Named anchors `origin`, `pocket_spawn`, and `arena_center` are supplied to `spawn_entity` steps. Script edits affect new runs; currently running scripts retain the version with which they started. Active script progress is not persisted across server restarts.
 
 Portal authoring has its own Portals page. Portal IDs, names, descriptions, linked templates, geometry, flat render color, lifetime, building permission, placement, removal, and both optional time settings are kept separate from pocket-template management. Shape, plane, and color are constrained dropdowns that expose every supported value, preventing invalid free-form input. **Create here** and **Move here** place the portal at the administrator's current position without a command. Create any number of portals inside a pocket's private editor. They appear at the corresponding coordinates in every running instance of that pocket. **Links to: Exit** returns players to the main world; choose a saved pocket instead to open another instance. Exit portals placed in the main world do not trigger.
 
@@ -507,6 +515,8 @@ CWP generates commands from every registered currency. In these examples, `renow
 | `/cwp portals templates list` | Game master | List captured template sizes and entry offsets |
 | `/cwp portals pockets create <id>` | Game master | Create a pocket with a private build dimension |
 | `/cwp portals pockets enter <id>\|leave` | Game master | Enter one pocket's build dimension or return |
+| `/cwp portals pockets export <id>` | Game master | Write the pocket and everything it uses to `cwp_pockets/<id>.cwppocket` |
+| `/cwp portals pockets import <file>` | Game master | Import a `.cwppocket` file from `cwp_pockets`; never overwrites |
 | `/cwp portals pockets spawn <id> <x> <y> <z>` | Game master | Set the preferred spawn in that pocket's editor |
 | `/cwp portals create <portal> <template> <shape> <plane> <width> <height> <lifetime_minutes> [color]` | Game master | Place and directly link a portal at the command source; color defaults to purple |
 | `/cwp portals exits create <portal>` | Game master | Create a return portal at your position inside a pocket editor |
@@ -575,7 +585,7 @@ Clone the repository and run commands from its root:
 .\gradlew.bat runServer
 ```
 
-Build output is written to `build/libs/crazy-world-progression-1.0.0.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
+Build output is written to `build/libs/crazy-world-progression-1.1.0.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
 
 The repository includes the Gradle wrapper, so a separate Gradle installation is not required. A Java 25 JDK must be available.
 

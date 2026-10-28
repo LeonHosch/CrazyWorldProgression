@@ -163,6 +163,11 @@ public final class PortalCommands {
                                         .then(Commands.argument("z", IntegerArgumentType.integer())
                                                 .executes(PortalCommands::setPocketSpawn))))))
                 .then(Commands.literal("leave").executes(PortalCommands::leavePocket))
+                .then(Commands.literal("export").then(templateIdArgument().executes(PortalCommands::exportPocket)))
+                .then(Commands.literal("import").then(Commands.argument("file", StringArgumentType.greedyString())
+                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                ekuzo.crazyworldprogression.portals.PocketTransfer.files(), builder))
+                        .executes(PortalCommands::importPocket)))
                 .then(Commands.literal("stresstest").then(templateIdArgument()
                         .then(Commands.argument("size_x", IntegerArgumentType.integer(16, 4096))
                                 .then(Commands.argument("size_y", IntegerArgumentType.integer(6, 384))
@@ -545,6 +550,33 @@ public final class PortalCommands {
         }
     }
 
+    // Write a pocket and everything it uses into cwp_pockets/<id>.cwppocket.
+    private static int exportPocket(CommandContext<CommandSourceStack> context) {
+        try {
+            var id = identifierArgument(context, "template_id");
+            var result = ekuzo.crazyworldprogression.portals.PocketTransfer.export(context.getSource().getServer(), id);
+            context.getSource().sendSuccess(() -> Component.literal("Exported pocket " + id + " to " + result.file()), true);
+            for (String note : result.notes())
+                context.getSource().sendSuccess(() -> Component.literal(note).withStyle(ChatFormatting.GRAY), false);
+            return 1;
+        } catch (Exception exception) {
+            return failure(context, exception);
+        }
+    }
+
+    // Read a .cwppocket file from cwp_pockets; refuses IDs that already exist with other content.
+    private static int importPocket(CommandContext<CommandSourceStack> context) {
+        try {
+            var result = ekuzo.crazyworldprogression.portals.PocketTransfer.importFile(context.getSource().getServer(),
+                    StringArgumentType.getString(context, "file").trim());
+            for (String note : result.notes())
+                context.getSource().sendSuccess(() -> Component.literal(note), true);
+            return 1;
+        } catch (Exception exception) {
+            return failure(context, exception);
+        }
+    }
+
     private static int enterPocket(CommandContext<CommandSourceStack> context) {
         try {
             PortalService.enterPocketEditor(context.getSource().getPlayerOrException(),
@@ -626,7 +658,7 @@ public final class PortalCommands {
         return Commands.argument("portal_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                         PortalService.portals(context.getSource().getServer()).stream()
-                                .map(portal -> portal.id().toString()).toList(), builder));
+                                .map(portal -> displayId(portal.id())).toList(), builder));
     }
 
     // Create a template-ID argument with live CWP-hosted suggestions.
@@ -634,12 +666,13 @@ public final class PortalCommands {
         return Commands.argument("template_id", net.minecraft.commands.arguments.IdentifierArgument.id())
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                         PortalTemplateService.templates(context.getSource().getServer()).stream()
-                                .map(template -> template.id().toString()).toList(), builder));
+                                .map(template -> displayId(template.id())).toList(), builder));
     }
 
     private static Identifier linkArgument(CommandContext<CommandSourceStack> context) {
-        Identifier value = net.minecraft.commands.arguments.IdentifierArgument.getId(context, "template_id");
-        return value.getPath().equalsIgnoreCase("exit") && value.getNamespace().equals("minecraft")
+        Identifier value = identifierArgument(context, "template_id");
+        return value.getPath().equalsIgnoreCase("exit")
+                && value.getNamespace().equals(CrazyWorldProgression.MOD_ID)
                 ? PortalDefinition.EXIT_TEMPLATE : value;
     }
 
@@ -648,7 +681,7 @@ public final class PortalCommands {
                 .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                         java.util.stream.Stream.concat(java.util.stream.Stream.of("exit"),
                                 PortalTemplateService.templates(context.getSource().getServer()).stream()
-                                        .map(template -> template.id().toString())).toList(), builder));
+                                        .map(template -> displayId(template.id()))).toList(), builder));
     }
 
     // Create a named portal-color argument with all built-in presets as suggestions.
@@ -677,10 +710,26 @@ public final class PortalCommands {
         if (raw instanceof Identifier id) {
             String typed = context.getInput();
             boolean explicit = typed.contains(id.getNamespace() + ":" + id.getPath());
-            return explicit ? id : CrazyWorldProgression.id(id.getPath());
+            return explicit ? id : resolvePlain(context, name, id.getPath());
         }
         String value = raw.toString();
-        return value.contains(":") ? Identifier.parse(value) : CrazyWorldProgression.id(value);
+        return value.contains(":") ? Identifier.parse(value) : resolvePlain(context, name, value);
+    }
+
+    private static Identifier resolvePlain(CommandContext<CommandSourceStack> context, String name, String path) {
+        var server = context.getSource().getServer();
+        List<Identifier> existing = name.equals("portal_id")
+                ? PortalService.portals(server).stream().map(PortalDefinition::id).toList()
+                : PocketEditorService.pockets(server);
+        List<Identifier> matches = existing.stream().filter(id -> id.getPath().equals(path)).distinct().toList();
+        if (matches.size() > 1)
+            throw new IllegalArgumentException("Several IDs use '" + path + "'. Enter mod:name.");
+        return matches.isEmpty() ? CrazyWorldProgression.id(path) : matches.getFirst();
+    }
+
+    private static String displayId(Identifier id) {
+        return id.getNamespace().equals(CrazyWorldProgression.MOD_ID) || id.getNamespace().equals("cwp")
+                ? id.getPath() : id.toString();
     }
 
     // Parse comma-separated ISO weekday names and convenient three-letter abbreviations.

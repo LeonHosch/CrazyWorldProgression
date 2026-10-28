@@ -37,7 +37,6 @@ public final class MobScriptYaml {
 		if (step.containsKey("mob_spawn")) return mobSpawn(map(step.get("mob_spawn"), field + ".mob_spawn"), field + ".mob_spawn");
 		if (step.containsKey("spawn")) return spawn(map(step.get("spawn"), field + ".spawn"), field);
 		if (step.containsKey("spawn_mobs")) return spawnMobs(map(step.get("spawn_mobs"), field + ".spawn_mobs"), field);
-		if (step.containsKey("sleep")) return new MobScript.SleepStep(duration(step.get("sleep"), field + ".sleep"));
 		if (step.containsKey("spawn_entity")) return spawnEntity(map(step.get("spawn_entity"), field + ".spawn_entity"), field);
 		if (step.containsKey("wait")) return waitUntil(map(step.get("wait"), field + ".wait"), field);
 		if (step.containsKey("wait_until")) return waitUntil(map(step.get("wait_until"), field + ".wait_until"), field);
@@ -49,6 +48,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("reward_item")) return rewardItem(map(step.get("reward_item"), field + ".reward_item"), field);
 		if (step.containsKey("reward_loot")) return rewardLoot(map(step.get("reward_loot"), field + ".reward_loot"), field);
 		if (step.containsKey("loot")) return loot(map(step.get("loot"), field + ".loot"), field);
+		if (step.containsKey("skill_xp")) return skillXp(map(step.get("skill_xp"), field + ".skill_xp"), field);
 		if (step.containsKey("achievement")) return achievement(map(step.get("achievement"), field + ".achievement"), field);
 		if (step.containsKey("variable")) return variable(map(step.get("variable"), field + ".variable"), field);
 		if (step.containsKey("event")) return event(map(step.get("event"), field + ".event"), field);
@@ -67,8 +67,9 @@ public final class MobScriptYaml {
 		if (step.containsKey("explosion")) return explosion(map(step.get("explosion"), field + ".explosion"), field);
 		if (step.containsKey("distances")) return distances(map(step.get("distances"), field + ".distances"), field);
 		if (step.containsKey("sound")) return sound(map(step.get("sound"), field + ".sound"), field);
+		if (step.containsKey("sound_stop")) return soundStop(step.get("sound_stop"), field + ".sound_stop");
 		if (step.containsKey("effect")) return effect(map(step.get("effect"), field + ".effect"), field);
-		if (step.containsKey("raid_complete")) return new MobScript.RaidCompleteStep();
+		if (step.containsKey("finish_instance")) return finishInstance(step.get("finish_instance"), field + ".finish_instance");
 		if (step.containsKey("encounter_start")) return new MobScript.EncounterStartStep();
 		if (step.containsKey("wipe")) return new MobScript.WipeStep();
 		if (step.containsKey("encounter_end")) return encounterEnd(step.get("encounter_end"), field + ".encounter_end");
@@ -77,7 +78,6 @@ public final class MobScriptYaml {
 			case "mob_spawn" -> mobSpawn(step, field);
 			case "spawn" -> spawn(step, field);
 			case "spawn_mobs" -> spawnMobs(step, field);
-			case "sleep" -> new MobScript.SleepStep(duration(step.get("duration"), field + ".duration"));
 			case "spawn_entity" -> spawnEntity(step, field);
 			case "wait", "wait_until" -> waitUntil(step, field);
 			case "mob_cast" -> cast(step, field);
@@ -87,6 +87,7 @@ public final class MobScriptYaml {
 			case "reward_item" -> rewardItem(step, field);
 			case "reward_loot" -> rewardLoot(step, field);
 			case "loot" -> loot(step, field);
+			case "skill_xp" -> skillXp(step, field);
 			case "achievement" -> achievement(step, field);
 			case "variable" -> variable(step, field);
 			case "event" -> event(step, field);
@@ -103,8 +104,9 @@ public final class MobScriptYaml {
 			case "explosion" -> explosion(step, field);
 			case "distances" -> distances(step, field);
 			case "sound" -> sound(step, field);
+			case "sound_stop" -> soundStop(step, field);
 			case "effect" -> effect(step, field);
-			case "raid_complete" -> new MobScript.RaidCompleteStep();
+			case "finish_instance" -> finishInstance(step, field);
 			case "encounter_start" -> new MobScript.EncounterStartStep();
 			case "wipe" -> new MobScript.WipeStep();
 			case "encounter_end" -> encounterEnd(step, field);
@@ -189,6 +191,11 @@ public final class MobScriptYaml {
 		Map<String, Object> fields = map(value, field);
 		return new MobScript.EncounterEndStep(position(map(fields.get("spawn"), field + ".spawn"), field + ".spawn"));
 	}
+	private MobScript.Step finishInstance(Object value, String field) {
+		if (!(value instanceof Map<?, ?> body) || !body.containsKey("spawn")) return new MobScript.FinishInstanceStep();
+		Map<String, Object> fields = map(value, field);
+		return new MobScript.FinishInstanceStep(position(map(fields.get("spawn"), field + ".spawn"), field + ".spawn"));
+	}
 	private MobScript.Step building(Map<String, Object> value, String field) {
 		String action = string(value.get("action"), field + ".action");
 		if (!List.of("add", "delete", "spawn", "despawn").contains(action))
@@ -214,7 +221,11 @@ public final class MobScriptYaml {
 	}
 	private MobScript.Step sound(Map<String, Object> value, String field) {
 		return new MobScript.SoundStep(namespaced(value.get("sound_id"), field + ".sound_id"),
-				position(map(value.get("location"), field + ".location"), field + ".location"));
+				value.containsKey("location") ? position(map(value.get("location"), field + ".location"), field + ".location") : null);
+	}
+	private MobScript.Step soundStop(Object value, String field) {
+		if (!(value instanceof Map<?, ?> body) || !body.containsKey("sound_id")) return new MobScript.StopSoundStep(null);
+		return new MobScript.StopSoundStep(namespaced(map(value, field).get("sound_id"), field + ".sound_id"));
 	}
 	private MobScript.Step effect(Map<String, Object> value, String field) {
 		return new MobScript.EffectStep(namespaced(value.get("effect_id"), field + ".effect_id"),
@@ -231,6 +242,11 @@ public final class MobScriptYaml {
 				string(value.get("at"), field + ".at"), string(value.get("save_as"), field + ".save_as"));
 	}
 	private MobScript.Step waitUntil(Map<String, Object> value, String field) {
+		if (value.containsKey("duration")) {
+			if (value.size() != 1 && !(value.size() == 2 && value.containsKey("type")))
+				throw new IllegalArgumentException(field + " wait duration cannot be combined with condition or timeout");
+			return new MobScript.WaitDurationStep(duration(value.get("duration"), field + ".duration"));
+		}
 		String condition = string(value.get("condition"), field + ".condition");
 		ScriptCondition.validate(condition);
 		return new MobScript.WaitUntilStep(condition, value.containsKey("timeout")
@@ -262,6 +278,10 @@ public final class MobScriptYaml {
 	private MobScript.Step loot(Map<String, Object> value, String field) {
 		return new MobScript.LootPoolStep(namespaced(value.get("lootpool_id"), field + ".lootpool_id"),
 				String.valueOf(value.getOrDefault("player", "")));
+	}
+	private MobScript.Step skillXp(Map<String, Object> value, String field) {
+		return new MobScript.SkillXpStep(String.valueOf(value.getOrDefault("skill", "dungeoning")),
+				integer(value.get("amount"), field + ".amount"), String.valueOf(value.getOrDefault("player", "")));
 	}
 	private MobScript.Step achievement(Map<String, Object> value, String field) {
 		return new MobScript.AchievementStep(namespaced(value.get("achievement_id"), field + ".achievement_id"),
@@ -331,7 +351,7 @@ public final class MobScriptYaml {
 		Map<String, Object> root = new LinkedHashMap<>(); root.put("id", script.id());
 		List<Object> steps = new ArrayList<>();
 		for (MobScript.Step step : script.steps()) {
-			if (step instanceof MobScript.SleepStep sleep) steps.add(Map.of("sleep", formatDuration(sleep.ticks())));
+			if (step instanceof MobScript.WaitDurationStep wait) steps.add(Map.of("wait", Map.of("duration", formatDuration(wait.ticks()))));
 			else if (step instanceof MobScript.SpawnStep spawn) {
 				Map<String, Object> body = new LinkedHashMap<>(); body.put("template", spawn.template());
 				body.put("location", position(spawn.location().x(), spawn.location().y(), spawn.location().z()));
@@ -359,6 +379,7 @@ public final class MobScriptYaml {
 			else if (step instanceof MobScript.RewardItemStep reward) steps.add(Map.of("reward_item", Map.of("item", reward.item().toString(), "count", reward.count())));
 			else if (step instanceof MobScript.RewardLootStep reward) steps.add(Map.of("reward_loot", Map.of("loot_table", reward.lootTable().toString(), "rolls", reward.rolls())));
 			else if (step instanceof MobScript.LootPoolStep loot) steps.add(Map.of("loot", Map.of("lootpool_id", loot.lootPoolId().toString(), "player", loot.playerId())));
+			else if (step instanceof MobScript.SkillXpStep xp) steps.add(Map.of("skill_xp", Map.of("skill", xp.skill(), "amount", xp.amount(), "player", xp.playerId())));
 			else if (step instanceof MobScript.AchievementStep achievement) steps.add(Map.of("achievement", Map.of("achievement_id", achievement.achievementId().toString(), "player", achievement.playerId())));
 			else if (step instanceof MobScript.VariableStep variable) steps.add(Map.of("variable", Map.of("name", variable.name(), "operation", variable.operation(), "value", variable.value())));
 			else if (step instanceof MobScript.EventStep event) steps.add(Map.of("event", Map.of("condition", event.condition(), "variable", event.variable(), "operation", event.operation(), "value", event.value())));
@@ -403,13 +424,20 @@ public final class MobScriptYaml {
 				if (distances.simulation() >= 0) values.put("simulation", distances.simulation());
 				steps.add(Map.of("distances", values));
 			}
-			else if (step instanceof MobScript.SoundStep sound) steps.add(Map.of("sound",
-					Map.of("sound_id", sound.soundId().toString(),
-							"location", position(sound.location().x(), sound.location().y(), sound.location().z()))));
+			else if (step instanceof MobScript.SoundStep sound) {
+				Map<String, Object> body = new LinkedHashMap<>();
+				body.put("sound_id", sound.soundId().toString());
+				if (sound.location() != null)
+					body.put("location", position(sound.location().x(), sound.location().y(), sound.location().z()));
+				steps.add(Map.of("sound", body));
+			}
+			else if (step instanceof MobScript.StopSoundStep stop) steps.add(Map.of("sound_stop", stop.soundId() == null
+					? Map.of() : Map.of("sound_id", stop.soundId().toString())));
 			else if (step instanceof MobScript.EffectStep effect) steps.add(Map.of("effect",
 					Map.of("effect_id", effect.effectId().toString(), "player_id", effect.playerId(),
 							"action", effect.action(), "amplifier", effect.amplifier())));
-			else if (step instanceof MobScript.RaidCompleteStep) steps.add(Map.of("raid_complete", true));
+			else if (step instanceof MobScript.FinishInstanceStep finish) steps.add(Map.of("finish_instance",
+					finish.spawn() == null ? true : Map.of("spawn", position(finish.spawn().x(), finish.spawn().y(), finish.spawn().z()))));
 			else if (step instanceof MobScript.EncounterStartStep) steps.add(Map.of("encounter_start", true));
 			else if (step instanceof MobScript.WipeStep) steps.add(Map.of("wipe", true));
 			else if (step instanceof MobScript.EncounterEndStep end) steps.add(Map.of("encounter_end", end.spawn() == null ? true

@@ -730,18 +730,21 @@ public final class SkillTreeScreen extends Screen {
             );
         }
         int hoverWidth = Math.max(MINIMUM_HOVER_WIDTH, Math.min(MAXIMUM_HOVER_WIDTH, widestContent));
+        List<FormattedCharSequence> statusLines = font.split(status,
+                hoverWidth - 34 - HOVER_HORIZONTAL_PADDING);
         List<FormattedCharSequence> description = displayedDescription.isBlank()
                 ? List.of()
                 : font.split(
                         Component.literal(displayedDescription),
                         hoverWidth - 2 * HOVER_HORIZONTAL_PADDING
                 );
-        int bodyStart = 34;
+        int bodyStart = Math.max(34, 17 + statusLines.size() * font.lineHeight + 4);
         int descriptionHeight = description.size() * font.lineHeight;
         int costY = bodyStart + descriptionHeight + (description.isEmpty() ? 0 : 3);
         int hoverHeight = showCosts
                 ? costY + font.lineHeight + 5
-                : description.isEmpty() ? 32 : bodyStart + descriptionHeight + 5;
+                : description.isEmpty() ? Math.max(32, 17 + statusLines.size() * font.lineHeight + 5)
+                        : bodyStart + descriptionHeight + 5;
         int nodeX = nodeScreenX(position);
         int nodeY = nodeScreenY(position);
         int hoverX = nodeX + NODE_SIZE / 2 - hoverWidth / 2;
@@ -750,7 +753,11 @@ public final class SkillTreeScreen extends Screen {
         drawHoverCardBackground(graphics, skill, hoverX, hoverY, hoverWidth, hoverHeight);
         drawNodeIcon(graphics, skill, hoverX + 4, hoverY + 4, true, 0.0D);
         graphics.text(font, Component.literal(displayedName), hoverX + 34, hoverY + 6, 0xFFFFFFFF, false);
-        graphics.text(font, status, hoverX + 34, hoverY + 17, 0xFFFFFFFF, false);
+        int statusY = hoverY + 17;
+        for (FormattedCharSequence line : statusLines) {
+            graphics.text(font, line, hoverX + 34, statusY, 0xFFFFFFFF, false);
+            statusY += font.lineHeight;
+        }
 
         int textY = hoverY + bodyStart;
         for (FormattedCharSequence line : description) {
@@ -919,6 +926,9 @@ public final class SkillTreeScreen extends Screen {
         if (!skill.prerequisitesUnlocked()) {
             return Component.translatable("screen.crazy-world-progression.skill_trees.status.previous_required")
                     .withStyle(ChatFormatting.GRAY);
+        }
+        if (skill.missingLevels() != null && !skill.missingLevels().isBlank()) {
+            return Component.literal(skill.missingLevels()).withStyle(ChatFormatting.RED);
         }
         if (!skill.affordable()) {
             return Component.translatable("screen.crazy-world-progression.skill_trees.status.not_enough_currency")

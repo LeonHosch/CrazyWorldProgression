@@ -44,6 +44,12 @@ public final class MobTemplateYaml {
 		if (rawTags instanceof List<?> list) out.tags = list.stream().map(MobTemplateYaml::string).toList();
 		else if (rawTags != null) throw new IllegalArgumentException("tags must be a list");
 
+		Object rawAbilities = map.get("abilities");
+		List<String> attached = List.of();
+		if (rawAbilities instanceof List<?> list) attached = list.stream().map(MobTemplateYaml::string).toList();
+		else if (rawAbilities != null) throw new IllegalArgumentException("abilities must be a list");
+		out.abilities = new MobTemplate.Abilities(bool(map, "default_abilities", true), attached);
+
 		Map<String, Object> ai = map(map.get("ai"), "ai", true);
 		String mode = string(ai.getOrDefault("mode", "vanilla"));
 		MobTemplate.Position target = null;
@@ -86,6 +92,8 @@ public final class MobTemplateYaml {
 		if (template.loot().lootPool() != null) loot.put("loot_pool", template.loot().lootPool());
 		root.put("loot", loot);
 		if (!template.tags().isEmpty()) root.put("tags", new ArrayList<>(template.tags()));
+		if (!template.abilities().defaults()) root.put("default_abilities", false);
+		if (!template.abilities().attached().isEmpty()) root.put("abilities", new ArrayList<>(template.abilities().attached()));
 		MobTemplate.Ai ai = template.ai();
 		Map<String, Object> aiMap = new LinkedHashMap<>();
 		aiMap.put("mode", ai.mode()); aiMap.put("combat", ai.combat());

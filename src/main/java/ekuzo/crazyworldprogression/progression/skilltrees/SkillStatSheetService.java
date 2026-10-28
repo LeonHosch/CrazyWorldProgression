@@ -27,13 +27,16 @@ public final class SkillStatSheetService {
         Map<String, Double> personalTotals = SkillStatRegistry.getTotals(
                 server, player.getUUID(), SkillTreeDefinition.SkillTreeType.PERSONAL);
         Set<String> usedFunctions = usedFunctions(sheetType);
+        boolean personalSheet = sheetType == SkillTreeDefinition.SkillTreeType.PERSONAL;
+        // The personal column also carries worn sets and effects (such as Hubris), so the total is the real value.
+        Map<String, Double> gear = personalSheet ? SkillStatRegistry.gearAndEffectTotals(player) : Map.of();
         List<StatSnapshot> rows = new ArrayList<>();
         for (SkillStatRegistry.StatDefinition definition : SkillStatRegistry.definitions()) {
-            if (!usedFunctions.contains(definition.key())) continue;
+            double extra = gear.getOrDefault(definition.key(), 0.0);
+            boolean alwaysShown = personalSheet && definition.key().equals(SkillStatRegistry.DAMAGE_TAKEN.toLowerCase(java.util.Locale.ROOT));
+            if (!usedFunctions.contains(definition.key()) && extra == 0.0 && !alwaysShown) continue;
             double global = globalTotals.getOrDefault(definition.key(), 0.0);
-            double personal = sheetType == SkillTreeDefinition.SkillTreeType.PERSONAL
-                    ? personalTotals.getOrDefault(definition.key(), 0.0)
-                    : 0.0;
+            double personal = personalSheet ? personalTotals.getOrDefault(definition.key(), 0.0) + extra : 0.0;
             rows.add(definition.attribute() == null
                     ? nonAttributeSnapshot(definition, global, personal)
                     : attributeSnapshot(player, definition, global, personal));

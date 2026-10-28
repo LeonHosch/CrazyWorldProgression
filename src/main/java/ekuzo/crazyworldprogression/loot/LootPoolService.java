@@ -86,7 +86,12 @@ public final class LootPoolService {
         if (parent != null) throw new IllegalArgumentException("Loot pool is used by " + parent.id());
         Set<String> removed = new java.util.LinkedHashSet<>();
         collectOwned(id, pools, removed);
-        for (String value : removed) requireUnusedByScripts(Identifier.parse(value));
+        for (String value : removed) {
+            Identifier removedId = Identifier.parse(value);
+            requireUnusedByScripts(removedId);
+            if (FishingLootService.all(server).stream().anyMatch(rule -> rule.pool().equals(removedId)))
+                throw new IllegalArgumentException("Loot pool " + removedId + " is used by a fishing rule");
+        }
         for (String value : removed) LootPoolData.get(server).remove(Identifier.parse(value));
     }
 
@@ -131,6 +136,12 @@ public final class LootPoolService {
         if (!pool.mode().equals("all") && !pool.mode().equals("one")) throw new IllegalArgumentException("Unknown loot pool mode");
         if (pool.entries().size() > 128) throw new IllegalArgumentException("Pool has more than 128 rewards");
         for (LootPoolData.Entry entry : pool.entries()) {
+            if (entry.xpPerItem() < 0 || entry.xpPerItem() > 1_000_000
+                    || (entry.xpPerItem() != 0 && !entry.kind().equals("item")))
+                throw new IllegalArgumentException("Item XP must be between 0 and 1000000");
+            if (entry.level() < 0 || entry.level() > 1_000_000
+                    || (entry.level() != 0 && !entry.kind().equals("item")))
+                throw new IllegalArgumentException("Item level must be between 0 and 1000000");
             if (entry.showInChat() && !entry.kind().equals("item"))
                 throw new IllegalArgumentException("Chat announcements are available for item rewards only");
             if (entry.chance() < 0 || entry.chance() > 10000 || entry.weight() < 1 || entry.weight() > 10000)
@@ -148,6 +159,14 @@ public final class LootPoolService {
                         throw new IllegalArgumentException("Currency must be player scoped: " + entry.target());
                 }
                 case "pool" -> validate(entry.target(), pools, path, depth + 1);
+                case MobLoot.VANILLA -> {
+                    if (!entry.target().getPath().startsWith("entities/"))
+                        throw new IllegalArgumentException("Vanilla drops need a mob loot table, such as minecraft:entities/zombie");
+                }
+                case "mount", "pet" -> {
+                    if (!ekuzo.crazyworldprogression.collectibles.Collectibles.exists(entry.kind(), entry.target()))
+                        throw new IllegalArgumentException("Unknown " + entry.kind() + " " + entry.target());
+                }
                 default -> throw new IllegalArgumentException("Unknown reward type " + entry.kind());
             }
         }
@@ -155,13 +174,36 @@ public final class LootPoolService {
     }
 
     public static void roll(MinecraftServer server, ServerPlayer player, Identifier id) {
+        roll(server, player, id, java.util.function.UnaryOperator.identity());
+    }
+
+    /**
+     * Rolls a pool for the player; {@code adjust} may change each rewarded item stack before it is given (amount,
+     * quality), or empty it.
+     */
+    public static void roll(MinecraftServer server, ServerPlayer player, Identifier id,
+                            java.util.function.UnaryOperator<ItemStack> adjust) {
         Map<String, LootPoolData.Pool> pools = all(server);
         validate(id, pools, new HashSet<>(), 0);
         List<LootPoolData.Entry> rewards = pick(id, pools, player.getRandom()::nextInt);
+        FishingJournal.recordLoot(player, id, rewards);
         int postmasterItems = 0;
         int droppedItems = 0;
         for (LootPoolData.Entry reward : rewards) {
-            Delivery delivery = grant(server, player, reward);
+            if (reward.kind().equals(MobLoot.VANILLA)) {
+                // The mob's vanilla loot table, rolled with the kill; every stack is given like an item reward.
+                List<ItemStack> drops = MobLoot.rollVanilla(player, reward.target());
+                FishingJournal.recordLootItems(player, id, drops);
+                for (ItemStack drop : drops) {
+                    ItemStack adjusted = adjust.apply(drop);
+                    if (adjusted.isEmpty()) continue;
+                    Delivery delivery = deliver(player, adjusted);
+                    postmasterItems += delivery.postmasterItems();
+                    droppedItems += delivery.droppedItems();
+                }
+                continue;
+            }
+            Delivery delivery = grant(server, player, reward, adjust);
             postmasterItems += delivery.postmasterItems();
             droppedItems += delivery.droppedItems();
         }
@@ -195,50 +237,78 @@ public final class LootPoolService {
 
     /** Rolls a validated pool and returns the item and currency rewards it produced. */
     public static List<LootPoolData.Entry> pick(Identifier id, Map<String, LootPoolData.Pool> pools, Roller random) {
+        return pick(id, pools, random, entry -> true);
+    }
+
+    /**
+     * Like {@link #pick(Identifier, Map, Roller)}, but entries that fail {@code allowed} are left out, as if they were
+     * not in the pool (a pick-one pool shares its odds among the rest). Used for level requirements.
+     */
+    public static List<LootPoolData.Entry> pick(Identifier id, Map<String, LootPoolData.Pool> pools, Roller random,
+                                                java.util.function.Predicate<LootPoolData.Entry> allowed) {
         List<LootPoolData.Entry> rewards = new ArrayList<>();
-        choose(id, pools, random, rewards, 0);
+        choose(id, pools, random, rewards, 0, allowed);
         return rewards;
     }
 
     private static void choose(Identifier id, Map<String, LootPoolData.Pool> pools, Roller random,
-                               List<LootPoolData.Entry> rewards, int depth) {
+                               List<LootPoolData.Entry> rewards, int depth,
+                               java.util.function.Predicate<LootPoolData.Entry> allowed) {
         LootPoolData.Pool pool = pools.get(id.toString());
         if (pool == null || pool.entries().isEmpty() || depth > MAX_DEPTH) return;
+        List<LootPoolData.Entry> entries = pool.entries().stream()
+                .filter(entry -> entry.kind().equals("pool") || allowed.test(entry)).toList();
         if (pool.mode().equals("one")) {
-            int total = pool.entries().stream().mapToInt(LootPoolData.Entry::chance).sum();
+            int total = entries.stream().mapToInt(LootPoolData.Entry::chance).sum();
             if (total <= 0) return;
             int pick = random.nextInt(total);
-            for (LootPoolData.Entry entry : pool.entries()) {
+            for (LootPoolData.Entry entry : entries) {
                 pick -= entry.chance();
-                if (pick < 0) { select(entry, pools, random, rewards, depth); break; }
+                if (pick < 0) { select(entry, pools, random, rewards, depth, allowed); break; }
             }
         } else {
-            for (LootPoolData.Entry entry : pool.entries()) {
-                if (random.nextInt(10000) < entry.chance()) select(entry, pools, random, rewards, depth);
+            for (LootPoolData.Entry entry : entries) {
+                if (random.nextInt(10000) < entry.chance()) select(entry, pools, random, rewards, depth, allowed);
             }
         }
     }
 
     private static void select(LootPoolData.Entry entry, Map<String, LootPoolData.Pool> pools,
-                               Roller random, List<LootPoolData.Entry> rewards, int depth) {
-        if (entry.kind().equals("pool")) choose(entry.target(), pools, random, rewards, depth + 1);
+                               Roller random, List<LootPoolData.Entry> rewards, int depth,
+                               java.util.function.Predicate<LootPoolData.Entry> allowed) {
+        if (entry.kind().equals("pool")) choose(entry.target(), pools, random, rewards, depth + 1, allowed);
         else rewards.add(entry);
     }
 
-    private static Delivery grant(MinecraftServer server, ServerPlayer player, LootPoolData.Entry reward) {
+    private static Delivery grant(MinecraftServer server, ServerPlayer player, LootPoolData.Entry reward,
+                                  java.util.function.UnaryOperator<ItemStack> adjust) {
         int amount = reward.min() + player.getRandom().nextInt(reward.max() - reward.min() + 1);
         if (reward.kind().equals("currency")) {
             CurrencyService.credit(server, player.getUUID(), reward.target(), amount);
             return new Delivery(0, 0);
         }
+        // Mounts and pets are unlocked, never given as items.
+        if (reward.kind().equals("mount") || reward.kind().equals("pet")) {
+            ekuzo.crazyworldprogression.collectibles.Collectibles.unlock(player, reward.kind(), reward.target());
+            return new Delivery(0, 0);
+        }
         Item item = BuiltInRegistries.ITEM.getValue(reward.target());
-        int stackSize = Math.max(1, item.getDefaultMaxStackSize());
+        ItemStack template = adjust.apply(new ItemStack(item, amount));
+        if (template.isEmpty()) return new Delivery(0, 0);
+        Delivery delivery = deliver(player, template);
+        if (reward.showInChat()) server.getPlayerList().broadcastSystemMessage(announcement(player, template), false);
+        return delivery;
+    }
+
+    /** Gives the items to the player: inventory, then the postmaster, then the ground at their feet. */
+    private static Delivery deliver(ServerPlayer player, ItemStack template) {
+        int amount = template.getCount();
+        int stackSize = Math.max(1, template.getItem().getDefaultMaxStackSize());
         int stored = 0;
         int dropped = 0;
-        int total = amount;
         while (amount > 0) {
             int count = Math.min(amount, stackSize);
-            ItemStack stack = new ItemStack(item, count);
+            ItemStack stack = template.copyWithCount(count);
             // Only offer what really fits: in creative mode, Inventory.add deletes items that do not fit.
             int fits = Math.min(count, roomFor(player.getInventory().getNonEquipmentItems(), stack));
             if (fits > 0) {
@@ -257,8 +327,6 @@ public final class LootPoolService {
             amount -= count;
         }
         player.containerMenu.broadcastChanges();
-        if (reward.showInChat()) server.getPlayerList().broadcastSystemMessage(announcement(player,
-                new ItemStack(item, total)), false);
         return new Delivery(stored, dropped);
     }
 

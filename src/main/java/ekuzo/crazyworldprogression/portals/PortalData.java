@@ -157,7 +157,7 @@ final class PortalData extends SavedData {
     record StoredInstance(Identifier portalId, Identifier templateId, Identifier slotDimension,
                           long createdEpochMillis, long expiresEpochMillis,
                           int originX, int originY, int originZ, int sizeX, int sizeY, int sizeZ,
-                          List<String> admittedPlayers, List<String> visitors) {
+                          List<String> admittedPlayers, List<String> visitors, boolean finished) {
         static final Codec<StoredInstance> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Identifier.CODEC.fieldOf("portal").forGetter(StoredInstance::portalId),
                 Identifier.CODEC.fieldOf("template").forGetter(StoredInstance::templateId),
@@ -172,7 +172,8 @@ final class PortalData extends SavedData {
                 Codec.INT.fieldOf("size_z").forGetter(StoredInstance::sizeZ),
                 Codec.STRING.listOf().optionalFieldOf("admitted_players", List.of())
                         .forGetter(StoredInstance::admittedPlayers),
-                Codec.STRING.listOf().optionalFieldOf("visitors", List.of()).forGetter(StoredInstance::visitors)
+                Codec.STRING.listOf().optionalFieldOf("visitors", List.of()).forGetter(StoredInstance::visitors),
+                Codec.BOOL.optionalFieldOf("finished", false).forGetter(StoredInstance::finished)
         ).apply(instance, StoredInstance::new));
 
         // Reject incomplete leases that cannot be safely cleaned later.
@@ -191,7 +192,15 @@ final class PortalData extends SavedData {
                        int originX, int originY, int originZ, int sizeX, int sizeY, int sizeZ,
                        List<String> admittedPlayers) {
             this(portalId, templateId, slotDimension, createdEpochMillis, expiresEpochMillis,
-                    originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, List.of());
+                    originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, List.of(), false);
+        }
+
+        StoredInstance(Identifier portalId, Identifier templateId, Identifier slotDimension,
+                       long createdEpochMillis, long expiresEpochMillis,
+                       int originX, int originY, int originZ, int sizeX, int sizeY, int sizeZ,
+                       List<String> admittedPlayers, List<String> visitors) {
+            this(portalId, templateId, slotDimension, createdEpochMillis, expiresEpochMillis,
+                    originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, visitors, false);
         }
 
         StoredInstance withAdmitted(java.util.UUID playerId) {
@@ -199,7 +208,7 @@ final class PortalData extends SavedData {
             var updated = new java.util.ArrayList<>(admittedPlayers);
             updated.add(playerId.toString());
             return new StoredInstance(portalId, templateId, slotDimension, createdEpochMillis,
-                    expiresEpochMillis, originX, originY, originZ, sizeX, sizeY, sizeZ, updated, visitors);
+                    expiresEpochMillis, originX, originY, originZ, sizeX, sizeY, sizeZ, updated, visitors, finished);
         }
 
         StoredInstance withVisitor(java.util.UUID playerId) {
@@ -207,14 +216,19 @@ final class PortalData extends SavedData {
             var updated = new java.util.ArrayList<>(visitors);
             updated.add(playerId.toString());
             return new StoredInstance(portalId, templateId, slotDimension, createdEpochMillis,
-                    expiresEpochMillis, originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, updated);
+                    expiresEpochMillis, originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, updated, finished);
+        }
+
+        StoredInstance withFinished() {
+            return new StoredInstance(portalId, templateId, slotDimension, createdEpochMillis,
+                    expiresEpochMillis, originX, originY, originZ, sizeX, sizeY, sizeZ, admittedPlayers, visitors, true);
         }
 
         // Return a copy whose shortened deadline survives a restart during forced batched cleanup.
         StoredInstance expiringAt(long epochMillis) {
             return new StoredInstance(portalId, templateId, slotDimension, createdEpochMillis,
                     Math.max(createdEpochMillis + 1L, epochMillis), originX, originY, originZ,
-                    sizeX, sizeY, sizeZ, admittedPlayers, visitors);
+                    sizeX, sizeY, sizeZ, admittedPlayers, visitors, finished);
         }
     }
 }

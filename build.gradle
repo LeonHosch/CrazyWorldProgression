@@ -6,6 +6,9 @@ plugins {
 repositories {
 	// SnakeYAML is a regular Java library published through Maven Central.
 	mavenCentral()
+	maven { url = 'https://maven.maxhenkel.de/repository/public' }
+	// JourneyMap API, only to compile the optional JourneyMap integration (client).
+	maven { url = 'https://maven.blamejared.com' }
 
 	// Add repositories to retrieve artifacts from in here.
 	// You should only use this when depending on other mods because
@@ -46,6 +49,11 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	// The voice API is only needed to compile the optional Simple Voice Chat entrypoint.
+	compileOnly "de.maxhenkel.voicechat:voicechat-api:${project.voicechat_api_version}"
+	// The JourneyMap API is only needed to compile the optional JourneyMap plugin (client entrypoint "journeymap").
+	compileOnly "info.journeymap:journeymap-api-fabric:${project.journeymap_api_version}"
+	clientCompileOnly "info.journeymap:journeymap-api-fabric:${project.journeymap_api_version}"
 
 	// Parse editable skill-tree configuration files and bundle the parser with the mod.
 	implementation "org.yaml:snakeyaml:2.6"

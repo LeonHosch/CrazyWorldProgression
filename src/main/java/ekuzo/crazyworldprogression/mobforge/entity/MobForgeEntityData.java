@@ -28,6 +28,8 @@ public final class MobForgeEntityData {
 	private static final String POCKET = "mobforge.pocket.";
 	private static final String EXECUTION = "mobforge.execution.";
 	private static final String COOLDOWN = "mobforge.cooldown.";
+	private static final String NO_DEFAULT_ABILITIES = "mobforge.no_default_abilities";
+	private static final String ABILITY = "mobforge.ability.";
 
 	private MobForgeEntityData() {}
 
@@ -39,9 +41,13 @@ public final class MobForgeEntityData {
 		if (template.loot().xp() >= 0) entity.addTag(XP + template.loot().xp());
 		if (template.loot().lootPool() != null) entity.addTag(LOOT_POOL + template.loot().lootPool());
 		entity.addTag(BURNS_IN_DAYLIGHT + template.properties().burnsInDaylight());
+		setAbilities(entity, template.abilities().defaults(), template.abilities().attached().stream()
+				.map(Identifier::tryParse).filter(java.util.Objects::nonNull).toList());
+		ekuzo.crazyworldprogression.mobforge.ai.MobAiState.invalidate(entity);
 	}
 
 	public static void setAi(Entity entity, MobTemplate.Ai ai) {
+		ekuzo.crazyworldprogression.mobforge.ai.MobAiState.invalidate(entity);
 		removePrefix(entity, AI); removePrefix(entity, TARGET); removePrefix(entity, PLAYER); removePrefix(entity, RANGE);
 		removePrefix(entity, ARRIVAL); removePrefix(entity, COMBAT);
 		entity.addTag(AI + ai.mode()); entity.addTag(COMBAT + ai.combat());
@@ -77,7 +83,10 @@ public final class MobForgeEntityData {
 	}
 	public static Optional<String> script(Entity entity) { return value(entity, SCRIPT); }
 	public static Optional<String> scriptRun(Entity entity) { return value(entity, SCRIPT_RUN); }
-	public static void setDefinition(Entity entity, Identifier id) { entity.addTag(MARKER); replace(entity, DEFINITION, id.toString()); }
+	public static void setDefinition(Entity entity, Identifier id) {
+		ekuzo.crazyworldprogression.mobforge.ai.MobAiState.invalidate(entity);
+		entity.addTag(MARKER); replace(entity, DEFINITION, id.toString());
+	}
 	public static Optional<Identifier> definition(Entity entity) { return value(entity, DEFINITION).map(Identifier::tryParse); }
 	public static Optional<String> phase(Entity entity) { return value(entity, PHASE); }
 	public static void setPhase(Entity entity, String phase) {
@@ -93,6 +102,19 @@ public final class MobForgeEntityData {
 	private static Optional<java.util.UUID> uuid(Entity entity, String prefix) {
 		try { return value(entity, prefix).map(java.util.UUID::fromString); }
 		catch (IllegalArgumentException exception) { return Optional.empty(); }
+	}
+	/** Whether the mob keeps its entity type's default abilities (templates can switch them off). */
+	public static boolean defaultAbilities(Entity entity) { return !entity.entityTags().contains(NO_DEFAULT_ABILITIES); }
+	/** Abilities attached to this mob on top of its defaults. */
+	public static java.util.List<Identifier> attachedAbilities(Entity entity) {
+		return entity.entityTags().stream().filter(tag -> tag.startsWith(ABILITY))
+				.map(tag -> Identifier.tryParse(tag.substring(ABILITY.length()))).filter(java.util.Objects::nonNull).toList();
+	}
+	public static void setAbilities(Entity entity, boolean defaults, java.util.Collection<Identifier> attached) {
+		entity.removeTag(NO_DEFAULT_ABILITIES);
+		if (!defaults) entity.addTag(NO_DEFAULT_ABILITIES);
+		removePrefix(entity, ABILITY);
+		for (Identifier id : attached) entity.addTag(ABILITY + id);
 	}
 	public static long cooldown(Entity entity, Identifier ability) {
 		return value(entity, COOLDOWN + ability + ".").map(value -> {

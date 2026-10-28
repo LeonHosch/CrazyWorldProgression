@@ -98,8 +98,11 @@ final class AdminMobEditor {
                         yesNo("gravity", "No gravity", v),
                         AdminPanelRegistry.AdminField.select("despawn", "Despawn", v.get("despawn"), DESPAWN)),
                 List.of(), null));
-        rows.add(row("Loot", "Death rewards", "XP -1 keeps the entity's normal amount.",
-                List.of(yesNo("vanilla_loot", "Vanilla loot", v), text("xp", "XP", "-1", v, 16)), List.of(), null));
+        rows.add(row("Loot", "Death rewards", "Vanilla drops: the killer also gets the base mob's drops (its pool in "
+                        + "Mob drops, by default its vanilla loot table rolled with the kill), straight into their inventory. "
+                        + "Fighting XP for the killer: -1 uses the default for the mob type "
+                        + "(zombie 1, creeper 3, enderman 5, ...). MobForge mobs never drop vanilla XP orbs.",
+                List.of(yesNo("vanilla_loot", "Vanilla drops", v), text("xp", "Fighting XP", "-1", v, 16)), List.of(), null));
         rows.add(row("Loot", "Loot pool", "The player who lands the killing blow gets one roll in this pool. Empty for none.",
                 List.of(new AdminPanelRegistry.AdminField("loot_pool", "Loot pool (type to search)", "none",
                         v.get("loot_pool"), 128, lootPools(player.level().getServer()))), List.of(), null));
@@ -116,6 +119,10 @@ final class AdminMobEditor {
                     List.of(text("ai_range", "Range", "64", v, 32)), List.of(), null));
             default -> { }
         }
+        rows.add(row("Abilities", "Abilities", "Default abilities: the abilities its mob type comes with (e.g. the Leshen's). "
+                        + "Extra abilities are used on top, comma separated. Available: " + abilityList() + ".",
+                List.of(yesNo("default_abilities", "Default abilities", v),
+                        text("abilities", "Extra abilities", "echelon-core:crow_swarm", v, 512)), List.of(), null));
         rows.add(row("AI", "Extra settings", "Additional AI options as a JSON object (advanced).",
                 List.of(text("ai_settings", "Settings", "{}", v, 1024)), List.of(), null));
 
@@ -205,6 +212,11 @@ final class AdminMobEditor {
             if (value >= 0) parts.add(attribute.replace('_', ' ') + " " + number(value));
         }
         return parts.isEmpty() ? "" : "Defaults: " + String.join(", ", parts) + ".";
+    }
+
+    private static String abilityList() {
+        var ids = MobForge.abilities().all().keySet().stream().map(Identifier::toString).sorted().toList();
+        return ids.isEmpty() ? "none registered" : String.join(", ", ids);
     }
 
     private static List<String> lootPools(MinecraftServer server) {
@@ -300,6 +312,8 @@ final class AdminMobEditor {
             fields.put("id", template.id()); fields.put("entity", template.entity());
             fields.put("name", template.name() == null ? "" : template.name());
             fields.put("tags", String.join(", ", template.tags()));
+            fields.put("default_abilities", yesNo(template.abilities().defaults()));
+            fields.put("abilities", String.join(", ", template.abilities().attached()));
             EntityType<?> type = entityType(template.entity());
             for (String attribute : MULTIPLIED) {
                 Double factor = template.multipliers().get(attribute);
@@ -396,10 +410,12 @@ final class AdminMobEditor {
             List<String> tags = java.util.Arrays.stream(fields.get("tags").split(","))
                     .map(String::trim).filter(tag -> !tag.isBlank()).toList();
             Identifier entity = Identifier.tryParse(fields.get("entity").trim().toLowerCase(java.util.Locale.ROOT));
+            List<String> abilities = java.util.Arrays.stream(fields.get("abilities").split(","))
+                    .map(String::trim).filter(ability -> !ability.isBlank()).toList();
             MobTemplate template = new MobTemplate(fields.get("id").trim(),
                     entity == null ? fields.get("entity").trim() : entity.toString(),
                     fields.get("name").isBlank() ? null : fields.get("name"), attributes, equipment,
-                    p, loot, tags, ai, multipliers);
+                    p, loot, tags, ai, multipliers, new MobTemplate.Abilities(yes(fields, "default_abilities"), abilities));
             return YAML.decode(YAML.encode(template));
         }
     }

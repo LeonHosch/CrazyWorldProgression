@@ -21,7 +21,6 @@ import ekuzo.crazyworldprogression.progression.skilltrees.SkillTreeManager;
 import ekuzo.crazyworldprogression.selection.AreaSelectionService;
 import ekuzo.crazyworldprogression.mobforge.MobForge;
 import ekuzo.crazyworldprogression.mobforge.entity.MobForgePurge;
-import ekuzo.crazyworldprogression.mobforge.networking.MobForgeNetworking;
 import ekuzo.crazyworldprogression.mobforge.script.MobScript;
 import ekuzo.crazyworldprogression.mobforge.template.MobTemplate;
 import ekuzo.crazyworldprogression.api.mobforge.EntitySpawnService;
@@ -93,12 +92,21 @@ public final class CwpAdminModule {
             new AdminPanelRegistry.AdminTab(POCKET_INSTANCES, "Instances", AdminPanelRegistry.MODERATE),
             new AdminPanelRegistry.AdminTab(EVENTS, "Events", AdminPanelRegistry.MODERATE),
             new AdminPanelRegistry.AdminTab(CURRENCIES, "Currencies", AdminPanelRegistry.MODERATE),
+            AdminPanelRegistry.AdminTab.dynamic(AdminReforgeEditor.ROOT,
+                    () -> ekuzo.crazyworldprogression.reforge.ReforgeBranding.get().name(), AdminPanelRegistry.MODERATE),
+            AdminPanelRegistry.AdminTab.dynamic(AdminSmithingEditor.ROOT,
+                    () -> ekuzo.crazyworldprogression.smithing.SmithingBranding.get().name(), AdminPanelRegistry.MODERATE),
+            new AdminPanelRegistry.AdminTab(AdminCrossbreedingEditor.ROOT, "Crossbreeding", AdminPanelRegistry.MODERATE),
+            new AdminPanelRegistry.AdminTab(AdminCookingEditor.ROOT, "Cooking", AdminPanelRegistry.MODERATE),
+            new AdminPanelRegistry.AdminTab(AdminFletchingEditor.ROOT, "Fletching", AdminPanelRegistry.MODERATE),
             new AdminPanelRegistry.AdminTab(POCKETS, "Pockets", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(PORTALS, "Portals", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(BUILDINGS, "Buildings", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(MOB_MOBS, "Mobs", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(MOB_SCRIPTS, "Scripts", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.ROOT, "Loot pools", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(AdminLootPoolEditor.MOBS, "Mob drops", AdminPanelRegistry.BUILD),
+            new AdminPanelRegistry.AdminTab(AdminFishingEditor.ROOT, "Fishing", AdminPanelRegistry.BUILD),
             new AdminPanelRegistry.AdminTab(AdminPerformance.PAGE, "Performance", AdminPanelRegistry.LOGS),
             new AdminPanelRegistry.AdminTab(LOGS, "Server log", AdminPanelRegistry.LOGS),
             new AdminPanelRegistry.AdminTab(SKILL_TREES, "Skill trees", AdminPanelRegistry.LOGS),
@@ -134,6 +142,12 @@ public final class CwpAdminModule {
     private static AdminPanelRegistry.AdminPage page(ServerPlayer player, String pageId) {
         if (AdminCategories.owns(pageId)) return AdminCategories.page(player, pageId, TABS);
         if (AdminLootPoolEditor.owns(pageId)) return AdminLootPoolEditor.page(player, pageId, TABS);
+        if (AdminFishingEditor.owns(pageId)) return AdminFishingEditor.page(player, pageId, TABS);
+        if (AdminReforgeEditor.owns(pageId)) return AdminReforgeEditor.page(player, pageId, TABS);
+        if (AdminSmithingEditor.owns(pageId)) return AdminSmithingEditor.page(player, pageId, TABS);
+        if (AdminCrossbreedingEditor.owns(pageId)) return AdminCrossbreedingEditor.page(player, pageId, TABS);
+        if (AdminCookingEditor.owns(pageId)) return AdminCookingEditor.page(player, pageId, TABS);
+        if (AdminFletchingEditor.owns(pageId)) return AdminFletchingEditor.page(player, pageId, TABS);
         ScriptRoute scriptRoute = scriptRoute(pageId);
         if (scriptRoute != null) return AdminScriptEditor.page(player, pageId, scriptRoute.backPage(),
                 scriptRoute.pocketId(), scriptRoute.scriptId(), TABS);
@@ -275,7 +289,7 @@ public final class CwpAdminModule {
         for (Identifier id : PocketEditorService.pockets(server)) {
             PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
             long instances = running.getOrDefault(id, 0L);
-            AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(id.toString(),
+            AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(AdminIds.display(id),
                     (template == null ? "Build space ready · no build saved yet"
                             : template.sizeX() + "×" + template.sizeY() + "×" + template.sizeZ())
                             + (instances > 0 ? " · " + instances + " running" : ""), instances > 0 ? GOOD : NORMAL, List.of(),
@@ -311,13 +325,23 @@ public final class CwpAdminModule {
     }
 
     private static AdminPanelRegistry.AdminPage newPocketPage() {
+        List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Identity", "One build dimension per pocket",
+                List.of(textField("template_id", "Pocket name", "", "my_pocket", 128, List.of())),
+                List.of(AdminPanelRegistry.AdminAction.wide("pocket.create", "Create pocket", false),
+                        AdminPanelRegistry.AdminAction.navigate("Back to pockets", POCKETS))));
+        List<String> files = ekuzo.crazyworldprogression.portals.PocketTransfer.files();
+        String folder = ekuzo.crazyworldprogression.portals.PocketTransfer.folder().getFileName().toString();
+        if (files.isEmpty()) entries.add(AdminPanelRegistry.AdminEntry.editor("Import", "Import a pocket",
+                "Put a .cwppocket file from another world into the " + folder + " folder next to the world folders.",
+                List.of(), List.of()));
+        else entries.add(AdminPanelRegistry.AdminEntry.editor("Import", "Import a pocket",
+                "Files in the " + folder + " folder. Existing pockets and changed content are never overwritten.",
+                List.of(AdminPanelRegistry.AdminField.select("pocket_import_file", "File", files.getFirst(), files)),
+                List.of(new AdminPanelRegistry.AdminAction("pocket.import", "Import", false))));
         return new AdminPanelRegistry.AdminPage(POCKET_NEW, "Create pocket",
-                "Choose a permanent pocket ID, then enter its private build dimension.", TABS,
-                List.of(AdminPanelRegistry.AdminEntry.editor("Pocket", "Identity", "One build dimension per pocket",
-                        List.of(textField("template_id", "Pocket ID", "", "cwp:my_pocket", 128, List.of())),
-                        List.of(AdminPanelRegistry.AdminAction.wide("pocket.create", "Create pocket", false),
-                                AdminPanelRegistry.AdminAction.navigate("Back to pockets", POCKETS)))),
-                AdminPanelRegistry.PageLayout.EDITOR);
+                "Choose a pocket name, then enter its private build dimension.", TABS,
+                entries, AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     // Edit only the private build dimension and structure owned by the selected pocket.
@@ -330,7 +354,7 @@ public final class CwpAdminModule {
         entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Identity",
                 (existing == null ? "No build saved yet. " : "")
                         + PocketEditorService.autoSaveStatus(server, requestedId),
-                List.of(AdminPanelRegistry.AdminField.readOnly("template_id", "Pocket ID", requestedId.toString())),
+                List.of(AdminPanelRegistry.AdminField.readOnly("template_id", "Pocket name", AdminIds.display(requestedId))),
                 List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Build dimension",
                 "Enter this pocket to build and edit its blocks.", List.of(),
@@ -382,6 +406,11 @@ public final class CwpAdminModule {
                                     new AdminPanelRegistry.AdminAction("pocket.script.remove|" + scriptId,
                                             "Remove", true))));
         }
+        entries.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Export",
+                "Writes this pocket, its scripts, portals, buildings, mob templates and loot pools into one file in "
+                        + ekuzo.crazyworldprogression.portals.PocketTransfer.folder().getFileName()
+                        + ", to import it in another world.",
+                List.of(), List.of(new AdminPanelRegistry.AdminAction("pocket.export|" + requestedId, "Export", false))));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Actions", "Save",
                 "Saves the settings on this page. Blocks you build in the workshop are saved when you leave it.",
                 List.of(), List.of(AdminPanelRegistry.AdminAction.wide("pocket.save|" + requestedId, "Save", false),
@@ -404,7 +433,7 @@ public final class CwpAdminModule {
             int locationCount = PortalService.locations(server, portal.id()).size();
             AdminPanelRegistry.AdminEntry entry = new AdminPanelRegistry.AdminEntry(portal.effectiveDisplayName(),
                     "Linked to: " + (portal.isExit() ? "Exit"
-                            : portal.isCoordinates() ? "Coordinates" : portal.templateId())
+                            : portal.isCoordinates() ? "Coordinates" : AdminIds.display(portal.templateId()))
                             + " · " + locationCount + " location(s)",
                     PortalService.isOpen(portal) ? GOOD : NORMAL, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", PORTAL_EDIT + portalId),
@@ -430,7 +459,7 @@ public final class CwpAdminModule {
                 List.of(AdminPanelRegistry.AdminAction.navigate("Create", BUILDING_NEW)), null)));
         Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (BuildingService.BuildingInfo building : BuildingService.buildings(player.level().getServer())) {
-            all.put(building.id().toString(), (new AdminPanelRegistry.AdminEntry(building.id().toString(),
+            all.put(building.id().toString(), (new AdminPanelRegistry.AdminEntry(AdminIds.display(building.id()),
                     building.sizeX() + " × " + building.sizeY() + " × " + building.sizeZ()
                             + " blocks · by " + building.author(), NORMAL, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", BUILDINGS + "/edit/" + building.id()),
@@ -458,7 +487,7 @@ public final class CwpAdminModule {
                 AdminPanelRegistry.AdminEntry.editor("Building", "Identity",
                         building.sizeX() + " × " + building.sizeY() + " × " + building.sizeZ() + " blocks · by "
                                 + building.author(),
-                        List.of(AdminPanelRegistry.AdminField.readOnly("build_id", "Building ID", id.toString())),
+                        List.of(AdminPanelRegistry.AdminField.readOnly("build_id", "Building name", AdminIds.display(id))),
                         List.of()),
                 AdminPanelRegistry.AdminEntry.editor("Replace blocks", "New block range", status,
                         List.of(), List.of(new AdminPanelRegistry.AdminAction("building.select", "Select corners", false))),
@@ -469,7 +498,7 @@ public final class CwpAdminModule {
                         "Only possible while no script uses it.", List.of(),
                         List.of(new AdminPanelRegistry.AdminAction("building.delete|" + id, "Delete", true),
                                 AdminPanelRegistry.AdminAction.navigate("Back to buildings", BUILDINGS))));
-        return new AdminPanelRegistry.AdminPage(BUILDINGS + "/edit/" + id, "Edit building", id.toString(), TABS,
+        return new AdminPanelRegistry.AdminPage(BUILDINGS + "/edit/" + id, "Edit building", AdminIds.display(id), TABS,
                 entries, AdminPanelRegistry.PageLayout.EDITOR);
     }
 
@@ -482,8 +511,8 @@ public final class CwpAdminModule {
                         : "Select both corners in the world";
         List<AdminPanelRegistry.AdminEntry> entries = List.of(
                 AdminPanelRegistry.AdminEntry.editor("Building", "Identity",
-                        "A permanent namespaced ID for this saved copy.",
-                        List.of(textField("build_id", "Building ID", "", "cwp:arena_wall", 128, List.of())),
+                        "A permanent name for this saved copy.",
+                        List.of(textField("build_id", "Building name", "", "arena_wall", 128, List.of())),
                         List.of()),
                 AdminPanelRegistry.AdminEntry.editor("Building", "Block range", status,
                         List.of(), List.of(new AdminPanelRegistry.AdminAction("building.select", "Select corners", false))),
@@ -503,20 +532,21 @@ public final class CwpAdminModule {
         if (requestedId != null && portal == null) return portalsPage(player);
         boolean creating = portal == null;
         String id = creating ? "" : portal.id().toString();
+        String displayId = creating ? "" : AdminIds.display(portal.id());
         List<String> templates = templateSuggestions(server);
         String template = creating ? templates.stream().filter(value -> !value.equals("Exit") && !value.equals("Coordinates"))
-                .findFirst().orElse("Exit") : portal.isExit() ? "Exit" : portal.templateId().toString();
+                .findFirst().orElse("Exit") : portal.isExit() ? "Exit" : AdminIds.display(portal.templateId());
         if (!creating && portal.isCoordinates()) template = "Coordinates";
         Identifier currentPocket = PocketEditorService.pocketForDimension(server, player.level().dimension().identifier());
         if (creating && currentPocket != null) template = "Exit";
         PortalDefinition.Schedule schedule = creating ? PortalDefinition.Schedule.always() : portal.schedule();
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
-        entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Portal ID",
-                creating ? "A permanent namespaced identifier, for example cwp:forgotten_vault_gate."
+        entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Portal name",
+                creating ? "A permanent name, for example forgotten_vault_gate."
                         : "Portal IDs remain fixed after creation.",
                 List.of(creating
-                        ? textField("portal_id", "Portal ID", id, "cwp:forgotten_vault_gate", 128, List.of())
-                        : AdminPanelRegistry.AdminField.readOnly("portal_id", "Portal ID", id)),
+                        ? textField("portal_id", "Portal name", displayId, "forgotten_vault_gate", 128, List.of())
+                        : AdminPanelRegistry.AdminField.readOnly("portal_id", "Portal name", displayId)),
                 List.of()));
         entries.add(AdminPanelRegistry.AdminEntry.editor("General", "Identity",
                 "Choose a pocket, Exit to return to the main world, or Coordinates for direct travel in this world.",
@@ -735,7 +765,7 @@ public final class CwpAdminModule {
         List<AdminPanelRegistry.AdminEntry> entries = new ArrayList<>();
         entries.add(AdminPanelRegistry.AdminEntry.editor("Currency", "Definition",
                 "Currency definitions come from content mods; this editor manages their balances.",
-                List.of(AdminPanelRegistry.AdminField.readOnly("currency_id", "ID", id.toString()),
+                List.of(AdminPanelRegistry.AdminField.readOnly("currency_id", "ID", AdminIds.display(id)),
                         AdminPanelRegistry.AdminField.readOnly("currency_scope", "Scope", currency.scope().name()),
                         AdminPanelRegistry.AdminField.readOnly("currency_abbreviation", "Symbol", currency.abbreviation())),
                 List.of()));
@@ -893,6 +923,18 @@ public final class CwpAdminModule {
                                                           Map<String, String> values) {
         if (AdminLootPoolEditor.owns(pageId) && actionId.startsWith("loot."))
             return AdminLootPoolEditor.action(player, actionId, values);
+        if (AdminFishingEditor.owns(pageId) && actionId.startsWith("fishing."))
+            return AdminFishingEditor.action(player, actionId, values);
+        if (AdminReforgeEditor.owns(pageId) && actionId.startsWith("reforge."))
+            return AdminReforgeEditor.action(player, actionId, values);
+        if (AdminSmithingEditor.owns(pageId) && actionId.startsWith("smithing."))
+            return AdminSmithingEditor.action(player, actionId, values);
+        if (AdminCrossbreedingEditor.owns(pageId) && actionId.startsWith("crossbreeding."))
+            return AdminCrossbreedingEditor.action(player, actionId, values);
+        if (AdminCookingEditor.owns(pageId) && actionId.startsWith("cooking."))
+            return AdminCookingEditor.action(player, actionId, values);
+        if (AdminFletchingEditor.owns(pageId) && actionId.startsWith("fletching."))
+            return AdminFletchingEditor.action(player, actionId, values);
         MinecraftServer server = player.level().getServer();
         if (AdminCategories.owns(pageId)) return AdminCategories.action(player, pageId, actionId, values);
         if (actionId.startsWith("mob.template.delete|")) {
@@ -960,9 +1002,31 @@ public final class CwpAdminModule {
         if (actionId.equals("mob.script.new")) {
             return AdminPanelRegistry.ActionResult.success("", MOB_SCRIPT_EDIT + "@new");
         }
+        if (actionId.equals("pocket.import")) {
+            String file = values.getOrDefault("pocket_import_file", "");
+            try {
+                var result = ekuzo.crazyworldprogression.portals.PocketTransfer.importFile(server, file);
+                for (String note : result.notes()) player.sendSystemMessage(net.minecraft.network.chat.Component.literal(note));
+                return AdminPanelRegistry.ActionResult.success(result.notes().getFirst(), POCKETS);
+            } catch (java.io.IOException exception) {
+                throw new IllegalStateException("Could not read " + file + ": " + exception.getMessage(), exception);
+            }
+        }
+        if (actionId.startsWith("pocket.export|")) {
+            Identifier id = Identifier.parse(actionId.substring(actionId.indexOf('|') + 1));
+            try {
+                var result = ekuzo.crazyworldprogression.portals.PocketTransfer.export(server, id);
+                for (String note : result.notes()) player.sendSystemMessage(net.minecraft.network.chat.Component.literal(note));
+                return AdminPanelRegistry.ActionResult.success("Exported to " + result.file().getFileName()
+                        + " in " + ekuzo.crazyworldprogression.portals.PocketTransfer.folder());
+            } catch (java.io.IOException exception) {
+                throw new IllegalStateException("Could not export " + id + ": " + exception.getMessage(), exception);
+            }
+        }
         if (actionId.equals("pocket.create")) {
             if (!pageId.equals(POCKET_NEW)) throw new IllegalArgumentException("Open Create pocket first");
-            Identifier id = formId(values, "template_id");
+            Identifier id = AdminIds.createAvailable(required(values, "template_id"),
+                    PocketEditorService.pockets(server));
             PocketEditorService.create(server, id);
             return AdminPanelRegistry.ActionResult.success("Created pocket " + id, POCKET_EDIT + id);
         }
@@ -976,7 +1040,8 @@ public final class CwpAdminModule {
             return AdminPanelRegistry.ActionResult.success("Saved new blocks for " + id, BUILDINGS + "/edit/" + id);
         }
         if (actionId.equals("building.capture")) {
-            Identifier id = formId(values, "build_id");
+            Identifier id = AdminIds.createAvailable(required(values, "build_id"),
+                    BuildingService.buildings(server).stream().map(BuildingService.BuildingInfo::id).toList());
             BuildingService.capture(player, id);
             return AdminPanelRegistry.ActionResult.success("Saved building " + id, BUILDINGS);
         }
@@ -1010,9 +1075,9 @@ public final class CwpAdminModule {
         if (actionId.equals("portal.position.current")) {
             return AdminPanelRegistry.ActionResult.success("Coordinates set to your current position");
         }
-        if (actionId.equals("portal.update")) return updatePortal(player, formId(values, "portal_id"), values);
+        if (actionId.equals("portal.update")) return updatePortal(player, formId(server, values, "portal_id"), values);
         if (actionId.equals("portal.move")) {
-            Identifier id = formId(values, "portal_id");
+            Identifier id = formId(server, values, "portal_id");
             PortalDefinition portal = PortalService.portal(server, id);
             if (portal == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
             PortalService.setLocation(server, id, "original", player.level().dimension().identifier(),
@@ -1020,7 +1085,7 @@ public final class CwpAdminModule {
             return AdminPanelRegistry.ActionResult.success("Set original location for " + id);
         }
         if (actionId.equals("portal.remove")) {
-            Identifier id = formId(values, "portal_id");
+            Identifier id = formId(server, values, "portal_id");
             return PortalService.remove(server, id)
                     ? AdminPanelRegistry.ActionResult.success("Removed portal " + id)
                     : AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
@@ -1224,8 +1289,9 @@ public final class CwpAdminModule {
     // Create a reusable portal definition without a placement.
     private static AdminPanelRegistry.ActionResult createPortal(ServerPlayer player, Map<String, String> values) {
         MinecraftServer server = player.level().getServer();
-        Identifier id = formId(values, "portal_id");
-        Identifier template = portalLink(values);
+        Identifier id = AdminIds.createAvailable(required(values, "portal_id"),
+                PortalService.portals(server).stream().map(PortalDefinition::id).toList());
+        Identifier template = portalLink(server, values);
         PortalDefinition.Mode access = PortalDefinition.Mode.parse(required(values, "portal_access_mode"));
         PortalDefinition portal = new PortalDefinition(id, player.level().dimension().identifier(),
                 PortalDefinition.Shape.parse(required(values, "portal_shape")),
@@ -1278,7 +1344,7 @@ public final class CwpAdminModule {
                 parsePortalPlane(required(values, "portal_plane")),
                 finiteDouble(values, "portal_x"), finiteDouble(values, "portal_y"),
                 finiteDouble(values, "portal_z"), positiveDouble(values, "portal_width"),
-                positiveDouble(values, "portal_height"), portalLink(values),
+                positiveDouble(values, "portal_height"), portalLink(server, values),
                 Math.multiplyExact(nonNegativeLong(values, "portal_lifetime"), 60L),
                 PortalDefinition.PortalColor.parse(required(values, "portal_color")).rgb(),
                 required(values, "portal_name"), values.getOrDefault("portal_description", "").trim(),
@@ -1320,7 +1386,7 @@ public final class CwpAdminModule {
                 values.containsKey("portal_z") ? finiteDouble(values, "portal_z") : current.centerZ(),
                 values.containsKey("portal_width") ? positiveDouble(values, "portal_width") : current.width(),
                 values.containsKey("portal_height") ? positiveDouble(values, "portal_height") : current.height(),
-                values.containsKey("portal_template") ? portalLink(values) : current.templateId(),
+                values.containsKey("portal_template") ? portalLink(server, values) : current.templateId(),
                 values.containsKey("portal_lifetime")
                         ? Math.multiplyExact(nonNegativeLong(values, "portal_lifetime"), 60L)
                         : current.lifetimeSeconds(),
@@ -1455,7 +1521,7 @@ public final class CwpAdminModule {
     private static AdminPanelRegistry.ActionResult updatePortalSchedule(MinecraftServer server,
                                                                          Map<String, String> values,
                                                                          String actionId) {
-        Identifier id = formId(values, "portal_id");
+        Identifier id = formId(server, values, "portal_id");
         PortalDefinition portal = PortalService.portal(server, id);
         if (portal == null) return AdminPanelRegistry.ActionResult.failure("Unknown portal " + id);
         PortalDefinition.Schedule schedule = portal.schedule();
@@ -1524,15 +1590,15 @@ public final class CwpAdminModule {
     // Prefer a constrained template dropdown, falling back to text when no template exists yet.
     private static AdminPanelRegistry.AdminField templateField(String value, List<String> templates) {
         return templates.isEmpty()
-                ? textField("portal_template", "Links to", value, "cwp:template_id", 128, templates)
+                ? textField("portal_template", "Links to", value, "pocket_name", 128, templates)
                 : AdminPanelRegistry.AdminField.select("portal_template", "Links to", value, templates);
     }
 
-    private static Identifier portalLink(Map<String, String> values) {
+    private static Identifier portalLink(MinecraftServer server, Map<String, String> values) {
         String value = required(values, "portal_template");
         if (value.equalsIgnoreCase("Exit")) return PortalDefinition.EXIT_TEMPLATE;
         if (value.equalsIgnoreCase("Coordinates")) return PortalDefinition.COORDINATES_TEMPLATE;
-        return Identifier.parse(value);
+        return AdminIds.reference(value, PocketEditorService.pockets(server));
     }
 
     // Convert a persisted portal orientation into the editor's readable dropdown label.
@@ -1574,6 +1640,7 @@ public final class CwpAdminModule {
     private static ScriptRoute scriptRoute(String pageId) {
         if (pageId.startsWith(MOB_SCRIPT_EDIT)) {
             String scriptId = pageId.substring(MOB_SCRIPT_EDIT.length());
+            if (scriptId.endsWith("/source")) scriptId = scriptId.substring(0, scriptId.length() - "/source".length());
             return scriptId.isBlank() || scriptId.contains("/") ? null
                     : new ScriptRoute(null, scriptId, MOB_SCRIPTS);
         }
@@ -1582,6 +1649,7 @@ public final class CwpAdminModule {
         if (segment < 0) return null;
         Identifier pocketId = Identifier.tryParse(pageId.substring(POCKET_EDIT.length(), segment));
         String scriptId = pageId.substring(segment + SCRIPT_SEGMENT.length());
+        if (scriptId.endsWith("/source")) scriptId = scriptId.substring(0, scriptId.length() - "/source".length());
         return pocketId == null || scriptId.isBlank() || scriptId.contains("/") ? null
                 : new ScriptRoute(pocketId, scriptId, POCKET_EDIT + pocketId);
     }
@@ -1597,9 +1665,11 @@ public final class CwpAdminModule {
     }
 
     // Parse a form ID and apply CWP's namespace to convenient bare names.
-    private static Identifier formId(Map<String, String> values, String key) {
+    private static Identifier formId(MinecraftServer server, Map<String, String> values, String key) {
         String value = required(values, key);
-        return value.contains(":") ? Identifier.parse(value) : CrazyWorldProgression.id(value);
+        if (key.equals("portal_id")) return AdminIds.reference(value,
+                PortalService.portals(server).stream().map(PortalDefinition::id).toList());
+        return AdminIds.create(value);
     }
 
     // Require a nonblank form value before a mutation begins.
@@ -1659,13 +1729,13 @@ public final class CwpAdminModule {
 
     // Return stable portal ID completions for the editor field.
     private static List<String> portalSuggestions(MinecraftServer server) {
-        return PortalService.portals(server).stream().map(portal -> portal.id().toString()).toList();
+        return PortalService.portals(server).stream().map(portal -> AdminIds.display(portal.id())).toList();
     }
 
     // Return stable template ID completions for draft and portal-link fields.
     private static List<String> templateSuggestions(MinecraftServer server) {
         return java.util.stream.Stream.concat(java.util.stream.Stream.of("Exit", "Coordinates"),
-                PortalTemplateService.templates(server).stream().map(template -> template.id().toString())).toList();
+                PortalTemplateService.templates(server).stream().map(template -> AdminIds.display(template.id()))).toList();
     }
 
     // Parse comma-separated full or abbreviated weekday names from the calendar editor.

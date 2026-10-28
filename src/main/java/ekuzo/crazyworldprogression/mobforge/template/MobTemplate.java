@@ -7,7 +7,7 @@ import java.util.Map;
 /** The one canonical representation used by YAML, commands, spawning, and the editor. */
 public record MobTemplate(String id, String entity, String name, Map<String, Double> attributes,
 		Map<String, EquipmentEntry> equipment, Properties properties, Loot loot, List<String> tags, Ai ai,
-		Map<String, Double> multipliers) {
+		Map<String, Double> multipliers, Abilities abilities) {
 	/** Attributes that are set as a multiple of the entity type's own default value (1 = unchanged). */
 	public static final List<String> MULTIPLIED = List.of("scale", "movement_speed", "follow_range", "max_health",
 			"attack_damage", "attack_speed");
@@ -20,6 +20,25 @@ public record MobTemplate(String id, String entity, String name, Map<String, Dou
 		loot = loot == null ? Loot.DEFAULT : loot;
 		tags = tags == null ? List.of() : List.copyOf(tags);
 		ai = ai == null ? Ai.VANILLA : ai;
+		abilities = abilities == null ? Abilities.DEFAULT : abilities;
+	}
+
+	/** Without abilities: the mob keeps its type's default abilities and gets no extra ones. */
+	public MobTemplate(String id, String entity, String name, Map<String, Double> attributes,
+			Map<String, EquipmentEntry> equipment, Properties properties, Loot loot, List<String> tags, Ai ai,
+			Map<String, Double> multipliers) {
+		this(id, entity, name, attributes, equipment, properties, loot, tags, ai, multipliers, Abilities.DEFAULT);
+	}
+
+	/**
+	 * defaults: whether the mob keeps its entity type's default abilities (e.g. the Leshen's); attached: ability IDs
+	 * the mob uses on top of those.
+	 */
+	public record Abilities(boolean defaults, List<String> attached) {
+		public static final Abilities DEFAULT = new Abilities(true, List.of());
+		public Abilities {
+			attached = attached == null ? List.of() : List.copyOf(attached);
+		}
 	}
 
 	/** Without multipliers, for code that only sets absolute attribute values. */
@@ -74,6 +93,7 @@ public record MobTemplate(String id, String entity, String name, Map<String, Dou
 		public Loot loot = Loot.DEFAULT;
 		public List<String> tags = List.of();
 		public Ai ai = Ai.VANILLA;
-		public MobTemplate build() { return new MobTemplate(id, entity, name, attributes, equipment, properties, loot, tags, ai, multipliers); }
+		public Abilities abilities = Abilities.DEFAULT;
+		public MobTemplate build() { return new MobTemplate(id, entity, name, attributes, equipment, properties, loot, tags, ai, multipliers, abilities); }
 	}
 }

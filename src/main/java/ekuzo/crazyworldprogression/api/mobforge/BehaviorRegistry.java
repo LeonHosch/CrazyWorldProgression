@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.api.mobforge;
 
+import ekuzo.crazyworldprogression.api.CwpIdentifiers;
 import net.minecraft.resources.Identifier;
 
 import java.util.LinkedHashMap;
@@ -14,6 +15,7 @@ public final class BehaviorRegistry {
     public synchronized void register(Identifier id, MobBehavior behavior) {
         requireOpen();
         Objects.requireNonNull(id, "behavior ID");
+        CwpIdentifiers.requireCustomRegistration(id);
         Objects.requireNonNull(behavior, "behavior for " + id);
         if (entries.putIfAbsent(id, behavior) != null) throw new IllegalArgumentException("Duplicate MobForge behavior: " + id);
     }

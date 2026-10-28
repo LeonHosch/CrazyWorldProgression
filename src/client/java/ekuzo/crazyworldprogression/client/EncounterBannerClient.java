@@ -21,16 +21,20 @@ public final class EncounterBannerClient {
 
     private EncounterBannerClient() { }
 
-    private record Banner(Component title, Component subtitle, int color, long shownAt) { }
+    private record Banner(EncounterBanner.Kind kind, Component title, Component subtitle, int color, long shownAt) { }
 
     public static void initialize() {
         ClientPlayNetworking.registerGlobalReceiver(EncounterBanner.Payload.TYPE, (payload, context) -> {
             EncounterBanner.Kind kind;
             try { kind = EncounterBanner.Kind.valueOf(payload.kind()); }
             catch (IllegalArgumentException exception) { return; }
-            current = new Banner(Component.translatable(kind.titleKey()),
-                    Component.translatable(kind.subtitleKey(), payload.argument()), kind.color(),
-                    System.currentTimeMillis());
+            long now = System.currentTimeMillis();
+            // A progress update for the banner already showing keeps it fully visible instead of fading in again.
+            Banner previous = current;
+            long shownAt = previous != null && previous.kind() == kind && kind == EncounterBanner.Kind.RESETTING
+                    && alpha(now - previous.shownAt()) > 0.0F ? now - FADE_IN_MS : now;
+            current = new Banner(kind, Component.translatable(kind.titleKey()),
+                    Component.translatable(kind.subtitleKey(), payload.argument()), kind.color(), shownAt);
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> current = null);
         HudElementRegistry.attachElementAfter(VanillaHudElements.TITLE_AND_SUBTITLE,

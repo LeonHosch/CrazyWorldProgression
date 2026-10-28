@@ -1,0 +1,13 @@
+{
+  "replace": false,
+  "values": [
+    "crazy-world-progression:broadhead_arrow",
+    "crazy-world-progression:barbed_arrow",
+    "crazy-world-progression:bodkin_arrow",
+    "crazy-world-progression:heavy_arrow",
+    "crazy-world-progression:piercing_arrow",
+    "crazy-world-progression:disruption_arrow",
+    "crazy-world-progression:explosive_arrow",
+    "crazy-world-progression:grappling_arrow"
+  ]
+}

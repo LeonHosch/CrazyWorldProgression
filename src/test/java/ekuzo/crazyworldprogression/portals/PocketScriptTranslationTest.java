@@ -12,20 +12,28 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PocketScriptTranslationTest {
+	@Test void movesFinishInstanceSpawnIntoTheInstance() {
+		MobScript script = new MobScript("finale", List.of(
+				new MobScript.FinishInstanceStep(new MobScript.Position(10, 64, 12))));
+		MobScript moved = PocketEditorService.translate(script, new BlockPos(100, 4, -10));
+		assertEquals(new MobScript.Position(110, 68, 2),
+				((MobScript.FinishInstanceStep) moved.steps().getFirst()).spawn());
+	}
+
     @Test void movesSpawnAndTargetWithoutChangingOtherSteps() {
         MobTemplate.Ai ai = new MobTemplate.Ai("target_position", true,
                 new MobTemplate.Position(12, 70, 14), 3, null, 64, Map.of("custom", "kept"));
         MobScript.SpawnStep spawn = new MobScript.SpawnStep("guard",
                 new MobScript.Position(10, 65, 11), MobScript.Offset.NONE, 2, ai);
-        MobScript.SleepStep sleep = new MobScript.SleepStep(20);
-        MobScript result = PocketEditorService.translate(new MobScript("wave", List.of(spawn, sleep)),
+        MobScript.WaitDurationStep wait = new MobScript.WaitDurationStep(20);
+        MobScript result = PocketEditorService.translate(new MobScript("wave", List.of(spawn, wait)),
                 new BlockPos(-8, 4, 6));
 
         MobScript.SpawnStep moved = (MobScript.SpawnStep) result.steps().getFirst();
         assertEquals(new MobScript.Position(2, 69, 17), moved.location());
         assertEquals(new MobTemplate.Position(4, 74, 20), moved.aiOverride().target());
         assertEquals(Map.of("custom", "kept"), moved.aiOverride().settings());
-        assertSame(sleep, result.steps().get(1));
+        assertSame(wait, result.steps().get(1));
     }
 
     @Test void movesRaidSensorsAndPortalLocationsIntoTheInstance() {

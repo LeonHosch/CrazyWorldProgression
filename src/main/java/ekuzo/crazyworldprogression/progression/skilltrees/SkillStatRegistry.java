@@ -27,6 +27,11 @@ public final class SkillStatRegistry {
     private static final Pattern EXPRESSION = Pattern.compile("^([A-Za-z][A-Za-z0-9_]*)\\((-?(?:\\d+(?:\\.\\d+)?|\\.\\d+))\\)$");
     private static final Map<String, StatTranslation> TRANSLATIONS = new LinkedHashMap<>();
     private static final Map<String, StatArgumentValidator> VALIDATORS = new LinkedHashMap<>();
+    public static final String DAMAGE_TAKEN = "addDamageTaken";
+    private static final Set<String> UNLOCKS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final Map<String, List<java.util.function.ToDoubleFunction<ServerPlayer>>> DYNAMIC =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    public static final String LIFE_STEAL = "addLifeSteal";
     private static final Map<String, StatDefinition> DEFINITIONS = new LinkedHashMap<>();
     private static final Map<MinecraftServer, Map<UUID, Map<String, Double>>> TOTAL_CACHE = new WeakHashMap<>();
 
@@ -44,6 +49,9 @@ public final class SkillStatRegistry {
                 AttributeModifier.Operation.ADD_MULTIPLIED_BASE, 0.01, StatValueFormat.PERCENT);
         registerAttribute("addAttackSpeed", "stat.crazy-world-progression.attack_speed", Attributes.ATTACK_SPEED,
                 AttributeModifier.Operation.ADD_MULTIPLIED_BASE, 0.01, StatValueFormat.PERCENT);
+        // Multiplies the total (weapon included), so +20 means 20% more damage per hit.
+        registerAttribute("addAttackDamage", "stat.crazy-world-progression.attack_damage", Attributes.ATTACK_DAMAGE,
+                AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, 0.01, StatValueFormat.PERCENT);
         registerAttribute("addJumpStrength", "stat.crazy-world-progression.jump_strength", Attributes.JUMP_STRENGTH,
                 AttributeModifier.Operation.ADD_MULTIPLIED_BASE, 0.01, StatValueFormat.PERCENT);
         registerAttribute("addBlockInteractionRange", "stat.crazy-world-progression.block_range",
@@ -53,6 +61,19 @@ public final class SkillStatRegistry {
         registerMultiplier("addMobDropMultiplier", "stat.crazy-world-progression.mob_drops");
         registerMultiplier("addExperienceMultiplier", "stat.crazy-world-progression.experience");
         registerMultiplier("addFarmingMultiplier", "stat.crazy-world-progression.farming");
+        // Damage taken, in percent: +10 means 10% more, -25 means 25% less. Multiplied in last (DamageTaken).
+        registerMultiplier(DAMAGE_TAKEN, "stat.crazy-world-progression.damage_taken");
+        // Life steal, in percent of the damage the player deals (after the target's armor). See BloodPact.
+        registerPercentStat(LIFE_STEAL, "stat.crazy-world-progression.life_steal");
+        // Enchanting proficiency: which reforge tiers a player may use at the enchanting table. Everyone starts at
+        // Novice (1); see Proficiency.
+        registerNumberStat("addEnchantingProficiency", "stat.crazy-world-progression.enchanting_proficiency",
+                ekuzo.crazyworldprogression.skills.Proficiency.NOVICE, true,
+                value -> { }, (player, value) -> { });
+        // Smithing proficiency: which resmith tier a player uses at the anvil. Everyone starts at Novice (1).
+        registerNumberStat("addSmithingProficiency", "stat.crazy-world-progression.smithing_proficiency",
+                ekuzo.crazyworldprogression.skills.Proficiency.NOVICE, true,
+                value -> { }, (player, value) -> { });
 
         ServerPlayerEvents.JOIN.register(SkillStatRegistry::refresh);
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> refresh(newPlayer));
@@ -80,6 +101,24 @@ public final class SkillStatRegistry {
         registerDefinition(new StatDefinition(functionName, translationKey, null,
                 AttributeModifier.Operation.ADD_VALUE, 1.0, StatValueFormat.NUMBER, startingValue, nonNegative));
         register(functionName, validator, translation);
+    }
+
+    /**
+     * Add a changing bonus to a stat for online players (such as Hubris stacks adding attack damage); it sums with
+     * skill trees and sets. Call {@link #refresh(ServerPlayer)} whenever the bonus changes.
+     */
+    public static void registerDynamicBonus(String functionName, java.util.function.ToDoubleFunction<ServerPlayer> bonus) {
+        String key = requireFunction(functionName);
+        DYNAMIC.computeIfAbsent(key, ignored -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(bonus);
+    }
+
+    /**
+     * Register an unlock: a number stat that switches something on while its total is above zero (check it with
+     * {@code getTotal(player, name) > 0}). Tooltips show just the translated text, such as "Unlocks ...".
+     */
+    public static void registerUnlockStat(String functionName, String translationKey) {
+        registerNumberStat(functionName, translationKey, 0.0, true, value -> { }, (player, value) -> { });
+        UNLOCKS.add(functionName.toLowerCase(Locale.ROOT));
     }
 
     // Parse one readable YAML expression into a registered function and numeric argument.
@@ -182,7 +221,23 @@ public final class SkillStatRegistry {
                 .forEach((name, value) -> totals.merge(name, value, Double::sum));
         calculateTotals(server, playerUuid, SkillTreeDefinition.SkillTreeType.PERSONAL)
                 .forEach((name, value) -> totals.merge(name, value, Double::sum));
+        // Worn equipment sets and dynamic bonuses add their stats too, while the player is online.
+        ServerPlayer online = server.getPlayerList().getPlayer(playerUuid);
+        if (online != null) gearAndEffectTotals(online).forEach((name, value) -> totals.merge(name, value, Double::sum));
         return Map.copyOf(totals);
+    }
+
+    /** Stats from worn equipment sets and dynamic bonuses (not skill trees), for an online player. */
+    public static Map<String, Double> gearAndEffectTotals(ServerPlayer player) {
+        Map<String, Double> totals = new LinkedHashMap<>(
+                ekuzo.crazyworldprogression.progression.equipment.EquipmentSetService.totals(player));
+        DYNAMIC.forEach((name, bonuses) -> {
+            for (var bonus : bonuses) {
+                double value = bonus.applyAsDouble(player);
+                if (value != 0) totals.merge(name, value, Double::sum);
+            }
+        });
+        return totals;
     }
 
     // Accumulate registered expressions from unlocked nodes in exactly one progression scope.
@@ -222,6 +277,43 @@ public final class SkillStatRegistry {
         return List.copyOf(DEFINITIONS.values());
     }
 
+    static boolean isUnlockDefinition(StatDefinition definition) {
+        return UNLOCKS.contains(definition.functionName()) || UNLOCKS.contains(definition.key());
+    }
+
+    /** Whether the expression is an unlock (an ability), such as unlockHubris(1). */
+    public static boolean isUnlock(String expression) { return UNLOCKS.contains(parse(expression).functionName()); }
+
+    /**
+     * An ability's name; its description is {@link #describe(String)}. The name key is the stat's translation key
+     * plus ".name" (falling back to the description when a mod gives no name).
+     */
+    public static net.minecraft.network.chat.Component abilityName(String expression) {
+        StatDefinition definition = DEFINITIONS.get(parse(expression).functionName());
+        if (definition == null) return net.minecraft.network.chat.Component.literal(expression);
+        return net.minecraft.network.chat.Component.translatableWithFallback(definition.translationKey() + ".name",
+                net.minecraft.network.chat.Component.translatable(definition.translationKey()).getString());
+    }
+
+    /** A readable line for one stat expression, e.g. "+20% Move Speed", for tooltips. */
+    public static net.minecraft.network.chat.Component describe(String expression) {
+        ParsedStat stat = parse(expression);
+        StatDefinition definition = DEFINITIONS.get(stat.functionName());
+        if (definition == null) return net.minecraft.network.chat.Component.literal(expression);
+        if (UNLOCKS.contains(stat.functionName()))
+            return net.minecraft.network.chat.Component.translatable(definition.translationKey());
+        String sign = stat.value() >= 0 ? "+" : "";
+        String amount = definition.format() == StatValueFormat.NUMBER
+                ? sign + trimNumber(stat.value() * definition.scale())
+                : sign + trimNumber(stat.value()) + "%";
+        return net.minecraft.network.chat.Component.literal(amount + " ")
+                .append(net.minecraft.network.chat.Component.translatable(definition.translationKey()));
+    }
+
+    private static String trimNumber(double value) {
+        return value == Math.rint(value) ? Long.toString((long) value) : String.format(Locale.ROOT, "%.2f", value);
+    }
+
     // Return every registered YAML function name, including extension-provided custom handlers.
     public static List<String> registeredFunctions() {
         return List.copyOf(TRANSLATIONS.keySet());
@@ -256,6 +348,18 @@ public final class SkillStatRegistry {
                 instance.addTransientModifier(new AttributeModifier(modifierId, scaledValue, operation));
             }
         });
+    }
+
+    // Register a percentage stat that starts at 0% and is read by game logic (no attribute behind it).
+    private static void registerPercentStat(String functionName, String translationKey) {
+        registerPercentStat(functionName, translationKey, (player, value) -> { });
+    }
+
+    /** A percentage stat starting at 0%; {@code translation} gets the player's total on every stat refresh. */
+    public static void registerPercentStat(String functionName, String translationKey, StatTranslation translation) {
+        registerDefinition(new StatDefinition(functionName, translationKey, null,
+                AttributeModifier.Operation.ADD_VALUE, 0.01, StatValueFormat.PERCENT, 0.0, true));
+        register(functionName, translation);
     }
 
     // Register an event-driven percentage stat whose value is consumed by SkillMultiplierService.

@@ -40,10 +40,12 @@ public final class SkillTreeService {
                 List<CostSnapshot> costs = costSnapshots(server, player, skill.costs());
                 boolean affordable = costs.stream().allMatch(CostSnapshot::affordable);
                 boolean excluded = excludedSkillIds.contains(skill.id()) && !unlocked;
+                boolean levelsMet = levelsMet(player, skill);
                 nodes.add(new NodeSnapshot(skill.id(), skill.name(), skill.germanName(), skill.description(),
                         skill.germanDescription(), skill.icon(), skill.previous(),
                         skill.following(), costs, unlocked, previousUnlocked, affordable, excluded,
-                        !unlocked && !excluded && previousUnlocked && affordable && decision.allowed()));
+                        !unlocked && !excluded && previousUnlocked && affordable && levelsMet && decision.allowed(),
+                        levelsMet ? "" : missingLevels(player, skill)));
             }
             trees.add(new TreeSnapshot(tree.id().toString(), tree.name(), tree.germanName(), tree.icon(), tree.type(),
                     tree.priority(), List.copyOf(nodes), treeBalances(server, player, tree),
@@ -67,11 +69,31 @@ public final class SkillTreeService {
         MinecraftServer server = player.level().getServer();
         Set<String> unlocks = ProgressionService.getUnlocks(server, player.getUUID(), tree.type());
         if (unlocks.contains(tree.persistedKey(skill)) || excludedSkillIds(tree, unlocks).contains(skill.id())
-                || !prerequisitesUnlocked(tree, skill, unlocks)) return;
+                || !prerequisitesUnlocked(tree, skill, unlocks) || !levelsMet(player, skill)) return;
         if (ProgressionService.purchase(server, player.getUUID(), tree, skill)) {
             if (tree.type() == SkillTreeType.GLOBAL) SkillStatRegistry.refreshAll(server.getPlayerList().getPlayers());
             else SkillStatRegistry.refresh(player);
         }
+    }
+
+    /** Whether the player has every level the node requires. */
+    static boolean levelsMet(ServerPlayer player, SkillNode skill) {
+        return skill.requires().entrySet().stream().allMatch(entry -> ekuzo.crazyworldprogression.skills.Skills.level(player,
+                ekuzo.crazyworldprogression.skills.Skills.Skill.parse(entry.getKey())) >= entry.getValue());
+    }
+
+    /** "Needs Fishing level 5, Cooking level 2" for the levels the player still lacks. */
+    private static String missingLevels(ServerPlayer player, SkillNode skill) {
+        StringBuilder text = new StringBuilder("Needs ");
+        boolean first = true;
+        for (Map.Entry<String, Integer> entry : skill.requires().entrySet()) {
+            var level = ekuzo.crazyworldprogression.skills.Skills.Skill.parse(entry.getKey());
+            if (ekuzo.crazyworldprogression.skills.Skills.level(player, level) >= entry.getValue()) continue;
+            if (!first) text.append(", ");
+            text.append(level.label()).append(" level ").append(entry.getValue());
+            first = false;
+        }
+        return text.toString();
     }
 
     // Pair each configured cost with current metadata, balance, and individual affordability for the client.
@@ -152,7 +174,7 @@ public final class SkillTreeService {
     public record NodeSnapshot(String id, String name, String germanName, String description,
                                String germanDescription, String icon, List<String> previous, int following,
                                List<CostSnapshot> costs, boolean unlocked, boolean prerequisitesUnlocked,
-                               boolean affordable, boolean excluded, boolean canPurchase) { }
+                               boolean affordable, boolean excluded, boolean canPurchase, String missingLevels) { }
 
     public record CurrencySnapshot(String id, String displayName, String abbreviation, String icon,
                                    int iconU, int iconV, int iconWidth, int iconHeight,

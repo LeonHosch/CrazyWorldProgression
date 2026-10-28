@@ -39,12 +39,18 @@ public final class LootPoolData extends SavedData {
         if (total <= 0) return pool;
         List<Entry> entries = pool.entries().stream().map(entry -> new Entry(entry.kind(), entry.target(),
                 (int) Math.max(1, Math.round(entry.weight() * 10000.0 / total)), entry.weight(), entry.min(),
-                entry.max(), entry.showInChat())).toList();
+                entry.max(), entry.showInChat(), entry.xpPerItem(), entry.level())).toList();
         return new Pool(pool.id(), pool.name(), pool.mode(), entries);
     }
     public static LootPoolData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(TYPE);
     }
+    /** Pools feed the fishing journal, so any change makes cached journals outdated. */
+    @Override public void setDirty() {
+        super.setDirty();
+        FishingLootData.REVISION.incrementAndGet();
+    }
+
     public Map<String, Pool> values() { return Map.copyOf(pools); }
     void put(Pool pool) { pools.put(pool.id().toString(), pool); setDirty(); }
     void remove(Identifier id) { pools.remove(id.toString()); setDirty(); }
@@ -60,7 +66,7 @@ public final class LootPoolData extends SavedData {
     }
 
     public record Entry(String kind, Identifier target, int chance, int weight, int min, int max,
-                        boolean showInChat) {
+                        boolean showInChat, int xpPerItem, int level) {
         public static final Codec<Entry> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.fieldOf("kind").forGetter(Entry::kind),
                 Identifier.CODEC.fieldOf("target").forGetter(Entry::target),
@@ -68,11 +74,23 @@ public final class LootPoolData extends SavedData {
                 Codec.INT.optionalFieldOf("weight", 1).forGetter(Entry::weight),
                 Codec.INT.optionalFieldOf("min", 1).forGetter(Entry::min),
                 Codec.INT.optionalFieldOf("max", 1).forGetter(Entry::max),
-                Codec.BOOL.optionalFieldOf("show_in_chat", false).forGetter(Entry::showInChat)
+                Codec.BOOL.optionalFieldOf("show_in_chat", false).forGetter(Entry::showInChat),
+                Codec.INT.optionalFieldOf("xp_per_item", 0).forGetter(Entry::xpPerItem),
+                Codec.INT.optionalFieldOf("level", 0).forGetter(Entry::level)
         ).apply(instance, Entry::new));
 
+        public Entry(String kind, Identifier target, int chance, int weight, int min, int max,
+                     boolean showInChat, int xpPerItem) {
+            this(kind, target, chance, weight, min, max, showInChat, xpPerItem, 0);
+        }
+
+        public Entry(String kind, Identifier target, int chance, int weight, int min, int max,
+                     boolean showInChat) {
+            this(kind, target, chance, weight, min, max, showInChat, 0, 0);
+        }
+
         public Entry(String kind, Identifier target, int chance, int weight, int min, int max) {
-            this(kind, target, chance, weight, min, max, false);
+            this(kind, target, chance, weight, min, max, false, 0, 0);
         }
     }
 }

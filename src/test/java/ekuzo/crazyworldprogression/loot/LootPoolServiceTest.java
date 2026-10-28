@@ -104,7 +104,8 @@ class LootPoolServiceTest {
 
     @Test void oldPickOnePoolsKeepTheirOddsAfterMigration() {
         var old = new LootPoolData.Pool(id("old"), "Old", "one", List.of(
-                new LootPoolData.Entry("item", Identifier.parse("minecraft:apple"), 10000, 1, 1, 1),
+                new LootPoolData.Entry("item", Identifier.parse("minecraft:apple"),
+                        10000, 1, 1, 1, false, 5, 12),
                 new LootPoolData.Entry("item", Identifier.parse("minecraft:bread"), 10000, 3, 1, 1)));
         var data = new LootPoolData();
         data.put(old);
@@ -114,6 +115,8 @@ class LootPoolServiceTest {
         var entries = restored.values().get(old.id().toString()).entries();
         assertEquals(2500, entries.get(0).chance());
         assertEquals(7500, entries.get(1).chance());
+        assertEquals(5, entries.get(0).xpPerItem());
+        assertEquals(12, entries.get(0).level());
         var current = LootPoolData.CODEC.parse(JsonOps.INSTANCE,
                 LootPoolData.CODEC.encodeStart(JsonOps.INSTANCE, restored).getOrThrow()).getOrThrow();
         assertEquals(restored.values(), current.values());

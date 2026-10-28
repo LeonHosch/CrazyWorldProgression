@@ -100,6 +100,9 @@ public final class PortalClientRenderer {
     }
 
     // Atomically replace render state and discard cached meshes for removed or resized portals.
+    /** The placed portals the server sent (for maps). */
+    public static List<PortalNetworking.PortalSnapshot> placedPortals() { return portals; }
+
     private static void replaceSnapshot(List<PortalNetworking.PortalSnapshot> replacement) {
         portals = replacement;
         contact = null;

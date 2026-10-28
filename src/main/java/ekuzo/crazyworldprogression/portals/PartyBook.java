@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
 
 /**
  * Party rules without any server objects, so they can be tested directly. Each party has a hidden ID that binds
@@ -17,9 +18,12 @@ public final class PartyBook {
     public static final int LIMIT = 10;
 
     public enum Visibility {
-        PUBLIC, SEMI_PRIVATE, PRIVATE;
+        PUBLIC, SEMI_PRIVATE, PRIVATE, FRIENDS, CLAN;
         public String label() {
-            return switch (this) { case PUBLIC -> "Public"; case SEMI_PRIVATE -> "Semi-private"; case PRIVATE -> "Private"; };
+            return switch (this) {
+                case PUBLIC -> "Public"; case SEMI_PRIVATE -> "Semi-private"; case PRIVATE -> "Private";
+                case FRIENDS -> "Friends"; case CLAN -> "Clan";
+            };
         }
         public Visibility next() { return values()[(ordinal() + 1) % values().length]; }
         public static Visibility parse(String value) {
@@ -33,6 +37,10 @@ public final class PartyBook {
         Visibility visibility;
         UUID leader;
         int maxSize;
+        /** Whether members can hurt each other (allies who heal allies always reach them). */
+        boolean pvp;
+        /** Open voice preserves two-way proximity audio; private voice isolates the party. */
+        boolean privateVoice;
         final LinkedHashSet<UUID> members = new LinkedHashSet<>();
         final LinkedHashSet<UUID> requests = new LinkedHashSet<>();
 
@@ -45,6 +53,8 @@ public final class PartyBook {
         public Visibility visibility() { return visibility; }
         public UUID leader() { return leader; }
         public int maxSize() { return maxSize; }
+        public boolean pvp() { return pvp; }
+        public boolean privateVoice() { return privateVoice; }
         public List<UUID> members() { return List.copyOf(members); }
         public List<UUID> requests() { return List.copyOf(requests); }
         public boolean full() { return members.size() >= maxSize; }
@@ -64,15 +74,41 @@ public final class PartyBook {
 
     public List<Party> all() { return List.copyOf(parties.values()); }
 
+    /** Disbands parties that have no online members. Offline members of active parties are retained. */
+    public boolean disbandInactive(Set<UUID> online) {
+        List<UUID> inactive = parties.values().stream()
+                .filter(party -> party.members.stream().noneMatch(online::contains))
+                .map(Party::id).toList();
+        for (UUID id : inactive) {
+            Party party = parties.remove(id);
+            party.members.forEach(memberOf::remove);
+            invites.values().forEach(set -> set.remove(id));
+        }
+        return !inactive.isEmpty();
+    }
+
     /** The key dungeon instances are leased to: the hidden party ID, or a personal key when not in a party. */
     public String leaseKey(UUID player) {
         Party party = partyOf(player);
         return party == null ? "solo:" + player : "party:" + party.id;
     }
 
+    /**
+     * Friends and Clan parties: whether a player belongs to the leader's circle (their friends, or their clan). Kept
+     * outside so the rules stay free of server objects.
+     */
+    public interface Circle { boolean contains(Visibility visibility, UUID leader, UUID player); }
+
     /** Public and semi-private parties, as listed in the party browser. Private parties never appear. */
-    public List<Party> browser() {
-        return parties.values().stream().filter(party -> party.visibility != Visibility.PRIVATE).toList();
+    public List<Party> browser() { return browser(null, (visibility, leader, player) -> false); }
+
+    /** The browser for one player: also the Friends and Clan parties whose leader's circle they are in. */
+    public List<Party> browser(UUID viewer, Circle circle) {
+        return parties.values().stream().filter(party -> switch (party.visibility) {
+            case PUBLIC, SEMI_PRIVATE -> true;
+            case PRIVATE -> false;
+            case FRIENDS, CLAN -> viewer != null && circle.contains(party.visibility, party.leader, viewer);
+        }).toList();
     }
 
     public List<Party> invitesFor(UUID player) {
@@ -92,11 +128,18 @@ public final class PartyBook {
     }
 
     /** Public: join at once when not full. Semi-private: becomes a join request for the leader. */
-    public boolean join(UUID player, UUID partyId) {
+    public boolean join(UUID player, UUID partyId) { return join(player, partyId, (visibility, leader, joiner) -> false); }
+
+    /** Friends and Clan parties: join at once when in the leader's circle (or invited). */
+    public boolean join(UUID player, UUID partyId, Circle circle) {
         Party party = require(partyId);
         if (memberOf.containsKey(player)) throw new IllegalArgumentException("Leave your current party first");
         if (party.visibility == Visibility.PRIVATE && !invited(player, partyId))
             throw new IllegalArgumentException("That party is private; its leader has to invite you");
+        if ((party.visibility == Visibility.FRIENDS || party.visibility == Visibility.CLAN) && !invited(player, partyId)
+                && !circle.contains(party.visibility, party.leader, player))
+            throw new IllegalArgumentException(party.visibility == Visibility.FRIENDS
+                    ? "Only the leader's friends can join that party" : "Only the leader's clan can join that party");
         if (party.full()) throw new IllegalArgumentException("That party is full");
         if (party.visibility == Visibility.SEMI_PRIVATE && !invited(player, partyId)) {
             party.requests.add(player);
@@ -188,9 +231,17 @@ public final class PartyBook {
         party.maxSize = maxSize;
     }
 
+    public void setPvp(UUID leader, boolean pvp) { leading(leader).pvp = pvp; }
+
+    public void setPrivateVoice(UUID leader, boolean privateVoice) { leading(leader).privateVoice = privateVoice; }
+
     /** Restores a saved party (server start). */
-    void restore(UUID id, String name, Visibility visibility, UUID leader, int maxSize, List<UUID> members, List<UUID> requests) {
+    void restore(UUID id, String name, Visibility visibility, UUID leader, int maxSize, boolean pvp,
+                 boolean privateVoice, List<UUID> members,
+                 List<UUID> requests) {
         Party party = new Party(id, name, visibility, leader, maxSize);
+        party.pvp = pvp;
+        party.privateVoice = privateVoice;
         for (UUID member : members) if (!memberOf.containsKey(member)) { party.members.add(member); memberOf.put(member, id); }
         memberOf.put(leader, id);
         party.requests.addAll(requests);

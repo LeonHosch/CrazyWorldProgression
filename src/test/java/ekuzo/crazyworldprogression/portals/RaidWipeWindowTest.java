@@ -25,7 +25,7 @@ class RaidWipeWindowTest {
         MobScript script = code.decode("""
                 script enrage
                 encounter_start()
-                sleep(duration="5m")
+                wait(duration="5m")
                 wipe()
                 """);
         assertInstanceOf(MobScript.WipeStep.class, script.steps().get(2));

@@ -1,0 +1,14 @@
+{
+  "static_discharge": {
+    "sounds": [
+      "crazy-world-progression:static_discharge"
+    ],
+    "subtitle": "subtitles.crazy-world-progression.static_discharge"
+  },
+  "return_by_death": {
+    "sounds": [
+      "crazy-world-progression:return_by_death"
+    ],
+    "subtitle": "subtitles.crazy-world-progression.return_by_death"
+  }
+}

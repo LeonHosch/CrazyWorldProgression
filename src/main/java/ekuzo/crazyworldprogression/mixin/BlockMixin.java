@@ -30,8 +30,13 @@ public abstract class BlockMixin {
             BlockState state, ServerLevel level, BlockPos pos, BlockEntity blockEntity,
             Entity entity, ItemInstance tool, CallbackInfoReturnable<List<ItemStack>> callback
     ) {
-        if (!(entity instanceof ServerPlayer player) || !state.is(BlockTags.CROPS)) return;
-        callback.setReturnValue(SkillMultiplierService.multiplyDrops(
+        if (!(entity instanceof ServerPlayer player)) return;
+        if (state.is(BlockTags.CROPS)) callback.setReturnValue(SkillMultiplierService.multiplyDrops(
                 player, callback.getReturnValue(), SkillMultiplierService.farmingMultiplier(player)));
+        // Produce quality (or a ruined harvest) for fully grown crops.
+        if (ekuzo.crazyworldprogression.skills.SkillXp.grownProduce(pos, state))
+            callback.setReturnValue(ekuzo.crazyworldprogression.farming.ProduceQuality.harvest(
+                    player, callback.getReturnValue(), ekuzo.crazyworldprogression.farming.ProduceQuality.CROPS,
+                    ekuzo.crazyworldprogression.farming.FarmingLevels.requiredLevel(level.getServer(), state.getBlock())));
     }
 }

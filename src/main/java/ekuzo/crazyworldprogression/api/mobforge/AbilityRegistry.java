@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.api.mobforge;
 
+import ekuzo.crazyworldprogression.api.CwpIdentifiers;
 import net.minecraft.resources.Identifier;
 
 import java.util.LinkedHashMap;
@@ -15,6 +16,7 @@ public final class AbilityRegistry {
     public synchronized void register(Identifier id, Supplier<? extends MobAbility> factory) {
         requireOpen();
         Objects.requireNonNull(id, "ability ID");
+        CwpIdentifiers.requireCustomRegistration(id);
         Objects.requireNonNull(factory, "ability factory for " + id);
         if (entries.putIfAbsent(id, factory) != null) throw new IllegalArgumentException("Duplicate MobForge ability: " + id);
     }

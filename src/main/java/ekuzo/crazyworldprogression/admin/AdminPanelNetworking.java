@@ -191,7 +191,7 @@ public final class AdminPanelNetworking {
                 ByteBufCodecs.STRING_UTF8, ExecuteActionPayload::moduleId,
                 ByteBufCodecs.STRING_UTF8, ExecuteActionPayload::pageId,
                 ByteBufCodecs.STRING_UTF8, ExecuteActionPayload::actionId,
-                ByteBufCodecs.stringUtf8(65_536), ExecuteActionPayload::valuesJson,
+                ByteBufCodecs.stringUtf8(524_288), ExecuteActionPayload::valuesJson,
                 ExecuteActionPayload::new);
 
         // Return the protocol identifier for this action request.

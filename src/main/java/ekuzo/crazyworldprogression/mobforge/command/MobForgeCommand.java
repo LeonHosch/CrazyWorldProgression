@@ -15,7 +15,6 @@ import ekuzo.crazyworldprogression.api.mobforge.EntitySpawnService;
 import ekuzo.crazyworldprogression.api.mobforge.SpawnContext;
 import net.minecraft.resources.Identifier;
 import ekuzo.crazyworldprogression.mobforge.entity.MobForgePurge;
-import ekuzo.crazyworldprogression.mobforge.networking.MobForgeNetworking;
 import ekuzo.crazyworldprogression.mobforge.script.MobScript;
 import ekuzo.crazyworldprogression.mobforge.template.MobTemplate;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;

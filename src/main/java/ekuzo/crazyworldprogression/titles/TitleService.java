@@ -68,8 +68,7 @@ public final class TitleService {
     }
 
     public static Definition equipped(ServerPlayer player, Map<String, Definition> definitions) {
-        TitleData data = TitleData.get(player.level().getServer());
-        Definition definition = definitions.get(data.equipped(player.getUUID().toString()));
+        Definition definition = definitions.get(TitleData.equipped(player));
         return definition != null && unlocked(player, definition) ? definition : null;
     }
 
@@ -77,12 +76,12 @@ public final class TitleService {
         Definition definition = definitions(player.level().getServer()).get(id.toString());
         if (definition == null) throw new IllegalArgumentException("Unknown achievement title " + id);
         if (!unlocked(player, definition)) throw new IllegalArgumentException("Achievement not unlocked: " + definition.achievementId());
-        TitleData.get(player.level().getServer()).equip(player.getUUID().toString(), id.toString());
+        TitleData.equip(player, id.toString());
         TitleNetworking.broadcast(player.level().getServer());
     }
 
     public static void clear(ServerPlayer player) {
-        TitleData.get(player.level().getServer()).equip(player.getUUID().toString(), "");
+        TitleData.equip(player, "");
         TitleNetworking.broadcast(player.level().getServer());
     }
 }

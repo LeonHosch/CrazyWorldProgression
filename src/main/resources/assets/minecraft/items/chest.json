@@ -1,0 +1,83 @@
+{
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:component",
+    "component": "crazy-world-progression:quality",
+    "cases": [
+      {
+        "when": 0,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:miserable"
+          }
+        }
+      },
+      {
+        "when": 2,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:fine"
+          }
+        }
+      },
+      {
+        "when": 3,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:superior"
+          }
+        }
+      },
+      {
+        "when": 4,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:perfect"
+          }
+        }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:select",
+      "cases": [
+        {
+          "model": {
+            "type": "minecraft:special",
+            "base": "minecraft:item/chest",
+            "model": {
+              "type": "minecraft:chest",
+              "texture": "minecraft:christmas"
+            }
+          },
+          "when": [
+            "12-24",
+            "12-25",
+            "12-26"
+          ]
+        }
+      ],
+      "fallback": {
+        "type": "minecraft:special",
+        "base": "minecraft:item/chest",
+        "model": {
+          "type": "minecraft:chest",
+          "texture": "minecraft:normal"
+        }
+      },
+      "pattern": "MM-dd",
+      "property": "minecraft:local_time"
+    }
+  }
+}

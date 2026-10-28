@@ -46,6 +46,12 @@ public final class BuildingService {
         return value == null ? null : view(value);
     }
 
+    /** Registers a building whose blocks were already written to its structure file (pocket import). */
+    public static void register(MinecraftServer server, Identifier id, int sizeX, int sizeY, int sizeZ, String author) {
+        if (building(server, id) != null) throw new IllegalArgumentException("Building already exists: " + id);
+        BuildingData.get(server).put(new BuildingData.Building(id, sizeX, sizeY, sizeZ, author));
+    }
+
     public static BuildingInfo capture(ServerPlayer player, Identifier id) {
         return capture(player, id, false);
     }

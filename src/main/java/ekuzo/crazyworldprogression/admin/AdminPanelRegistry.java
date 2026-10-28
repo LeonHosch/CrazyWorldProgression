@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.admin;
 
+import ekuzo.crazyworldprogression.api.CwpIdentifiers;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -17,6 +18,7 @@ public final class AdminPanelRegistry {
 
     // Register one uniquely identified module during common mod initialization.
     public static synchronized AdminModule register(AdminModule module) {
+        CwpIdentifiers.requireCustomRegistration(module.id());
         if (MODULES.putIfAbsent(module.id(), module) != null) {
             throw new IllegalArgumentException("Duplicate CWP admin module: " + module.id());
         }
@@ -82,7 +84,8 @@ public final class AdminPanelRegistry {
     public enum PageLayout {
         STANDARD,
         PREVIEW_CARDS,
-        EDITOR
+        EDITOR,
+        CODE
     }
 
     /** Workspaces the panel's navigation is split into. */
@@ -92,6 +95,13 @@ public final class AdminPanelRegistry {
 
     /** One page in the panel's navigation; workspace is MODERATE, BUILD or LOGS. */
     public record AdminTab(String id, String label, String workspace) {
+        /**
+         * Labels looked up each time the panel is built, by tab ID. Kept outside the record because tabs are sent
+         * to the client as JSON, which cannot carry a Supplier.
+         */
+        private static final Map<String, java.util.function.Supplier<String>> DYNAMIC_LABELS =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
         public AdminTab {
             if (workspace == null || workspace.isBlank()) workspace = BUILD;
         }
@@ -99,6 +109,18 @@ public final class AdminPanelRegistry {
         // Tabs registered without a workspace go to Build.
         public AdminTab(String id, String label) {
             this(id, label, BUILD);
+        }
+
+        /** A tab whose label is looked up each time the panel is built, for names a content mod can change. */
+        public static AdminTab dynamic(String id, java.util.function.Supplier<String> label, String workspace) {
+            DYNAMIC_LABELS.put(id, label);
+            return new AdminTab(id, label.get(), workspace);
+        }
+
+        @Override
+        public String label() {
+            var dynamic = DYNAMIC_LABELS.get(id);
+            return dynamic == null ? label : dynamic.get();
         }
     }
 

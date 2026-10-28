@@ -11,6 +11,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -76,8 +77,21 @@ public final class RaidCheckpoints extends SavedData {
         return true;
     }
 
+    void clearForParticipants(String portalId, Collection<String> participants) {
+        for (String id : participants) reset(id, portalId);
+    }
+
     public static boolean reset(MinecraftServer server, UUID playerId, Identifier portalId) {
         return get(server).reset(playerId.toString(), portalId.toString());
+    }
+
+    /** A finished instance clears this portal's checkpoint for everyone who participated in its lease. */
+    static void clearForInstance(MinecraftServer server, PortalData.StoredInstance instance, ServerLevel level) {
+        Set<String> participants = new LinkedHashSet<>(instance.admittedPlayers());
+        participants.addAll(instance.visitors());
+        for (ServerPlayer player : level.players()) participants.add(player.getUUID().toString());
+        RaidCheckpoints data = get(server);
+        data.clearForParticipants(instance.portalId().toString(), participants);
     }
 
     /** A new or reset instance of a raid starts at its party leader's checkpoint (the first admitted player). */
@@ -94,7 +108,8 @@ public final class RaidCheckpoints extends SavedData {
         MinecraftServer server = level.getServer();
         PortalData.StoredInstance instance = PortalData.get(server).instances()
                 .get(level.dimension().identifier().toString());
-        if (instance == null || encounters < 1 || !RaidService.isRaid(server, instance.slotDimension())) return;
+        if (instance == null || instance.finished() || encounters < 1
+                || !RaidService.isRaid(server, instance.slotDimension())) return;
         Set<String> participants = new LinkedHashSet<>();
         for (ServerPlayer player : level.players()) {
             String id = player.getUUID().toString();

@@ -82,9 +82,7 @@ public final class MobScriptCode {
                 if (List.of("if", "else", "end_if", "loop", "end_loop").contains(name))
                     throw error(lineNumber, "Control flow uses indentation");
                 Object body = arguments(call.group(2), lineNumber);
-                if (name.equals("sleep") && body instanceof Map<?, ?> map && map.size() == 1 && map.containsKey("duration"))
-                    body = map.get("duration");
-				if ((name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end")
+				if ((name.equals("finish_instance") || name.equals("encounter_start") || name.equals("encounter_end")
 						|| name.equals("wipe")) && body instanceof Map<?, ?> map && map.isEmpty()) body = true;
                 steps.add(Map.of(name, body));
             }
@@ -112,8 +110,7 @@ public final class MobScriptCode {
                 Map<?, ?> loop = (Map<?, ?>) body;
                 out.append("while ").append(loop.get("condition")).append(", max_iterations=")
                         .append(loop.get("max_iterations")).append(":\n"); depth++;
-            } else if (name.equals("sleep")) out.append("sleep(duration=").append(JSON.toJson(body)).append(")\n");
-            else if ((name.equals("raid_complete") || name.equals("encounter_start") || name.equals("encounter_end")
+			} else if ((name.equals("finish_instance") || name.equals("encounter_start") || name.equals("encounter_end")
                     || name.equals("wipe")) && !(body instanceof Map<?, ?>))
                 out.append(name).append("()\n");
             else if (body instanceof Map<?, ?> fields) {

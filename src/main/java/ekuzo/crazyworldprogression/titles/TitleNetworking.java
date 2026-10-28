@@ -21,6 +21,7 @@ public final class TitleNetworking {
     private static final Gson GSON = new Gson();
     private TitleNetworking() { }
     public static void initialize() {
+        TitleData.initialize();
         PayloadTypeRegistry.clientboundPlay().register(Payload.TYPE, Payload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(OptionsPayload.TYPE, OptionsPayload.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(ActionPayload.TYPE, ActionPayload.CODEC);

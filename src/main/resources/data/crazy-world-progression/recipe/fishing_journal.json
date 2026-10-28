@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:book",
+    "#minecraft:fishes"
+  ],
+  "result": {
+    "id": "crazy-world-progression:fishing_journal",
+    "count": 1
+  }
+}

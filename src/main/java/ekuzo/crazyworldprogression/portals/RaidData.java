@@ -24,7 +24,7 @@ final class RaidData extends SavedData {
     private static final SavedDataType<RaidData> TYPE = new SavedDataType<>(
             CrazyWorldProgression.id("raid_attempts"), RaidData::new, CODEC, null);
     private final Map<String, Attempt> attempts = new LinkedHashMap<>();
-    /** Spawn set by the last encounter_end(spawn=...) in each slot; replaces the template spawn there. */
+    /** Instance spawn set by encounter_end(spawn=...) or finish_instance(spawn=...). */
     private final Map<String, Spot> spawns = new LinkedHashMap<>();
 
     private RaidData() { }

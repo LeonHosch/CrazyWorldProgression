@@ -38,14 +38,21 @@ public record SkillTreeDefinition(
             List<String> previous,
             int following,
             List<String> stats,
-            Map<Identifier, Long> costs
+            Map<Identifier, Long> costs,
+            Map<String, Integer> requires
     ) {
         // Preserve YAML cost order for predictable GUI rendering and reject reward-like negative costs.
         public SkillNode {
             costs = Collections.unmodifiableMap(new LinkedHashMap<>(costs));
+            requires = Collections.unmodifiableMap(new LinkedHashMap<>(requires));
             if (costs.values().stream().anyMatch(value -> value < 0L)) {
                 throw new IllegalArgumentException("Skill costs must not be negative");
             }
+        }
+
+        public SkillNode(String id, String name, String germanName, String description, String germanDescription,
+                         String icon, List<String> previous, int following, List<String> stats, Map<Identifier, Long> costs) {
+            this(id, name, germanName, description, germanDescription, icon, previous, following, stats, costs, Map.of());
         }
     }
 }

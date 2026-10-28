@@ -8,7 +8,7 @@ import java.util.List;
 public record MobScript(String id, List<Step> steps) {
 	public MobScript { steps = steps == null ? List.of() : List.copyOf(steps); }
 
-	public sealed interface Step permits SpawnStep, SpawnMobsStep, SleepStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, DistancesStep, EffectStep, EncounterStartStep, EncounterEndStep, RaidCompleteStep, WipeStep { }
+	public sealed interface Step permits SpawnStep, SpawnMobsStep, WaitDurationStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, SkillXpStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, StopSoundStep, DistancesStep, EffectStep, EncounterStartStep, EncounterEndStep, FinishInstanceStep, WipeStep { }
 	public record Position(double x, double y, double z) { }
 	public record Offset(double x, double y, double z) {
 		public static final Offset NONE = new Offset(0, 0, 0);
@@ -29,7 +29,7 @@ public record MobScript(String id, List<Step> steps) {
 			this(mobId, location, offset, count, "");
 		}
 	}
-	public record SleepStep(long ticks) implements Step { }
+	public record WaitDurationStep(long ticks) implements Step { }
 	public record SpawnEntityStep(Identifier id, String at, String saveAs) implements Step { }
 	public record WaitUntilStep(String condition, long timeoutTicks) implements Step { }
 	public record MobCastStep(String mob, Identifier ability) implements Step { }
@@ -39,6 +39,8 @@ public record MobScript(String id, List<Step> steps) {
 	public record RewardItemStep(Identifier item, int count) implements Step { }
 	public record RewardLootStep(Identifier lootTable, int rolls) implements Step { }
 	public record LootPoolStep(Identifier lootPoolId, String playerId) implements Step { }
+	/** Gives skill XP (dungeoning unless another skill is named) to the players in a list variable, or everyone inside. */
+	public record SkillXpStep(String skill, int amount, String playerId) implements Step { }
 	/** Award all remaining criteria of a real advancement to the selected players. */
 	public record AchievementStep(Identifier achievementId, String playerId) implements Step { }
 	/** All state belongs to one run, so parallel pocket instances never share variables. */
@@ -83,7 +85,10 @@ public record MobScript(String id, List<Step> steps) {
 		/** True when this deletes every location of the preset, including its original placement. */
 		public boolean deletesAll() { return action.equals("delete") && locationId.isEmpty(); }
 	}
-	public record RaidCompleteStep() implements Step { }
+	/** Marks the instance finished; it closes as soon as all players have left. */
+	public record FinishInstanceStep(Position spawn) implements Step {
+		public FinishInstanceStep() { this(null); }
+	}
 	public record EncounterStartStep() implements Step { }
 	/** Fail the encounter: everyone is downed, and after 5 seconds the encounter resets unless it ends first. */
 	public record WipeStep() implements Step { }
@@ -105,7 +110,10 @@ public record MobScript(String id, List<Step> steps) {
 	public record ExplosionStep(Position location, float power) implements Step { }
 	/** View and simulation distance of the instance in chunks: -1 leaves it, 0 returns to the portal's setting. */
 	public record DistancesStep(int view, int simulation) implements Step { }
+	/** {@code location} null plays the sound to every player in the world, attached to them, like music. */
 	public record SoundStep(Identifier soundId, Position location) implements Step { }
+	/** Stops a sound the scripts played in this world; {@code soundId} null stops all of them. */
+	public record StopSoundStep(Identifier soundId) implements Step { }
 	/** A blank playerId targets every player in this run's world or pocket instance. */
 	public record EffectStep(Identifier effectId, String playerId, String action, int amplifier) implements Step { }
 }

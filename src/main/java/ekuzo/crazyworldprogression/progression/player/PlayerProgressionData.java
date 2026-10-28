@@ -18,9 +18,6 @@ import java.util.UUID;
 
 /** Dynamic player wallets, personal unlocks, and reusable one-time claim ledgers. */
 public final class PlayerProgressionData extends SavedData {
-    private static final String LEGACY_EP = "echelon-core:echelon_points";
-    private static final String LEGACY_FC = "echelon-core:fakhrul_currency";
-    private static final String LEGACY_PS = "echelon-core:powerful_souls";
     private static final Codec<UUID> UUID_CODEC = Codec.STRING.xmap(UUID::fromString, UUID::toString);
     private static final Codec<Map<UUID, Long>> UUID_BALANCES_CODEC = Codec.unboundedMap(UUID_CODEC, Codec.LONG);
     private static final Codec<Map<String, Map<UUID, Long>>> BALANCES_CODEC = Codec.unboundedMap(Codec.STRING, UUID_BALANCES_CODEC);
@@ -36,39 +33,25 @@ public final class PlayerProgressionData extends SavedData {
     public static final Codec<PlayerProgressionData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             BALANCES_CODEC.optionalFieldOf("balances", Collections.emptyMap()).forGetter(data -> data.balances),
             CLAIMS_CODEC.optionalFieldOf("claims", Collections.emptyMap()).forGetter(data -> data.claims),
-            UUID_SETS_CODEC.optionalFieldOf("unlocked_skills", Collections.emptyMap()).forGetter(data -> data.unlockedSkills),
-            UUID_BALANCES_CODEC.optionalFieldOf("points", Collections.emptyMap()).forGetter(data -> Collections.emptyMap()),
-            UUID_BALANCES_CODEC.optionalFieldOf("fakhrul_currency", Collections.emptyMap()).forGetter(data -> Collections.emptyMap()),
-            UUID_BALANCES_CODEC.optionalFieldOf("powerful_souls", Collections.emptyMap()).forGetter(data -> Collections.emptyMap()),
-            UUID_SETS_CODEC.optionalFieldOf("powerful_soul_claims", Collections.emptyMap()).forGetter(data -> Collections.emptyMap())
+            UUID_SETS_CODEC.optionalFieldOf("unlocked_skills", Collections.emptyMap()).forGetter(data -> data.unlockedSkills)
     ).apply(instance, PlayerProgressionData::new));
 
     public static final SavedDataType<PlayerProgressionData> TYPE = new SavedDataType<>(
-            CrazyWorldProgression.id("echelon_points"), PlayerProgressionData::new, CODEC, null);
+            CrazyWorldProgression.id("player_progression"), PlayerProgressionData::new, CODEC, null);
 
     // Create empty per-player progression state for a new world.
     public PlayerProgressionData() {
     }
 
-    // Decode generic state and merge fixed-format balances and claims written by pre-framework releases.
+    // Decode generic state into independently mutable collections.
     private PlayerProgressionData(
             Map<String, Map<UUID, Long>> balances,
             Map<String, Map<UUID, Set<String>>> claims,
-            Map<UUID, Set<String>> unlockedSkills,
-            Map<UUID, Long> legacyEchelonPoints,
-            Map<UUID, Long> legacyFakhrulCurrency,
-            Map<UUID, Long> legacyPowerfulSouls,
-            Map<UUID, Set<String>> legacyPowerfulSoulClaims
+            Map<UUID, Set<String>> unlockedSkills
     ) {
         balances.forEach((id, values) -> copyBalances(values, this.balances.computeIfAbsent(id, ignored -> new HashMap<>())));
         claims.forEach((id, values) -> this.claims.put(id, copySets(values)));
         this.unlockedSkills.putAll(copySets(unlockedSkills));
-        mergeLegacyBalance(LEGACY_EP, legacyEchelonPoints);
-        mergeLegacyBalance(LEGACY_FC, legacyFakhrulCurrency);
-        mergeLegacyBalance(LEGACY_PS, legacyPowerfulSouls);
-        if (!legacyPowerfulSoulClaims.isEmpty()) {
-            this.claims.computeIfAbsent(LEGACY_PS, ignored -> new HashMap<>()).putAll(copySets(legacyPowerfulSoulClaims));
-        }
     }
 
     // Load the one per-player progression record stored in the overworld's SavedData storage.
@@ -83,6 +66,7 @@ public final class PlayerProgressionData extends SavedData {
 
     // Store an exact player balance and remove empty currency maps from serialized state.
     public void setBalance(UUID playerUuid, Identifier currencyId, long amount) {
+        if (balance(playerUuid, currencyId) == amount) return;
         Map<UUID, Long> values = balances.computeIfAbsent(currencyId.toString(), ignored -> new HashMap<>());
         putOrRemoveZero(values, playerUuid, amount);
         if (values.isEmpty()) balances.remove(currencyId.toString());
@@ -96,8 +80,7 @@ public final class PlayerProgressionData extends SavedData {
 
     // Persist one personal unlock after its complete purchase has succeeded.
     public void unlockSkill(UUID playerUuid, String skillId) {
-        unlockedSkills.computeIfAbsent(playerUuid, ignored -> new HashSet<>()).add(skillId);
-        setDirty();
+        if (unlockedSkills.computeIfAbsent(playerUuid, ignored -> new HashSet<>()).add(skillId)) setDirty();
     }
 
     // Return an immutable snapshot of one player's personal unlock keys.
@@ -117,17 +100,11 @@ public final class PlayerProgressionData extends SavedData {
 
     // Record a unique claim in its ledger and mark the player progression save dirty.
     public void addClaim(UUID playerUuid, Identifier ledgerId, String claimId) {
-        claims.computeIfAbsent(ledgerId.toString(), ignored -> new HashMap<>())
-                .computeIfAbsent(playerUuid, ignored -> new HashSet<>()).add(claimId);
-        setDirty();
+        if (claims.computeIfAbsent(ledgerId.toString(), ignored -> new HashMap<>())
+                .computeIfAbsent(playerUuid, ignored -> new HashSet<>()).add(claimId)) setDirty();
     }
 
-    // Merge a decoded fixed-format balance only when generic state does not already contain that player.
-    private void mergeLegacyBalance(String currencyId, Map<UUID, Long> values) {
-        if (!values.isEmpty()) copyBalances(values, balances.computeIfAbsent(currencyId, ignored -> new HashMap<>()));
-    }
-
-    // Copy positive balances while preserving values already decoded from the new generic format.
+    // Copy positive balances into mutable storage.
     private static void copyBalances(Map<UUID, Long> source, Map<UUID, Long> target) {
         source.forEach((uuid, amount) -> { if (amount > 0L) target.putIfAbsent(uuid, amount); });
     }

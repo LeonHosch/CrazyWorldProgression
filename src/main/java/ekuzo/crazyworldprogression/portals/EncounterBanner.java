@@ -31,6 +31,8 @@ public final class EncounterBanner {
         WIPED(0xFF5555, "Raid wiped", "Attempt %s is ready"),
         RESUMED(0x55FFFF, "Checkpoint", "Resuming at encounter %s"),
         FAILED(0xFF5555, "Encounter failed", "Resetting in %s seconds"),
+        /** Sent again as the rebuild progresses; the client keeps it on screen and only updates the number. */
+        RESETTING(0xFFAA00, "Resetting the encounter", "Rebuilding... %s%%"),
         CLUTCH(0xFFD700, "Cleared in the clutch!", "The encounter ended just in time");
 
         final int color;

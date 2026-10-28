@@ -127,7 +127,25 @@ public final class MobScriptExecutor {
 		for (ActiveRun run : active.values()) if (pocketInstanceId.equals(run.pocketInstanceId)) run.clearState();
 		for (ActiveRun run : pending.values()) if (pocketInstanceId.equals(run.pocketInstanceId)) run.clearState();
 	}
-	public void clear() { active.clear(); pending.clear(); canceled.clear(); ticking = false; clock = 0; }
+	public void clear() { active.clear(); pending.clear(); canceled.clear(); playedSounds.clear(); ticking = false; clock = 0; }
+
+	/** Sound IDs scripts played per world, so wipes, encounter ends and sound_stop() can stop them again. */
+	private final Map<ServerLevel, Set<Identifier>> playedSounds = new java.util.WeakHashMap<>();
+
+	/** Stops every sound a script played in this world for the players in it. */
+	public void stopSounds(ServerLevel level) {
+		Set<Identifier> sounds = playedSounds.remove(level);
+		if (sounds != null) for (Identifier sound : sounds) sendStop(level, sound);
+	}
+	private void stopSound(ServerLevel level, Identifier sound) {
+		Set<Identifier> sounds = playedSounds.get(level);
+		if (sounds != null) sounds.remove(sound);
+		sendStop(level, sound);
+	}
+	private static void sendStop(ServerLevel level, Identifier sound) {
+		var packet = new net.minecraft.network.protocol.game.ClientboundStopSoundPacket(sound, SoundSource.MASTER);
+		for (var player : level.players()) player.connection.send(packet);
+	}
 	public void entityDied(ServerLevel level, Entity entity) {
 		for (ActiveRun run : active.values()) if (run.level == level)
 		{
@@ -224,7 +242,8 @@ public final class MobScriptExecutor {
 
 	/** Rewards that belong to an already completed encounter and are not repeated after resuming. */
 	static boolean rewardStep(MobScript.Step step) {
-		return step instanceof MobScript.LootPoolStep || step instanceof MobScript.AchievementStep
+		return step instanceof MobScript.LootPoolStep || step instanceof MobScript.SkillXpStep
+				|| step instanceof MobScript.AchievementStep
 				|| step instanceof MobScript.RewardCurrencyStep || step instanceof MobScript.RewardItemStep
 				|| step instanceof MobScript.RewardLootStep;
 	}
@@ -287,10 +306,10 @@ public final class MobScriptExecutor {
 				run.step++;
 				continue;
 			}
-			if (step instanceof MobScript.SleepStep sleep) {
+			if (step instanceof MobScript.WaitDurationStep wait) {
 				run.step++;
-				run.wakeTick = clock + sleep.ticks();
-				if (sleep.ticks() > 0) return false;
+				run.wakeTick = clock + wait.ticks();
+				if (wait.ticks() > 0) return false;
 			} else if (step instanceof MobScript.SpawnStep spawn) {
 				run.step++;
 				spawn(run, spawn);
@@ -338,8 +357,19 @@ public final class MobScriptExecutor {
 				if (run.pocketInstanceId == null) throw new IllegalStateException("Loot rewards require a pocket instance");
 				for (UUID playerId : playerTargets(run, loot.playerId())) {
 					var player = run.level.getServer().getPlayerList().getPlayer(playerId);
-					if (player != null && player.level() == run.level)
+					if (player == null || player.level() != run.level) continue;
+					LootPoolService.roll(run.level.getServer(), player, loot.lootPoolId());
+					// A second roll by chance with the player's Dungeoning level.
+					if (ekuzo.crazyworldprogression.skills.Skills.bonusRoll(player, ekuzo.crazyworldprogression.skills.Skills.Skill.DUNGEONING))
 						LootPoolService.roll(run.level.getServer(), player, loot.lootPoolId());
+				}
+			} else if (step instanceof MobScript.SkillXpStep xp) {
+				run.step++;
+				var skill = ekuzo.crazyworldprogression.skills.Skills.Skill.parse(xp.skill());
+				for (UUID playerId : playerTargets(run, xp.playerId())) {
+					var player = run.level.getServer().getPlayerList().getPlayer(playerId);
+					if (player != null && player.level() == run.level)
+						ekuzo.crazyworldprogression.skills.Skills.add(player, skill, xp.amount());
 				}
 			} else if (step instanceof MobScript.AchievementStep achievement) {
 				run.step++;
@@ -446,8 +476,20 @@ public final class MobScriptExecutor {
 				run.step++;
 				var event = BuiltInRegistries.SOUND_EVENT.getValue(sound.soundId());
 				if (event == null) throw new IllegalArgumentException("Unknown sound " + sound.soundId());
-				run.level.playSound(null, sound.location().x(), sound.location().y(),
+				playedSounds.computeIfAbsent(run.level, ignored -> new java.util.HashSet<>()).add(sound.soundId());
+				if (sound.location() != null) run.level.playSound(null, sound.location().x(), sound.location().y(),
 						sound.location().z(), event, SoundSource.MASTER, 1.0F, 1.0F);
+				else {
+					var holder = BuiltInRegistries.SOUND_EVENT.wrapAsHolder(event);
+					long seed = run.level.getRandom().nextLong();
+					for (var player : run.level.players())
+						player.connection.send(new net.minecraft.network.protocol.game.ClientboundSoundEntityPacket(
+								holder, SoundSource.MASTER, player, 1.0F, 1.0F, seed));
+				}
+			} else if (step instanceof MobScript.StopSoundStep stop) {
+				run.step++;
+				if (stop.soundId() == null) stopSounds(run.level);
+				else stopSound(run.level, stop.soundId());
 			} else if (step instanceof MobScript.EffectStep effect) {
 				run.step++;
 				var holder = BuiltInRegistries.MOB_EFFECT.get(ResourceKey.create(Registries.MOB_EFFECT,
@@ -458,9 +500,11 @@ public final class MobScriptExecutor {
 					if (effect.action().equals("remove")) player.removeEffect(holder);
 					else player.addEffect(new MobEffectInstance(holder, -1, effect.amplifier()));
 				}
-			} else if (step instanceof MobScript.RaidCompleteStep) {
+			} else if (step instanceof MobScript.FinishInstanceStep finish) {
 				run.step++;
-				RaidService.complete(run.level);
+				MobScript.Position spawn = finish.spawn();
+				PortalService.finishInstance(run.level,
+						spawn == null ? null : new Vec3(spawn.x(), spawn.y(), spawn.z()));
 			} else if (step instanceof MobScript.EncounterStartStep) {
 				if (!clearScriptManaged(run)) return false;
 				run.step++;
@@ -568,8 +612,15 @@ public final class MobScriptExecutor {
 	private static List<MobForgeHandle> tagged(ActiveRun run, String expression) {
 		ScriptEntityHandle handle = run.handles.get(ScriptCondition.reference(expression));
 		if (handle instanceof TagGroup group) return group.livingMobForge();
-		if (handle instanceof MobForgeHandle mob && mob.isAlive()) return List.of(mob);
-		return List.of();
+		MobForgeHandle mob = handle != null && handle.isAlive() ? asCaster(handle) : null;
+		return mob == null ? List.of() : List.of(mob);
+	}
+
+	/** Any living tagged entity can cast abilities and hold a phase, registered MobForge mob or not. */
+	static MobForgeHandle asCaster(ScriptEntityHandle handle) {
+		if (handle instanceof MobForgeHandle mob) return mob;
+		Entity entity = handle.world().getEntity(handle.uuid());
+		return entity instanceof net.minecraft.world.entity.Mob ? ekuzo.crazyworldprogression.api.mobforge.MobAbilities.handle(entity) : null;
 	}
 
 	/** Adds the script tag to a spawned mob (used by kills()) and to the tag's group (dead, health_percent, phase). */

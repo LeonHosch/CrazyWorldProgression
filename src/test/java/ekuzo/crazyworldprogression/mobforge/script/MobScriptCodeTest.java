@@ -20,6 +20,30 @@ class MobScriptCodeTest {
         assertEquals(script, code.decode(code.encode(script)));
     }
 
+    @Test void soundLocationIsOptional() {
+        MobScript script = code.decode("""
+                script music_example
+                sound(sound_id="minecraft:music_disc.pigstep")
+                sound(sound_id="minecraft:block.note_block.pling", location={"x":1,"y":64,"z":2})
+                """);
+        assertEquals(new MobScript.SoundStep(net.minecraft.resources.Identifier.parse("minecraft:music_disc.pigstep"),
+                null), script.steps().getFirst());
+        assertEquals(new MobScript.Position(1, 64, 2), ((MobScript.SoundStep) script.steps().get(1)).location());
+        assertEquals(script, code.decode(code.encode(script)));
+    }
+
+    @Test void soundStopStopsOneOrEverySound() {
+        MobScript script = code.decode("""
+                script stop_example
+                sound_stop(sound_id="minecraft:music_disc.pigstep")
+                sound_stop()
+                """);
+        assertEquals(java.util.List.of(
+                new MobScript.StopSoundStep(net.minecraft.resources.Identifier.parse("minecraft:music_disc.pigstep")),
+                new MobScript.StopSoundStep(null)), script.steps());
+        assertEquals(script, code.decode(code.encode(script)));
+    }
+
     @Test void savedLootPoolSupportsPlayerListVariables() {
         MobScript script = code.decode("""
                 script loot_example
@@ -62,22 +86,25 @@ class MobScriptCodeTest {
                     if players_in("plate") >= 2 and powered(10, 64, 5):
                         variable(name="charge", operation="increment", value="1")
                     else:
-                        sleep(duration="1s")
+                        wait(duration="1s")
                 portal_location(portal="cwp:boss_gate", action="add", location="entrance", position={"x":3,"y":64,"z":4})
-                raid_complete()
+                finish_instance()
                 """;
         MobScript parsed = code.decode(source);
         assertEquals("raid_example", parsed.id());
         assertEquals(11, parsed.steps().size());
         assertEquals(parsed, code.decode(code.encode(parsed)));
         assertInstanceOf(MobScript.LoopStep.class, parsed.steps().get(2));
-        assertInstanceOf(MobScript.RaidCompleteStep.class, parsed.steps().getLast());
+        assertInstanceOf(MobScript.FinishInstanceStep.class, parsed.steps().getLast());
     }
 
     @Test void rejectsMalformedBlocks() {
+		assertThrows(IllegalArgumentException.class, () -> code.decode("script old\nraid_complete()\n"));
+		assertThrows(IllegalArgumentException.class, () -> code.decode("script old\nsleep(duration=\"1s\")\n"));
+		assertThrows(IllegalArgumentException.class, () -> code.decode("script mixed\nwait(duration=\"1s\", condition=\"true\")\n"));
         assertThrows(IllegalArgumentException.class, () -> code.decode("script test\nif kills(\"add\") > 1:\n"));
-        assertThrows(IllegalArgumentException.class, () -> code.decode("script test\nelse:\n    sleep(duration=\"1s\")\n"));
-        assertThrows(IllegalArgumentException.class, () -> code.decode("script test\nwhile var(\"x\") < 1:\n  sleep(duration=\"1s\")\n"));
+        assertThrows(IllegalArgumentException.class, () -> code.decode("script test\nelse:\n    wait(duration=\"1s\")\n"));
+        assertThrows(IllegalArgumentException.class, () -> code.decode("script test\nwhile var(\"x\") < 1:\n  wait(duration=\"1s\")\n"));
     }
 
     @Test void outerElseClosesNestedBlocksAndConditionsValidate() {
@@ -85,9 +112,9 @@ class MobScriptCodeTest {
                 script nested
                 if (players_in("plate") >= 2 and not powered("switch")) or kills("adds") >= 3:
                     if var("ready") == true:
-                        sleep(duration="1t")
+                        wait(duration="1t")
                 else:
-                    sleep(duration="2t")
+                    wait(duration="2t")
                 """);
         assertEquals(script, code.decode(code.encode(script)));
         assertThrows(IllegalArgumentException.class, () -> ScriptCondition.validate("unknown('x')"));
@@ -115,7 +142,7 @@ class MobScriptCodeTest {
                 id: all_steps
                 steps:
                   - spawn: {template: raid_zombie, location: {x: 1, y: 64, z: 2}, offset: {x: 1, y: 0, z: 1}, count: 2}
-                  - sleep: 2t
+                  - wait: {duration: 2t}
                   - spawn_entity: {id: 'minecraft:zombie', at: origin, save_as: boss}
                   - wait_until: {condition: '${boss.health_percent <= 0.5}', timeout: 5m}
                   - mob_cast: {mob: '${boss}', ability: 'cwp:slam'}
@@ -129,15 +156,15 @@ class MobScriptCodeTest {
                   - event_box: {name: plate, min: {x: 0, y: 64, z: 0}, max: {x: 2, y: 66, z: 2}}
                   - redstone_sensor: {name: switch, position: {x: 3, y: 64, z: 3}}
                   - if: '${box.plate >= 2}'
-                  - sleep: 1t
+                  - wait: {duration: 1t}
                   - else: true
-                  - sleep: 2t
+                  - wait: {duration: 2t}
                   - end_if: true
                   - loop: {condition: '${kills.raid_add < 6}', max_iterations: 100}
-                  - sleep: 1t
+                  - wait: {duration: 1t}
                   - end_loop: true
                   - portal_location: {portal: 'cwp:gate', action: add, location: main, position: {x: 3, y: 64, z: 4}}
-                  - raid_complete: true
+                  - finish_instance: true
                 """);
         assertEquals(all, code.decode(code.encode(all)));
     }

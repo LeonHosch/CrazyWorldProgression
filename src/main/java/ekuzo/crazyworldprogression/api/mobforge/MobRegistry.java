@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.api.mobforge;
 
+import ekuzo.crazyworldprogression.api.CwpIdentifiers;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 
@@ -20,6 +21,7 @@ public final class MobRegistry {
     public synchronized void register(MobDefinition definition) {
         if (frozen) throw new IllegalStateException("MobForge mob registration closed; register during Fabric mod initialization");
         Objects.requireNonNull(definition, "mob definition");
+        CwpIdentifiers.requireCustomRegistration(definition.id());
         if (entries.putIfAbsent(definition.id(), definition) != null)
             throw new IllegalArgumentException("Duplicate MobForge mob: " + definition.id());
         for (String tag : definition.tags()) byTag.computeIfAbsent(tag, ignored -> new LinkedHashSet<>()).add(definition);

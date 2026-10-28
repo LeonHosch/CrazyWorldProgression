@@ -8,6 +8,7 @@ import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -45,7 +46,8 @@ public final class Parties {
 
     // ---------------------------------------------------------------- persistence
 
-    record SavedParty(UUID id, String name, String visibility, UUID leader, int maxSize, List<UUID> members,
+    record SavedParty(UUID id, String name, String visibility, UUID leader, int maxSize, boolean pvp,
+                      boolean privateVoice, List<UUID> members,
                       List<UUID> requests) {
         static final Codec<SavedParty> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 UUIDUtil.STRING_CODEC.fieldOf("id").forGetter(SavedParty::id),
@@ -53,6 +55,8 @@ public final class Parties {
                 Codec.STRING.fieldOf("visibility").forGetter(SavedParty::visibility),
                 UUIDUtil.STRING_CODEC.fieldOf("leader").forGetter(SavedParty::leader),
                 Codec.INT.fieldOf("max_size").forGetter(SavedParty::maxSize),
+                Codec.BOOL.optionalFieldOf("pvp", false).forGetter(SavedParty::pvp),
+                Codec.BOOL.optionalFieldOf("private_voice", false).forGetter(SavedParty::privateVoice),
                 UUIDUtil.STRING_CODEC.listOf().fieldOf("members").forGetter(SavedParty::members),
                 UUIDUtil.STRING_CODEC.listOf().optionalFieldOf("requests", List.of()).forGetter(SavedParty::requests)
         ).apply(instance, SavedParty::new));
@@ -90,7 +94,7 @@ public final class Parties {
             for (SavedParty party : data(server).parties) {
                 try {
                     book.restore(party.id(), party.name(), PartyBook.Visibility.parse(party.visibility()), party.leader(),
-                            party.maxSize(), party.members(), party.requests());
+                            party.maxSize(), party.pvp(), party.privateVoice(), party.members(), party.requests());
                 } catch (RuntimeException exception) {
                     CrazyWorldProgression.LOGGER.warn("Skipping a saved party that could not be loaded: {}", exception.getMessage());
                 }
@@ -102,7 +106,8 @@ public final class Parties {
     private static void save(MinecraftServer server) {
         Data data = data(server);
         data.parties = book(server).all().stream().map(party -> new SavedParty(party.id(), party.name(),
-                party.visibility().name(), party.leader(), party.maxSize(), party.members(), party.requests())).toList();
+                party.visibility().name(), party.leader(), party.maxSize(), party.pvp(), party.privateVoice(), party.members(),
+                party.requests())).toList();
         data.setDirty();
     }
 
@@ -112,8 +117,12 @@ public final class Parties {
         ServerPlayNetworking.registerGlobalReceiver(ActionPayload.TYPE, (payload, context) ->
                 context.server().execute(() -> act(context.player(), payload.action(), payload.a(), payload.b())));
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-            viewers(server).remove(handler.getPlayer().getUUID());
-            server.execute(() -> refresh(server));
+            UUID departing = handler.getPlayer().getUUID();
+            viewers(server).remove(departing);
+            server.execute(() -> {
+                cleanupInactive(server, departing);
+                refresh(server);
+            });
         });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             Data data = data(server);
@@ -124,6 +133,11 @@ public final class Parties {
                 data.setDirty();
             }
             server.execute(() -> refresh(server));
+        });
+        // Parties with nobody online do not survive a server restart.
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            cleanupInactive(server, null);
+            PartyVoiceBridge.sync(server, book(server));
         });
     }
 
@@ -217,6 +231,8 @@ public final class Parties {
                     return;
                 }
                 case "create" -> {
+                    if (b.equalsIgnoreCase("CLAN") && ekuzo.crazyworldprogression.social.SocialData.get(server).clanOf(me) == null)
+                        throw new IllegalArgumentException("Join a clan first to make a clan party");
                     PartyBook.Party party = book.create(me, a.isBlank() ? player.getGameProfile().name() + "'s party" : a,
                             b.isBlank() ? PartyBook.Visibility.PRIVATE : PartyBook.Visibility.parse(b));
                     adoptSoloInstances(server, me, party);
@@ -224,7 +240,7 @@ public final class Parties {
                 }
                 case "join" -> {
                     PartyBook.Party party = book.party(UUID.fromString(a));
-                    if (book.join(me, UUID.fromString(a))) {
+                    if (book.join(me, UUID.fromString(a), circle(server))) {
                         notifyParty(server, party, player.getGameProfile().name() + " joined the party.");
                     } else {
                         tell(player, "Join request sent to " + name(server, party.leader()) + ".");
@@ -297,8 +313,27 @@ public final class Parties {
                     }
                 }
                 case "rename" -> book.rename(me, a);
-                case "visibility" -> book.setVisibility(me, PartyBook.Visibility.parse(a));
+                case "visibility" -> {
+                    PartyBook.Visibility visibility = PartyBook.Visibility.parse(a);
+                    if (visibility == PartyBook.Visibility.CLAN
+                            && ekuzo.crazyworldprogression.social.SocialData.get(server).clanOf(me) == null)
+                        throw new IllegalArgumentException("Join a clan first to make a clan party");
+                    book.setVisibility(me, visibility);
+                }
                 case "max_size" -> book.setMaxSize(me, Integer.parseInt(a));
+                case "pvp" -> {
+                    book.setPvp(me, Boolean.parseBoolean(a));
+                    notifyParty(server, book.partyOf(me), "Party PvP is now " + (book.partyOf(me).pvp() ? "on" : "off") + ".");
+                }
+                case "voice_mode" -> {
+                    boolean privateVoice = switch (a) {
+                        case "private" -> true;
+                        case "open" -> false;
+                        default -> throw new IllegalArgumentException("Voice mode must be open or private");
+                    };
+                    book.setPrivateVoice(me, privateVoice);
+                    notifyParty(server, book.partyOf(me), "Party voice is now " + (privateVoice ? "private" : "open") + ".");
+                }
                 default -> throw new IllegalArgumentException("Unknown party action");
             }
             save(server);
@@ -347,6 +382,16 @@ public final class Parties {
     }
 
     /** /party join <leader>: joins (public) or asks to join (semi-private) the party that player leads or is in. */
+    /** Friends parties: the leader's friends; Clan parties: the leader's clan. */
+    static PartyBook.Circle circle(MinecraftServer server) {
+        var social = ekuzo.crazyworldprogression.social.SocialData.get(server);
+        return (visibility, leader, player) -> {
+            if (visibility == PartyBook.Visibility.FRIENDS) return social.friends(leader, player);
+            var clan = social.clanOf(leader);
+            return clan != null && clan.members().contains(player);
+        };
+    }
+
     public static void joinLeader(ServerPlayer player, String leaderName) {
         MinecraftServer server = player.level().getServer();
         try {
@@ -370,8 +415,16 @@ public final class Parties {
         return VIEWERS.computeIfAbsent(server, ignored -> new HashSet<>());
     }
 
+    private static void cleanupInactive(MinecraftServer server, UUID departing) {
+        Set<UUID> online = new HashSet<>();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) online.add(player.getUUID());
+        if (departing != null) online.remove(departing);
+        if (book(server).disbandInactive(online)) save(server);
+    }
+
     /** Sends fresh state to everyone with the party screen open. */
     public static void refresh(MinecraftServer server) {
+        PartyVoiceBridge.sync(server, book(server));
         for (UUID viewer : List.copyOf(viewers(server))) {
             ServerPlayer player = server.getPlayerList().getPlayer(viewer);
             if (player == null) viewers(server).remove(viewer);
@@ -399,6 +452,8 @@ public final class Parties {
             party.addProperty("name", mine.name());
             party.addProperty("visibility", mine.visibility().name());
             party.addProperty("max", mine.maxSize());
+            party.addProperty("pvp", mine.pvp());
+            party.addProperty("private_voice", mine.privateVoice());
             party.addProperty("leader", mine.leader().equals(me));
             party.addProperty("activity", activity(server, mine));
             JsonArray members = new JsonArray();
@@ -431,7 +486,7 @@ public final class Parties {
         }
         root.add("invites", invites);
         JsonArray browser = new JsonArray();
-        for (PartyBook.Party party : book.browser()) {
+        for (PartyBook.Party party : book.browser(me, circle(server))) {
             if (mine != null && party.id().equals(mine.id())) continue;
             JsonObject entry = new JsonObject();
             entry.addProperty("id", party.id().toString());

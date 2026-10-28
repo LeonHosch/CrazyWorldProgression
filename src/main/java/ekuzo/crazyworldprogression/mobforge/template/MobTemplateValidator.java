@@ -24,6 +24,11 @@ public final class MobTemplateValidator {
 		Identifier entityId = parseId(template.entity(), "entity", errors);
 		if (entityId != null && !BuiltInRegistries.ENTITY_TYPE.containsKey(entityId)) errors.add("unknown entity ID: " + entityId);
 		else if (entityId != null && "minecraft:player".equals(entityId.toString())) errors.add("player is not spawnable");
+		for (String ability : template.abilities().attached()) {
+			Identifier id = parseId(ability, "abilities", errors);
+			if (id != null && ekuzo.crazyworldprogression.mobforge.MobForge.abilities().get(id).isEmpty())
+				errors.add("unknown ability: " + id);
+		}
 		template.attributes().forEach((key, value) -> {
 			if (!ATTRIBUTES.contains(key)) errors.add("unknown attribute: " + key);
 			if (value == null || !Double.isFinite(value)) errors.add("attribute " + key + " must be finite");

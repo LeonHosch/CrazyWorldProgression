@@ -27,6 +27,8 @@ import static ekuzo.crazyworldprogression.admin.AdminPanelRegistry.Tone.NORMAL;
 final class AdminLootPoolEditor {
     static final String ROOT = "loot_pools";
     private static final String NEW = ROOT + "/new";
+    /** Which loot pool each mob drops (MobLoot). */
+    static final String MOBS = ROOT + "/mobs";
     private static final String EDIT = ROOT + "/edit/";
     private static final String ENTRY = ROOT + "/entry/";
 
@@ -38,6 +40,7 @@ final class AdminLootPoolEditor {
                                               List<AdminPanelRegistry.AdminTab> tabs) {
         MinecraftServer server = player.level().getServer();
         if (pageId.equals(NEW)) return create(tabs);
+        if (pageId.equals(MOBS)) return mobs(server, tabs);
         if (pageId.startsWith(EDIT)) {
             Identifier id = Identifier.tryParse(pageId.substring(EDIT.length()));
             if (id != null && LootPoolService.get(server, id) != null) return edit(server, id, tabs);
@@ -61,13 +64,13 @@ final class AdminLootPoolEditor {
                 "Create a pool first, then add items and nested pools in its editor.", GOOD, List.of(),
                 List.of(AdminPanelRegistry.AdminAction.navigate("Create", NEW)), null)));
         List<LootPoolData.Pool> topLevel = pools.values().stream()
-                .filter(pool -> !LootPoolService.nested(pools, pool.id()))
+                .filter(pool -> !LootPoolService.nested(pools, pool.id()) && !ekuzo.crazyworldprogression.loot.MobLoot.isMobPool(pool.id()))
                 .sorted(Comparator.comparing(pool -> pool.id().toString())).toList();
         Map<String, AdminPanelRegistry.AdminEntry> all = new java.util.LinkedHashMap<>();
         for (LootPoolData.Pool pool : topLevel) {
             var firstItem = pool.entries().stream().filter(entry -> entry.kind().equals("item")).findFirst();
             all.put(pool.id().toString(), (new AdminPanelRegistry.AdminEntry(pool.name(),
-                    pool.id() + " · " + countLabel(pool.entries().size()), GOOD, List.of(),
+                    AdminIds.display(pool.id()) + " · " + countLabel(pool.entries().size()), GOOD, List.of(),
                     List.of(AdminPanelRegistry.AdminAction.navigate("Edit", EDIT + pool.id()),
                             new AdminPanelRegistry.AdminAction("loot.delete|" + pool.id(), "Delete", true)),
                     new AdminPanelRegistry.EntryPreview("item",
@@ -79,12 +82,47 @@ final class AdminLootPoolEditor {
                 AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
     }
 
+    /** Every mob and the pool it drops, with a way to attach another pool or reset one to the vanilla drops. */
+    private static AdminPanelRegistry.AdminPage mobs(MinecraftServer server, List<AdminPanelRegistry.AdminTab> tabs) {
+        Map<String, LootPoolData.Pool> pools = LootPoolService.all(server);
+        Map<String, String> attached = ekuzo.crazyworldprogression.loot.MobLoot.attached(server);
+        List<AdminPanelRegistry.AdminEntry> rows = new ArrayList<>();
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Attach", "Give a mob another pool",
+                "The mob's killer gets one roll of this pool. Leave the pool empty to make the mob drop nothing. "
+                        + "\"Reset to vanilla\" leaves only the mob's vanilla drops entry.",
+                List.of(field("mob", "Mob", "minecraft:zombie", "", List.copyOf(attached.keySet())),
+                        field("pool", "Loot pool", "crazy-world-progression:my_pool", "",
+                                pools.values().stream().filter(pool -> !LootPoolService.nested(pools, pool.id()))
+                                        .map(pool -> pool.id().toString()).sorted().toList())),
+                List.of(new AdminPanelRegistry.AdminAction("loot.mob_attach", "Attach", false))));
+        attached.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+            Identifier type = Identifier.parse(entry.getKey());
+            Identifier poolId = Identifier.parse(entry.getValue());
+            LootPoolData.Pool pool = pools.get(poolId.toString());
+            String name = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getOptional(type)
+                    .map(value -> value.getDescription().getString()).orElse(type.toString());
+            var firstItem = pool == null ? java.util.Optional.<LootPoolData.Entry>empty()
+                    : pool.entries().stream().filter(value -> value.kind().equals("item")).findFirst();
+            List<AdminPanelRegistry.AdminAction> actions = new ArrayList<>();
+            if (pool != null) actions.add(AdminPanelRegistry.AdminAction.navigate("Edit pool", EDIT + poolId));
+            actions.add(new AdminPanelRegistry.AdminAction("loot.mob_reset|" + type, "Reset to vanilla", true));
+            rows.add(new AdminPanelRegistry.AdminEntry(name, type + " · "
+                    + (pool == null ? "missing pool " + poolId : AdminIds.display(poolId) + " · " + countLabel(pool.entries().size())),
+                    pool == null ? AdminPanelRegistry.Tone.WARNING : GOOD, List.of(), actions,
+                    new AdminPanelRegistry.EntryPreview("item",
+                            firstItem.map(value -> value.target().toString()).orElse("minecraft:bone"), 0)));
+        });
+        return new AdminPanelRegistry.AdminPage(MOBS, "Mob drops", attached.size()
+                + " mob(s) · mobs drop nothing on the ground; their killer gets a roll of the pool", tabs, rows,
+                AdminPanelRegistry.PageLayout.PREVIEW_CARDS);
+    }
+
     private static AdminPanelRegistry.AdminPage create(List<AdminPanelRegistry.AdminTab> tabs) {
         return new AdminPanelRegistry.AdminPage(NEW, "Create loot pool",
-                "Choose a permanent ID. You can add items and nested pools after creating it.", tabs,
+                "Choose a permanent name. You can add items and nested pools after creating it.", tabs,
                 List.of(AdminPanelRegistry.AdminEntry.editor("Loot pool", "Identity",
-                        "The ID is what scripts use; the name is only shown here.",
-                        List.of(field("id", "Pool ID", "cwp:raid_rewards", "", List.of()),
+                        "The name is stored under CWP's namespace; external mods use mod:name.",
+                        List.of(field("id", "Pool name", "raid_rewards", "", List.of()),
                                 field("name", "Display name", "Raid rewards", "", List.of())),
                         List.of(new AdminPanelRegistry.AdminAction("loot.create", "Create", false),
                                 AdminPanelRegistry.AdminAction.navigate("Back", ROOT)))),
@@ -114,16 +152,25 @@ final class AdminLootPoolEditor {
                 "Add an item or a nested pool below.", List.of(), List.of()));
         for (int index = 0; index < pool.entries().size(); index++)
             rows.add(entryRow(pools, pool, index, total, entriesSection));
-        rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Item", "Start typing to search items",
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Add item", "Item and roll", "Start typing to search items",
                 List.of(field("add_item", "Item (type to search)", "diamond_sword", "", itemIds()),
                         field("add_chance", pickOne ? "Share %" : "Chance %", "100", "", List.of()),
-                        field("add_amount", "Amount", "1 or 1-3", "", List.of())),
+                        field("add_amount", "Amount", "1 or 1-3", "", List.of())), List.of()));
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Add item", "Optional proficiency rank",
+                "Fishing pools: the fishing proficiency needed to catch it (1 Novice to 5 Master). Fishing XP comes "
+                        + "from this rank and the catch's quality.",
+                List.of(AdminPanelRegistry.AdminField.select("add_level", "Rank", ekuzo.crazyworldprogression.skills.Proficiency.name(ekuzo.crazyworldprogression.skills.Proficiency.NOVICE), ekuzo.crazyworldprogression.skills.Proficiency.names())),
                 List.of(new AdminPanelRegistry.AdminAction("loot.add_item|" + id, "Add item", false))));
         rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Nested pool",
                 "Rolls its chance, then picks one of its own entries",
                 List.of(field("nested_chance", pickOne ? "Nested pool share %" : "Nested pool chance %", "25", "",
                         List.of())),
                 List.of(new AdminPanelRegistry.AdminAction("loot.add_nested|" + id, "Add nested pool", false))));
+        rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Vanilla drops",
+                "A mob's vanilla loot table, rolled with the real kill (Looting, fire, wool color, ...) and given to the killer",
+                List.of(field("vanilla_mob", "Mob", "minecraft:zombie", "", mobIds()),
+                        field("vanilla_chance", pickOne ? "Share %" : "Chance %", "100", "", List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("loot.add_vanilla|" + id, "Add vanilla drops", false))));
         List<String> currencies = playerCurrencies();
         if (!currencies.isEmpty()) rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Currency",
                 "Credits a player currency",
@@ -131,7 +178,14 @@ final class AdminLootPoolEditor {
                         field("currency_chance", pickOne ? "Share %" : "Chance %", "100", "", List.of()),
                         field("currency_amount", "Amount", "1 or 5-10", "", List.of())),
                 List.of(new AdminPanelRegistry.AdminAction("loot.add_currency|" + id, "Add currency", false))));
-        String subtitle = pool.id() + " · " + (pickOne ? "nested pool, picks one entry" : "every entry rolls on its own");
+        List<String> collectibles = collectibleIds();
+        if (!collectibles.isEmpty()) rows.add(AdminPanelRegistry.AdminEntry.editor("Add", "Mount or pet",
+                "Unlocks a mount or pet for the player (they never drop as items)",
+                List.of(field("add_collectible", "Mount or pet", collectibles.getFirst(), "", collectibles),
+                        field("collectible_chance", pickOne ? "Share %" : "Chance %", "1", "", List.of())),
+                List.of(new AdminPanelRegistry.AdminAction("loot.add_collectible|" + id, "Add mount or pet", false))));
+        String subtitle = AdminIds.display(pool.id()) + " · "
+                + (pickOne ? "nested pool, picks one entry" : "every entry rolls on its own");
         return new AdminPanelRegistry.AdminPage(EDIT + id, pool.name(), subtitle, tabs, rows,
                 AdminPanelRegistry.PageLayout.EDITOR);
     }
@@ -154,12 +208,21 @@ final class AdminLootPoolEditor {
                 actions.add(AdminPanelRegistry.AdminAction.navigate("Open", EDIT + entry.target()));
             }
             case "currency" -> {
-                title = "Currency " + entry.target();
+                title = "Currency " + AdminIds.display(entry.target());
                 detail = odds + " · " + amountLabel(entry);
+            }
+            case "mount", "pet" -> {
+                title = (entry.kind().equals("mount") ? "Mount " : "Pet ") + entry.target();
+                detail = odds + " · unlocks it";
+            }
+            case ekuzo.crazyworldprogression.loot.MobLoot.VANILLA -> {
+                title = "Vanilla drops: " + entry.target();
+                detail = odds + " · rolls the vanilla loot table with the kill (Looting, fire, ...)";
             }
             default -> {
                 title = entry.target().toString();
-                detail = odds + " · " + amountLabel(entry);
+                detail = odds + " · " + amountLabel(entry)
+                        + (entry.level() > ekuzo.crazyworldprogression.skills.Proficiency.NOVICE ? " · " + ekuzo.crazyworldprogression.skills.Proficiency.name(entry.level()) : "");
             }
         }
         if (entry.kind().equals("item"))
@@ -187,17 +250,23 @@ final class AdminLootPoolEditor {
                 "Type to search", List.of(field("target", "Item (type to search)", "minecraft:diamond",
                         reward.target().toString(), itemIds())), List.of()));
         if (reward.kind().equals("currency")) rows.add(AdminPanelRegistry.AdminEntry.editor("Entry", "Currency",
-                "Player currency", List.of(field("target", "Currency", "namespace:id",
-                        reward.target().toString(), playerCurrencies())), List.of()));
+                "Player currency", List.of(field("target", "Currency", "name or mod:name",
+                        AdminIds.display(reward.target()), playerCurrencies())), List.of()));
         rows.add(AdminPanelRegistry.AdminEntry.editor("Roll", pickOne ? "Share" : "Chance",
                 pickOne ? "This entry's share when the nested pool picks one entry."
                         : "100% always drops. Each entry rolls on its own.",
                 List.of(field("chance", pickOne ? "Share %" : "Chance %", "25", percentValue(reward.chance()),
                         List.of())), List.of()));
-        if (!reward.kind().equals("pool")) rows.add(AdminPanelRegistry.AdminEntry.editor("Amount", "Amount",
+        if (!reward.kind().equals("pool") && !reward.kind().equals("mount") && !reward.kind().equals("pet")
+                && !reward.kind().equals(ekuzo.crazyworldprogression.loot.MobLoot.VANILLA))
+            rows.add(AdminPanelRegistry.AdminEntry.editor("Amount", "Amount",
                 "A whole number between Min and Max, both included.",
                 List.of(field("min", "Min", "1", Integer.toString(reward.min()), List.of()),
                         field("max", "Max", "1", Integer.toString(reward.max()), List.of())), List.of()));
+        if (reward.kind().equals("item")) rows.add(AdminPanelRegistry.AdminEntry.editor("Proficiency",
+                "Rank", "Fishing pools: the fishing proficiency needed to catch it (1 Novice to 5 Master); it also sets the fishing XP.",
+                List.of(AdminPanelRegistry.AdminField.select("level", "Rank", ekuzo.crazyworldprogression.skills.Proficiency.name(reward.level()), ekuzo.crazyworldprogression.skills.Proficiency.names())),
+                List.of()));
         if (reward.kind().equals("item")) rows.add(AdminPanelRegistry.AdminEntry.editor("Announcement",
                 "Show in chat", "Off by default. When on, chat shows \"<player> just got <item>\" to everyone.",
                 List.of(AdminPanelRegistry.AdminField.select("show_in_chat", "Show in chat",
@@ -206,15 +275,32 @@ final class AdminLootPoolEditor {
                 List.of(), List.of(new AdminPanelRegistry.AdminAction("loot.entry.save|" + pool.id() + "|" + index,
                                 "Save", false),
                         AdminPanelRegistry.AdminAction.navigate("Back", EDIT + pool.id()))));
-        String name = reward.kind().equals("pool") ? "nested pool" : reward.kind();
+        String name = reward.kind().equals("pool") ? "nested pool"
+                : reward.kind().equals(ekuzo.crazyworldprogression.loot.MobLoot.VANILLA) ? "vanilla drops" : reward.kind();
         return new AdminPanelRegistry.AdminPage(ENTRY + pool.id() + "/" + index, "Edit " + name,
                 pool.name() + " · entry " + (index + 1), tabs, rows, AdminPanelRegistry.PageLayout.EDITOR);
     }
 
     static AdminPanelRegistry.ActionResult action(ServerPlayer player, String actionId, Map<String, String> values) {
         MinecraftServer server = player.level().getServer();
+        if (actionId.equals("loot.mob_attach")) {
+            Identifier mob = Identifier.tryParse(values.getOrDefault("mob", "").trim());
+            String poolText = values.getOrDefault("pool", "").trim();
+            if (mob == null) throw new IllegalArgumentException("Enter a mob, such as minecraft:zombie");
+            Identifier pool = poolText.isEmpty() ? null : AdminIds.reference(poolText,
+                    LootPoolService.all(server).values().stream().map(LootPoolData.Pool::id).toList());
+            ekuzo.crazyworldprogression.loot.MobLoot.attach(server, mob, pool);
+            return AdminPanelRegistry.ActionResult.success(pool == null ? mob + " drops nothing now"
+                    : mob + " now drops " + pool, MOBS);
+        }
+        if (actionId.startsWith("loot.mob_reset|")) {
+            Identifier mob = Identifier.parse(actionId.substring("loot.mob_reset|".length()));
+            Identifier pool = ekuzo.crazyworldprogression.loot.MobLoot.reset(server, mob);
+            return AdminPanelRegistry.ActionResult.success("Reset " + mob + " to its vanilla drops", EDIT + pool);
+        }
         if (actionId.equals("loot.create")) {
-            Identifier id = parse(values.get("id"));
+            Identifier id = AdminIds.createAvailable(values.get("id"),
+                    LootPoolService.all(server).values().stream().map(LootPoolData.Pool::id).toList());
             if (LootPoolService.get(server, id) != null) throw new IllegalArgumentException("Loot pool already exists: " + id);
             String name = values.getOrDefault("name", "").trim();
             LootPoolService.save(server, new LootPoolData.Pool(id, name.isEmpty() ? id.getPath() : name, "all", List.of()));
@@ -239,12 +325,34 @@ final class AdminLootPoolEditor {
                 Identifier item = itemId(values.get("add_item"));
                 int[] amount = amount(values.get("add_amount"));
                 entries.add(new LootPoolData.Entry("item", item, chance(values.get("add_chance")), 1,
-                        amount[0], amount[1]));
+                        amount[0], amount[1], false, 0, level(values.get("add_level"))));
                 saveEntries(server, pool, entries);
                 return AdminPanelRegistry.ActionResult.success("Added " + item, EDIT + id);
             }
+            case "loot.add_collectible" -> {
+                String value = values.getOrDefault("add_collectible", "").trim();
+                int colon = value.indexOf(':');
+                String kind = colon < 0 ? "" : value.substring(0, colon);
+                Identifier target = colon < 0 ? null : Identifier.tryParse(value.substring(colon + 1));
+                if (target == null || !ekuzo.crazyworldprogression.collectibles.Collectibles.exists(kind, target))
+                    throw new IllegalArgumentException("Pick a mount or pet, such as " + collectibleIds().getFirst());
+                entries.add(new LootPoolData.Entry(kind, target, chance(values.get("collectible_chance")), 1, 1, 1));
+                saveEntries(server, pool, entries);
+                return AdminPanelRegistry.ActionResult.success("Added " + kind + " " + target, EDIT + id);
+            }
+            case "loot.add_vanilla" -> {
+                requireRoom(entries);
+                Identifier mob = Identifier.tryParse(values.getOrDefault("vanilla_mob", "").trim().toLowerCase(java.util.Locale.ROOT));
+                if (mob == null || BuiltInRegistries.ENTITY_TYPE.getOptional(mob).isEmpty())
+                    throw new IllegalArgumentException("Enter a mob, such as minecraft:zombie");
+                Identifier table = ekuzo.crazyworldprogression.loot.MobLoot.lootTable(mob);
+                entries.add(new LootPoolData.Entry(ekuzo.crazyworldprogression.loot.MobLoot.VANILLA, table,
+                        chance(values.get("vanilla_chance")), 1, 1, 1));
+                saveEntries(server, pool, entries);
+                return AdminPanelRegistry.ActionResult.success("Added the vanilla drops of " + mob, EDIT + id);
+            }
             case "loot.add_currency" -> {
-                Identifier currency = parse(values.get("add_currency"));
+                Identifier currency = AdminIds.reference(values.get("add_currency"), playerCurrencyIds());
                 int[] amount = amount(values.get("currency_amount"));
                 entries.add(new LootPoolData.Entry("currency", currency, chance(values.get("currency_chance")), 1,
                         amount[0], amount[1]));
@@ -288,7 +396,7 @@ final class AdminLootPoolEditor {
             case "loot.chat" -> {
                 if (!old.kind().equals("item")) throw new IllegalArgumentException("Only items can be announced in chat");
                 entries.set(index, new LootPoolData.Entry(old.kind(), old.target(), old.chance(), old.weight(),
-                        old.min(), old.max(), !old.showInChat()));
+                        old.min(), old.max(), !old.showInChat(), old.xpPerItem(), old.level()));
                 saveEntries(server, pool, entries);
                 return AdminPanelRegistry.ActionResult.success(old.showInChat()
                         ? "Chat announcement off for " + old.target() : "Chat announcement on for " + old.target(), EDIT + id);
@@ -298,7 +406,8 @@ final class AdminLootPoolEditor {
             case "loot.entry.save" -> {
                 Identifier target = switch (old.kind()) {
                     case "item" -> itemId(values.getOrDefault("target", old.target().toString()));
-                    case "currency" -> parse(values.getOrDefault("target", old.target().toString()));
+                    case "currency" -> AdminIds.reference(values.getOrDefault("target", old.target().toString()),
+                            playerCurrencyIds());
                     default -> old.target();
                 };
                 int chance = values.containsKey("chance") ? chance(values.get("chance")) : old.chance();
@@ -306,8 +415,11 @@ final class AdminLootPoolEditor {
                 int max = values.containsKey("max") ? number(values.get("max"), "Max") : old.max();
                 boolean showInChat = values.containsKey("show_in_chat")
                         ? "Yes".equals(values.get("show_in_chat")) : old.showInChat();
+                int xp = old.xpPerItem();
+                int level = old.kind().equals("item") && values.containsKey("level")
+                        ? level(values.get("level")) : old.level();
                 entries.set(index, new LootPoolData.Entry(old.kind(), target, chance, old.weight(), min, max,
-                        showInChat));
+                        showInChat, xp, level));
                 saveEntries(server, pool, entries);
                 return AdminPanelRegistry.ActionResult.success("Saved entry", EDIT + id);
             }
@@ -353,10 +465,22 @@ final class AdminLootPoolEditor {
                 .filter(value -> !value.equals("minecraft:air")).sorted().toList();
     }
 
+    /** Mobs with a vanilla loot table. */
+    private static List<String> mobIds() {
+        return BuiltInRegistries.ENTITY_TYPE.keySet().stream()
+                .filter(id -> !ekuzo.crazyworldprogression.loot.MobLoot.tableItems(
+                        ekuzo.crazyworldprogression.loot.MobLoot.lootTable(id)).isEmpty())
+                .map(Object::toString).sorted().toList();
+    }
+
     private static List<String> playerCurrencies() {
+        return playerCurrencyIds().stream().map(AdminIds::display).sorted().toList();
+    }
+
+    private static List<Identifier> playerCurrencyIds() {
         return CurrencyRegistry.values().stream()
                 .filter(value -> value.scope() == CurrencyDefinition.CurrencyScope.PLAYER)
-                .map(value -> value.id().toString()).sorted().toList();
+                .map(CurrencyDefinition::id).toList();
     }
 
     /** Accepts "diamond" as well as "minecraft:diamond". */
@@ -369,10 +493,7 @@ final class AdminLootPoolEditor {
     }
 
     private static Identifier parse(String value) {
-        if (value == null || !value.contains(":")) throw new IllegalArgumentException("Use a namespaced ID such as cwp:raid_rewards");
-        Identifier id = Identifier.tryParse(value.trim());
-        if (id == null) throw new IllegalArgumentException("Invalid ID: " + value);
-        return id;
+        return AdminIds.create(value);
     }
 
     private static Integer parseIndex(String value) {
@@ -402,6 +523,9 @@ final class AdminLootPoolEditor {
         try { return Integer.parseInt(value.trim()); }
         catch (RuntimeException exception) { throw new IllegalArgumentException(label + " must be a whole number"); }
     }
+
+    /** A rank picked in the dropdown (Novice to Master). */
+    private static int level(String value) { return ekuzo.crazyworldprogression.skills.Proficiency.parse(value); }
 
     /** Blank means 100%. Accepts up to two decimals and an optional % sign. */
     static int chance(String value) {
@@ -434,6 +558,14 @@ final class AdminLootPoolEditor {
 
     private static String countLabel(int count) {
         return count == 1 ? "1 entry" : count + " entries";
+    }
+
+    /** "mount:<id>" and "pet:<id>" for every registered mount and pet. */
+    private static List<String> collectibleIds() {
+        List<String> ids = new ArrayList<>();
+        ekuzo.crazyworldprogression.collectibles.Collectibles.mounts().forEach(mount -> ids.add("mount:" + mount.id()));
+        ekuzo.crazyworldprogression.collectibles.Collectibles.pets().forEach(pet -> ids.add("pet:" + pet.id()));
+        return ids;
     }
 
     private static AdminPanelRegistry.AdminField field(String id, String label, String placeholder,

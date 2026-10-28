@@ -1,0 +1,83 @@
+{
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:component",
+    "component": "crazy-world-progression:quality",
+    "cases": [
+      {
+        "when": 0,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/trapped_chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:trapped_miserable"
+          }
+        }
+      },
+      {
+        "when": 2,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/trapped_chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:trapped_fine"
+          }
+        }
+      },
+      {
+        "when": 3,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/trapped_chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:trapped_superior"
+          }
+        }
+      },
+      {
+        "when": 4,
+        "model": {
+          "type": "minecraft:special",
+          "base": "minecraft:item/trapped_chest",
+          "model": {
+            "type": "minecraft:chest",
+            "texture": "crazy-world-progression:trapped_perfect"
+          }
+        }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:select",
+      "cases": [
+        {
+          "model": {
+            "type": "minecraft:special",
+            "base": "minecraft:item/trapped_chest",
+            "model": {
+              "type": "minecraft:chest",
+              "texture": "minecraft:christmas"
+            }
+          },
+          "when": [
+            "12-24",
+            "12-25",
+            "12-26"
+          ]
+        }
+      ],
+      "fallback": {
+        "type": "minecraft:special",
+        "base": "minecraft:item/trapped_chest",
+        "model": {
+          "type": "minecraft:chest",
+          "texture": "minecraft:trapped"
+        }
+      },
+      "pattern": "MM-dd",
+      "property": "minecraft:local_time"
+    }
+  }
+}

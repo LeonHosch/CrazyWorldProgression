@@ -21,8 +21,13 @@ public abstract class LivingEntityMixin {
     )
     private Consumer<ItemStack> crazyworldprogression$multiplyMobDrops(Consumer<ItemStack> original) {
         Player creditedPlayer = ((LivingEntity) (Object) this).getLastHurtByPlayer();
-        if (!(creditedPlayer instanceof ServerPlayer serverPlayer)) return original;
+        // No player killed it: its meat is Miserable.
+        if (!(creditedPlayer instanceof ServerPlayer serverPlayer))
+            return stack -> original.accept(stack.is(ekuzo.crazyworldprogression.farming.ProduceQuality.MEAT)
+                    ? ekuzo.crazyworldprogression.farming.ProduceQuality.miserable(stack) : stack);
         double multiplier = SkillMultiplierService.mobDropMultiplier(serverPlayer);
-        return stack -> SkillMultiplierService.appendMultiplied(serverPlayer.getRandom(), original, stack, multiplier);
+        // Meat gets its quality (or is ruined) once per kill, then the multiplier copies it.
+        Consumer<ItemStack> graded = ekuzo.crazyworldprogression.farming.ProduceQuality.butcher(serverPlayer, original);
+        return stack -> SkillMultiplierService.appendMultiplied(serverPlayer.getRandom(), graded, stack, multiplier);
     }
 }

@@ -6,7 +6,11 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.MultiLineEditBox;
+import net.minecraft.client.gui.components.MultilineTextField;
+import net.minecraft.client.gui.components.Whence;
 import net.minecraft.client.gui.screens.Screen;
+import ekuzo.crazyworldprogression.mixin.client.MultiLineEditBoxAccessor;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
@@ -47,6 +51,21 @@ public final class AdminPanelScreen extends Screen {
     private final Map<String, String> formValues = new HashMap<>();
     private final Map<String, String> pendingAutoValues = new HashMap<>();
     private final Map<String, EditBox> editBoxes = new HashMap<>();
+    private MultiLineEditBox codeBox;
+    /** Inputs panel right of the source editor; zero width when the panel is too narrow for it. */
+    private int codeHintX, codeHintY, codeHintWidth, codeHintHeight;
+    /** Inner padding of MultiLineEditBox (AbstractTextAreaWidget.INNER_PADDING). */
+    private static final int CODE_BOX_PADDING = 4;
+    /** Space between the text cursor and the faded completion preview. */
+    private static final int GHOST_GAP = 3;
+    /** Values the server sent for script inputs (templates, loot pools, ...), by list name. */
+    private final Map<String, List<String>> codeValues = new HashMap<>();
+    private static final Map<String, List<String>> CLIENT_VALUE_CACHE = new HashMap<>();
+    private List<String> codeMatches = List.of();
+    private int codeMatchIndex;
+    private String codeMatchKey = "";
+    private String codeDismissedKey;
+    private static final int CODE_MATCH_ROWS = 8;
     private final Map<String, AdminPanelRegistry.AdminField> fieldDefinitions = new HashMap<>();
     private AdminPanelNetworking.PanelSnapshot snapshot;
     /** Content area right of the sidebar; the whole panel is shellLeft..shellLeft + shellWidth. */
@@ -89,6 +108,8 @@ public final class AdminPanelScreen extends Screen {
         this.snapshot = snapshot;
         Runnable pendingLeave = afterSave;
         afterSave = null;
+        if (!changedPage && snapshot.error() && snapshot.page() != null
+                && snapshot.page().layout() == AdminPanelRegistry.PageLayout.CODE) return;
         // "Save and leave": only leave when the save worked and the save itself did not already move on.
         if (pendingLeave != null && !snapshot.error() && !changedPage) {
             formValues.clear();
@@ -122,6 +143,7 @@ public final class AdminPanelScreen extends Screen {
         updatePanelScale();
         closeDropdown();
         editBoxes.clear();
+        codeBox = null;
         fieldDefinitions.clear();
         selectAnchor = null;
         shellWidth = Math.min(MAX_PANEL_WIDTH, width - PANEL_MARGIN * 2);
@@ -134,7 +156,7 @@ public final class AdminPanelScreen extends Screen {
         if (isDashboard()) buildDashboardButtons();
         else buildModuleButtons();
         int right = left + panelWidth - 6;
-        Button close = Button.builder(Component.literal("✕"), ignored -> leave(this::onClose))
+        Button close = Button.builder(Component.literal("✕"), ignored -> onClose())
                 .bounds(right - 18, top + 5, 18, 18).build();
         close.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Close")));
         addRenderableWidget(close);
@@ -312,6 +334,10 @@ public final class AdminPanelScreen extends Screen {
             addSelectOptions();
             return;
         }
+        if (page.layout() == AdminPanelRegistry.PageLayout.CODE) {
+            buildCodeWidgets();
+            return;
+        }
         if (page.layout() == AdminPanelRegistry.PageLayout.PREVIEW_CARDS) {
             for (PreviewPlacement placement : previewPlacements()) {
                 addActionButtons(placement.entry(), placement.y(), placement.x() + 8,
@@ -339,6 +365,47 @@ public final class AdminPanelScreen extends Screen {
             addFields(entry, placement.y(), placement.x() + 6, placement.width() - 12, true);
             addActionButtons(entry, placement.y(), placement.x() + 6, placement.x() + placement.width() - 6, true,
                     placement.height());
+        }
+    }
+
+    private void buildCodeWidgets() {
+        AdminPanelRegistry.AdminField source = snapshot.page().entries().stream()
+                .flatMap(entry -> entry.fields().stream())
+                .filter(field -> field.id().equals("script_source"))
+                .findFirst().orElseThrow();
+        int x = left + 14;
+        int y = contentTop() + 18;
+        int areaWidth = panelWidth - 28;
+        codeHintWidth = areaWidth >= 480 ? Math.max(160, Math.min(230, areaWidth / 3)) : 0;
+        int editorWidth = areaWidth - (codeHintWidth > 0 ? codeHintWidth + 8 : 0);
+        int editorHeight = Math.max(80, top + panelHeight - FOOTER_HEIGHT - 42 - y);
+        codeHintX = x + editorWidth + 8;
+        codeHintY = y;
+        codeHintHeight = editorHeight;
+        codeBox = MultiLineEditBox.builder().setX(x).setY(y)
+                .setPlaceholder(Component.literal("script <id>"))
+                .build(font, editorWidth, editorHeight, Component.literal("MobForge script source"));
+        codeBox.setCharacterLimit(source.maxLength());
+        codeBox.setValue(formValues.getOrDefault(source.id(), source.initialValue()));
+        codeBox.setValueListener(value -> formValues.put(source.id(), value));
+        codeValues.clear();
+        for (String entry : source.suggestions()) {
+            int tab = entry.indexOf('\t');
+            if (tab > 0) codeValues.computeIfAbsent(entry.substring(0, tab), ignored -> new ArrayList<>())
+                    .add(entry.substring(tab + 1));
+        }
+        addRenderableWidget(codeBox);
+        int buttonY = y + editorHeight + 7;
+        for (AdminPanelRegistry.AdminEntry entry : snapshot.page().entries()) {
+            for (AdminPanelRegistry.AdminAction action : entry.actions()) {
+                int buttonWidth = 112;
+                int buttonX = action.wide()
+                        ? x + areaWidth - buttonWidth : x;
+                String label = action.dangerous() && action.id().equals(pendingDangerousAction)
+                        ? "Confirm" : action.label();
+                addRenderableWidget(Button.builder(Component.literal(label), ignored -> activate(action))
+                        .bounds(buttonX, buttonY, buttonWidth, 20).build());
+            }
         }
     }
 
@@ -423,6 +490,11 @@ public final class AdminPanelScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         event = panelMouseEvent(event);
         if (event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            int codeRow = codeMatchRowAt(event.x(), event.y());
+            if (codeRow >= 0) {
+                acceptCodeMatch(codeRow);
+                return true;
+            }
             int row = dropdownRowAt(event.x(), event.y());
             if (row >= 0) {
                 acceptDropdown(row);
@@ -587,6 +659,8 @@ public final class AdminPanelScreen extends Screen {
         super.extractRenderState(graphics, (int) (mouseX / panelRenderScale),
                 (int) (mouseY / panelRenderScale), delta);
         if (isDashboard()) renderModuleIcons(graphics);
+        renderCodeGhost(graphics);
+        renderCodeMatches(graphics, (int) (mouseX / panelRenderScale), (int) (mouseY / panelRenderScale));
         renderDropdown(graphics, (int) (mouseX / panelRenderScale), (int) (mouseY / panelRenderScale));
         graphics.pose().popMatrix();
     }
@@ -614,6 +688,13 @@ public final class AdminPanelScreen extends Screen {
 
     // Render visible status entries with severity accents and concise secondary text.
     private void renderEntries(GuiGraphicsExtractor graphics) {
+        if (snapshot.page().layout() == AdminPanelRegistry.PageLayout.CODE) {
+            graphics.text(font, Component.literal(trim("Tab: complete a command or input, jump to the next input, or indent"
+                            + " · Save validates on the server", panelWidth - 32)),
+                    left + 16, contentTop() + 4, 0xFFA7AFBA, false);
+            renderCodeHint(graphics);
+            return;
+        }
         if (snapshot.page().layout() == AdminPanelRegistry.PageLayout.EDITOR) {
             renderEditor(graphics);
             return;
@@ -765,6 +846,8 @@ public final class AdminPanelScreen extends Screen {
             int rowLeft = placement.x() + 6, rowRight = placement.x() + placement.width() - 6;
             graphics.fill(rowLeft - 2, placement.y(), rowRight + 2, placement.y() + placement.height(), 0x66232934);
             if (entry.fields().isEmpty()) {
+                // A single wide button fills the row, so its text would only peek out around the button.
+                if (entry.actions().size() == 1 && entry.actions().getFirst().wide()) continue;
                 int textX = rowLeft + 2;
                 if (entry.preview() != null && entry.preview().kind().equals("item")) {
                     graphics.item(icon(entry.title().equals("Item preview")
@@ -910,6 +993,32 @@ public final class AdminPanelScreen extends Screen {
     // Accept the visible autocomplete candidate with Tab while a suggested field is focused.
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (codeBox != null && codeBox.isFocused() && !updateCodeMatches().isEmpty()) {
+            switch (event.key()) {
+                case GLFW.GLFW_KEY_DOWN -> {
+                    codeMatchIndex = (codeMatchIndex + 1) % codeMatches.size();
+                    return true;
+                }
+                case GLFW.GLFW_KEY_UP -> {
+                    codeMatchIndex = (codeMatchIndex + codeMatches.size() - 1) % codeMatches.size();
+                    return true;
+                }
+                case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER, GLFW.GLFW_KEY_TAB -> {
+                    acceptCodeMatch(codeMatchIndex);
+                    return true;
+                }
+                case GLFW.GLFW_KEY_ESCAPE -> {
+                    codeDismissedKey = codeMatchKey;
+                    codeMatches = List.of();
+                    return true;
+                }
+                default -> { }
+            }
+        }
+        if (event.key() == GLFW.GLFW_KEY_TAB && codeBox != null && codeBox.isFocused()) {
+            completeCode();
+            return true;
+        }
         if (dropdownVisible()) {
             switch (event.key()) {
                 case GLFW.GLFW_KEY_DOWN -> {
@@ -946,9 +1055,460 @@ public final class AdminPanelScreen extends Screen {
         return super.keyPressed(event);
     }
 
+    /**
+     * Tab in the source editor: completes a command or condition together with its required inputs, completes an
+     * input name inside a call, adds a missing required input, or jumps to the next input. Otherwise indents.
+     */
+    private void completeCode() {
+        MultilineTextField field = ((MultiLineEditBoxAccessor) codeBox).cwp$textField();
+        String source = field.value();
+        int cursor = field.cursor();
+        CodeInsertion insertion = pendingInsertion(source, cursor);
+        if (insertion != null) {
+            field.insertText(insertion.text());
+            if (insertion.valueOffset() >= 0)
+                selectValue(field, cursor + insertion.valueOffset(),
+                        cursor + insertion.valueOffset() + insertion.template().length(), insertion.template());
+            else if (insertion.cursorInParens()) field.seekCursor(Whence.RELATIVE, -1);
+            return;
+        }
+        ScriptSignatures.Context context = ScriptSignatures.at(source, cursor);
+        if (context.callOpen() >= 0 && nextInput(field, source, cursor, context.signature().condition())) return;
+        field.insertText("    ");
+    }
+
+    /**
+     * Text Tab would insert at the cursor: a command or condition with its required inputs, or an input name with
+     * its value. {@code valueOffset} is where the value to select starts in {@code text}, or -1.
+     */
+    private record CodeInsertion(String text, int valueOffset, String template, boolean cursorInParens) { }
+
+    /** What Tab would insert here, or null when Tab jumps to the next input or indents instead. */
+    private static CodeInsertion pendingInsertion(String source, int cursor) {
+        ScriptSignatures.Context context = ScriptSignatures.at(source, cursor);
+        if (context.callOpen() >= 0) return context.prefix() == null ? null : inputInsertion(context);
+        int start = cursor;
+        while (start > 0 && (Character.isLowerCase(source.charAt(start - 1))
+                || source.charAt(start - 1) == '_')) start--;
+        if (start == cursor) return null;
+        String prefix = source.substring(start, cursor);
+        int lineStart = source.lastIndexOf('\n', start - 1) + 1;
+        String before = source.substring(lineStart, start).trim();
+        boolean conditions = before.equals("if") || before.equals("while")
+                || before.startsWith("if ") || before.startsWith("while ")
+                || before.endsWith(" and") || before.endsWith(" or") || before.endsWith("not");
+        // Only the first word of a line can be a command; later words (script IDs, values) are not completed.
+        if (!conditions && !before.isEmpty()) return null;
+        Map<String, ScriptSignatures.Signature> table = conditions ? ScriptSignatures.CONDITIONS : ScriptSignatures.COMMANDS;
+        ScriptSignatures.Signature match = table.containsKey(prefix) ? table.get(prefix) : table.keySet().stream()
+                .sorted().filter(value -> value.startsWith(prefix)).findFirst().map(table::get).orElse(null);
+        if (match == null) return null;
+        String rest = match.name().substring(prefix.length());
+        if (cursor < source.length() && source.charAt(cursor) == '(')
+            return rest.isEmpty() ? null : new CodeInsertion(rest, -1, null, false);
+        if (match.block()) return new CodeInsertion(rest + " ", -1, null, false);
+        StringBuilder call = new StringBuilder(rest).append('(');
+        int firstValue = -1;
+        for (ScriptSignatures.Arg arg : match.inserted()) {
+            if (call.charAt(call.length() - 1) != '(') call.append(", ");
+            if (!match.condition()) call.append(arg.name()).append('=');
+            if (firstValue < 0) firstValue = call.length();
+            call.append(arg.template());
+        }
+        call.append(')');
+        return new CodeInsertion(call.toString(), firstValue,
+                firstValue < 0 ? null : match.inserted().getFirst().template(),
+                firstValue < 0 && !match.optional().isEmpty());
+    }
+
+    /** The input name typed inside a call, completed; on an empty one, the first missing required input. */
+    private static CodeInsertion inputInsertion(ScriptSignatures.Context context) {
+        String prefix = context.prefix();
+        ScriptSignatures.Signature signature = context.signature();
+        List<ScriptSignatures.Arg> candidates = new ArrayList<>(signature.required());
+        if (!prefix.isEmpty()) candidates.addAll(signature.optional());
+        for (ScriptSignatures.Arg arg : candidates) {
+            if (context.usedArgs().contains(arg.name()) || !arg.name().startsWith(prefix)) continue;
+            // An alternative of a "one of" input that is already written would be invalid.
+            if (arg.oneOf() != null && signature.satisfied(arg, context.usedArgs())) continue;
+            String text = arg.name().substring(prefix.length()) + "=" + arg.template();
+            return new CodeInsertion(text, text.length() - arg.template().length(), arg.template(), false);
+        }
+        return null;
+    }
+
+    /**
+     * Values matching what is typed inside the quotes of an input that has a value list, such as sound IDs.
+     * Recomputed only when the typed text or the input changes.
+     */
+    private List<String> updateCodeMatches() {
+        if (codeBox == null || !codeBox.isFocused()) return codeMatches = List.of();
+        MultilineTextField field = ((MultiLineEditBoxAccessor) codeBox).cwp$textField();
+        String source = field.value();
+        int cursor = field.cursor();
+        ScriptSignatures.Context context = ScriptSignatures.at(source, cursor);
+        ScriptSignatures.Arg arg = context.currentArg();
+        if (context.stringStart() < 0 || arg == null || arg.values() == null || field.hasSelection()) {
+            codeMatchKey = "";
+            return codeMatches = List.of();
+        }
+        String typed = source.substring(context.stringStart(), cursor);
+        String key = arg.values() + "\u0000" + context.stringStart() + "\u0000" + typed;
+        if (key.equals(codeMatchKey)) return codeMatches;
+        codeMatchKey = key;
+        codeMatchIndex = 0;
+        if (key.equals(codeDismissedKey)) return codeMatches = List.of();
+        codeDismissedKey = null;
+        String whole = source.substring(context.stringStart(), ScriptSignatures.stringEnd(source, context.stringStart()));
+        List<String> values = codeValues(arg.values(), source);
+        codeMatches = typed.isBlank() || values.contains(whole) && whole.equals(typed) ? List.of()
+                : ScriptSignatures.rank(values, typed, CODE_MATCH_ROWS);
+        return codeMatches;
+    }
+
+    /** IDs for one value list: from the client's registries, the script itself, or what the server sent. */
+    private List<String> codeValues(String list, String source) {
+        if (ScriptSignatures.SCRIPT_VALUES.contains(list)) return ScriptSignatures.scriptValues(list, source);
+        if (!ScriptSignatures.CLIENT_VALUES.contains(list)) return codeValues.getOrDefault(list, List.of());
+        return CLIENT_VALUE_CACHE.computeIfAbsent(list, ignored -> {
+            var registry = switch (list) {
+                case "sound" -> BuiltInRegistries.SOUND_EVENT.keySet();
+                case "effect" -> BuiltInRegistries.MOB_EFFECT.keySet();
+                case "particle" -> BuiltInRegistries.PARTICLE_TYPE.keySet();
+                case "item" -> BuiltInRegistries.ITEM.keySet();
+                default -> BuiltInRegistries.ENTITY_TYPE.keySet();
+            };
+            return registry.stream().map(Identifier::toString).sorted().toList();
+        });
+    }
+
+    /** Replaces the whole quoted value with the chosen ID and puts the cursor after the closing quote. */
+    private void acceptCodeMatch(int row) {
+        if (row < 0 || row >= codeMatches.size()) return;
+        String value = codeMatches.get(row);
+        MultilineTextField field = ((MultiLineEditBoxAccessor) codeBox).cwp$textField();
+        String source = field.value();
+        ScriptSignatures.Context context = ScriptSignatures.at(source, field.cursor());
+        if (context.stringStart() < 0) return;
+        int end = ScriptSignatures.stringEnd(source, context.stringStart());
+        field.setSelecting(false);
+        field.seekCursor(Whence.ABSOLUTE, context.stringStart());
+        field.setSelecting(true);
+        field.seekCursor(Whence.ABSOLUTE, end);
+        field.setSelecting(false);
+        field.insertText(value);
+        String updated = field.value();
+        int cursor = field.cursor();
+        if (cursor < updated.length() && (updated.charAt(cursor) == '"' || updated.charAt(cursor) == '\''))
+            field.seekCursor(Whence.RELATIVE, 1);
+        codeMatches = List.of();
+        codeDismissedKey = null;
+    }
+
+    /** Screen position of the text cursor's line, or null when it is scrolled out of view. */
+    private int[] codeCursorPosition() {
+        MultilineTextField field = ((MultiLineEditBoxAccessor) codeBox).cwp$textField();
+        int lineIndex = field.getLineAtCursor();
+        int lineBegin = CodeLines.begin(field, lineIndex);
+        int y = codeBox.getY() + CODE_BOX_PADDING + lineIndex * font.lineHeight - (int) codeBox.scrollAmount();
+        if (y < codeBox.getY() + 2 || y + font.lineHeight > codeBox.getY() + codeBox.getHeight() - 2) return null;
+        int x = codeBox.getX() + CODE_BOX_PADDING + font.width(field.value().substring(lineBegin, field.cursor()));
+        return new int[] {x, y};
+    }
+
+    private int codeMatchWidth() { return 230; }
+
+    /** Top-left of the value list: below the cursor's line, or above it near the bottom of the editor. */
+    private int[] codeMatchOrigin() {
+        int[] cursor = codeCursorPosition();
+        if (cursor == null) return null;
+        int height = codeMatches.size() * DROPDOWN_ROW_HEIGHT;
+        int x = Math.min(cursor[0], codeBox.getX() + codeBox.getWidth() - codeMatchWidth());
+        int y = cursor[1] + font.lineHeight + 2;
+        if (y + height > top + panelHeight - 4) y = cursor[1] - height - 2;
+        return new int[] {Math.max(codeBox.getX(), x), y};
+    }
+
+    private int codeMatchRowAt(double mouseX, double mouseY) {
+        if (codeBox == null || updateCodeMatches().isEmpty()) return -1;
+        int[] origin = codeMatchOrigin();
+        if (origin == null || mouseX < origin[0] || mouseX >= origin[0] + codeMatchWidth() || mouseY < origin[1]) return -1;
+        int row = (int) (mouseY - origin[1]) / DROPDOWN_ROW_HEIGHT;
+        return row < codeMatches.size() ? row : -1;
+    }
+
+    private void renderCodeMatches(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+        if (codeBox == null || updateCodeMatches().isEmpty()) return;
+        int[] origin = codeMatchOrigin();
+        if (origin == null) return;
+        int x = origin[0], y = origin[1], width = codeMatchWidth();
+        int height = codeMatches.size() * DROPDOWN_ROW_HEIGHT;
+        graphics.fill(x - 1, y - 1, x + width + 1, y + height + 1, 0xFF7C5CDA);
+        graphics.fill(x, y, x + width, y + height, 0xF0101318);
+        int hovered = codeMatchRowAt(mouseX, mouseY);
+        for (int row = 0; row < codeMatches.size(); row++) {
+            int rowY = y + row * DROPDOWN_ROW_HEIGHT;
+            if (row == codeMatchIndex || row == hovered)
+                graphics.fill(x, rowY, x + width, rowY + DROPDOWN_ROW_HEIGHT,
+                        row == codeMatchIndex ? 0xFF33294D : 0xFF242A35);
+            graphics.text(font, Component.literal(trim(codeMatches.get(row), width - 8)), x + 4, rowY + 5,
+                    0xFFF0F1F3, false);
+        }
+    }
+
+    /**
+     * Shows what Tab would insert as faded text at the cursor. Text after the cursor on that line moves right
+     * behind it, the way it will after Tab.
+     */
+    private void renderCodeGhost(GuiGraphicsExtractor graphics) {
+        if (codeBox == null || !codeBox.isFocused()) return;
+        MultilineTextField field = ((MultiLineEditBoxAccessor) codeBox).cwp$textField();
+        if (field.hasSelection()) return;
+        String source = field.value();
+        int cursor = field.cursor();
+        CodeInsertion insertion = pendingInsertion(source, cursor);
+        if (insertion == null || insertion.text().isEmpty()) return;
+        int lineIndex = field.getLineAtCursor();
+        int lineBegin = CodeLines.begin(field, lineIndex), lineEnd = CodeLines.end(field, lineIndex);
+        int innerLeft = codeBox.getX() + CODE_BOX_PADDING;
+        int innerRight = codeBox.getX() + codeBox.getWidth() - CODE_BOX_PADDING;
+        int y = codeBox.getY() + CODE_BOX_PADDING + lineIndex * font.lineHeight - (int) codeBox.scrollAmount();
+        if (y < codeBox.getY() + 2 || y + font.lineHeight > codeBox.getY() + codeBox.getHeight() - 2) return;
+        int x = innerLeft + font.width(source.substring(lineBegin, cursor));
+        String after = source.substring(cursor, Math.max(cursor, lineEnd));
+        String ghost = font.plainSubstrByWidth(insertion.text(), Math.max(0, innerRight - x));
+        if (ghost.isEmpty()) return;
+        // Cover the text after the cursor, then draw the suggestion and that text again behind it.
+        graphics.fill(x + 1, y - 1, innerRight, y + font.lineHeight, 0xFF000000);
+        graphics.text(font, Component.literal(ghost), x + GHOST_GAP, y, 0x88B8B8C8, false);
+        int afterX = x + GHOST_GAP + font.width(ghost);
+        if (!after.isEmpty() && afterX < innerRight)
+            graphics.text(font, Component.literal(font.plainSubstrByWidth(after, innerRight - afterX)), afterX, y,
+                    0xFFE0E0E0, false);
+    }
+
+    /**
+     * Moves to the next input of the current call (or the next coordinate inside a position) and selects its value,
+     * or past the call's closing parenthesis when the cursor is on its last input.
+     */
+    private static boolean nextInput(MultilineTextField field, String source, int cursor, boolean positional) {
+        int lineStart = source.lastIndexOf('\n', cursor - 1) + 1;
+        int lineEnd = source.indexOf('\n', cursor);
+        if (lineEnd < 0) lineEnd = source.length();
+        char quote = 0;
+        boolean escaped = false;
+        java.util.ArrayDeque<Character> open = new java.util.ArrayDeque<>();
+        for (int index = lineStart; index < cursor; index++) {
+            char c = source.charAt(index);
+            if (escaped) { escaped = false; continue; }
+            if (quote != 0) { if (c == '\\') escaped = true; else if (c == quote) quote = 0; continue; }
+            if (c == '"' || c == '\'') quote = c;
+            else if (c == '(' || c == '{' || c == '[') open.push(c);
+            else if ((c == ')' || c == '}' || c == ']') && !open.isEmpty()) open.pop();
+        }
+        int depth = 0;
+        for (char c : open) { if (c == '(') break; depth++; }
+        int braces = depth;
+        for (int index = cursor; index < lineEnd; index++) {
+            char c = source.charAt(index);
+            if (escaped) { escaped = false; continue; }
+            if (quote != 0) { if (c == '\\') escaped = true; else if (c == quote) quote = 0; continue; }
+            if (c == '"' || c == '\'') quote = c;
+            else if (c == '(' || c == '{' || c == '[') depth++;
+            else if (c == '}' || c == ']') depth--;
+            else if (c == ')') {
+                if (depth == 0) {
+                    field.seekCursor(Whence.ABSOLUTE, index + 1);
+                    return true;
+                }
+                depth--;
+            } else if (c == ',' && (depth == 0 || depth == braces && braces > 0)) {
+                int mark = depth == 0 && positional ? index : source.indexOf(depth == 0 ? '=' : ':', index);
+                if (mark < 0 || mark >= lineEnd) return false;
+                int valueStart = mark + 1;
+                while (valueStart < lineEnd && source.charAt(valueStart) == ' ') valueStart++;
+                int valueEnd = valueEnd(source, valueStart, lineEnd);
+                selectValue(field, valueStart, valueEnd, source.substring(valueStart, valueEnd));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** End of the value starting at {@code start}: the next comma or closing bracket outside quotes and nesting. */
+    private static int valueEnd(String source, int start, int lineEnd) {
+        int depth = 0;
+        char quote = 0;
+        boolean escaped = false;
+        for (int index = start; index < lineEnd; index++) {
+            char c = source.charAt(index);
+            if (escaped) { escaped = false; continue; }
+            if (quote != 0) { if (c == '\\') escaped = true; else if (c == quote) quote = 0; continue; }
+            if (c == '"' || c == '\'') quote = c;
+            else if (c == '(' || c == '{' || c == '[') depth++;
+            else if (c == ')' || c == '}' || c == ']') { if (depth == 0) return trimEnd(source, start, index); depth--; }
+            else if (c == ',' && depth == 0) return trimEnd(source, start, index);
+        }
+        return trimEnd(source, start, lineEnd);
+    }
+
+    private static int trimEnd(String source, int start, int end) {
+        while (end > start && source.charAt(end - 1) == ' ') end--;
+        return end;
+    }
+
+    /**
+     * Puts the cursor into a value so typing replaces it: between empty quotes, over a quoted word, over the first
+     * coordinate of a position, or over the whole value.
+     */
+    private static void selectValue(MultilineTextField field, int start, int end, String value) {
+        int from = start, to = end;
+        if (value.startsWith("\"") && value.length() >= 2 && value.endsWith("\"")) { from = start + 1; to = end - 1; }
+        else if (value.startsWith("{")) {
+            int colon = value.indexOf(':');
+            if (colon >= 0) {
+                from = start + colon + 1;
+                to = valueEnd(field.value(), from, end);
+            }
+        }
+        field.setSelecting(false);
+        field.seekCursor(Whence.ABSOLUTE, from);
+        if (to > from) {
+            field.setSelecting(true);
+            field.seekCursor(Whence.ABSOLUTE, to);
+            field.setSelecting(false);
+        }
+    }
+
+    /** Inputs and usage of the command or condition the cursor is in, right of the source editor. */
+    private void renderCodeHint(GuiGraphicsExtractor graphics) {
+        if (codeBox == null || codeHintWidth <= 0) return;
+        int x = codeHintX, y = codeHintY, right = codeHintX + codeHintWidth, bottom = codeHintY + codeHintHeight;
+        graphics.fill(x, y, right, bottom, 0xFF1A1E26);
+        graphics.fill(x, y, right, y + 1, 0xFF2C3240);
+        MultilineTextField field = ((MultiLineEditBoxAccessor) codeBox).cwp$textField();
+        ScriptSignatures.Context context = ScriptSignatures.at(field.value(), field.cursor());
+        HintWriter out = new HintWriter(graphics, x + 7, y + 6, codeHintWidth - 14, bottom - 4);
+        ScriptSignatures.Signature signature = context.signature();
+        if (signature == null) {
+            out.line("Script reference", 0xFFE1D8FF);
+            out.gap();
+            out.wrap("Type a command and press Tab to insert it with its required inputs.", 0xFFA7AFBA);
+            out.wrap("In a call, Tab selects the next input. Type the start of an input name and press Tab to add it.",
+                    0xFFA7AFBA);
+            out.gap();
+            out.line("Commands", 0xFFAEB6C2);
+            out.wrap(String.join(", ", ScriptSignatures.COMMANDS.keySet()), 0xFF8E96A3);
+            out.gap();
+            out.line("Conditions", 0xFFAEB6C2);
+            out.wrap(String.join(", ", ScriptSignatures.CONDITIONS.keySet()), 0xFF8E96A3);
+            return;
+        }
+        out.line(signature.block() ? signature.name() : signature.name() + "(…)", 0xFFE1D8FF);
+        out.wrap(signature.about(), 0xFFA7AFBA);
+        String current = signature.condition()
+                ? (context.argIndex() >= 0 && context.argIndex() < signature.required().size()
+                        ? signature.required().get(context.argIndex()).name() : null)
+                : context.argument();
+        boolean inCall = context.callOpen() >= 0;
+        if (!signature.required().isEmpty()) {
+            out.gap();
+            out.line(signature.condition() ? "Inputs, in order" : "Required", 0xFFAEB6C2);
+            List<ScriptSignatures.Arg> required = signature.required();
+            for (int index = 0; index < required.size(); index++) {
+                ScriptSignatures.Arg arg = required.get(index);
+                boolean missing = inCall && !signature.condition() && !signature.satisfied(arg, context.usedArgs());
+                if (arg.oneOf() == null) {
+                    out.arg(arg, arg.name().equals(current), missing, 0);
+                    continue;
+                }
+                boolean first = index == 0 || !arg.oneOf().equals(required.get(index - 1).oneOf());
+                boolean last = index + 1 == required.size() || !arg.oneOf().equals(required.get(index + 1).oneOf());
+                if (first) out.note("One of these:", missing);
+                out.arg(arg, arg.name().equals(current), false, 8);
+                if (!last) out.note("    or", false);
+            }
+        }
+        if (!signature.optional().isEmpty()) {
+            out.gap();
+            out.line("Optional", 0xFFAEB6C2);
+            for (ScriptSignatures.Arg arg : signature.optional()) out.arg(arg, arg.name().equals(current), false, 0);
+        }
+        out.gap();
+        out.line("Example", 0xFFAEB6C2);
+        out.wrap(signature.example(), 0xFF8E96A3);
+    }
+
+    /** Reads wrapped-line bounds; MultilineTextField.StringView is only accessible from a subclass. */
+    private static final class CodeLines extends MultilineTextField {
+        private CodeLines() { super(null, 0); }
+
+        static int begin(MultilineTextField field, int line) { return field.getLineView(line).beginIndex(); }
+
+        static int end(MultilineTextField field, int line) { return field.getLineView(line).endIndex(); }
+    }
+
+    /** Writes the hint panel top to bottom and stops at its bottom edge. */
+    private final class HintWriter {
+        private final GuiGraphicsExtractor graphics;
+        private final int x, width, bottom;
+        private int y;
+
+        private HintWriter(GuiGraphicsExtractor graphics, int x, int y, int width, int bottom) {
+            this.graphics = graphics;
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.bottom = bottom;
+        }
+
+        private void line(String text, int color) {
+            if (y + 9 > bottom) return;
+            graphics.text(font, Component.literal(trim(text, width)), x, y, color, false);
+            y += 11;
+        }
+
+        private void wrap(String text, int color) { wrap(text, color, 0); }
+
+        private void wrap(String text, int color, int indent) {
+            for (net.minecraft.util.FormattedCharSequence part : font.split(Component.literal(text), width - indent)) {
+                if (y + 9 > bottom) return;
+                graphics.text(font, part, x + indent, y, color, false);
+                y += 10;
+            }
+        }
+
+        private void gap() { y += 5; }
+
+        /** A small grey line, such as the "one of these" label of alternative inputs. */
+        private void note(String text, boolean missing) {
+            if (y + 9 > bottom) return;
+            graphics.text(font, Component.literal(text), x, y, 0xFF9CA3AF, false);
+            if (missing) graphics.text(font, Component.literal("missing"), x + font.width(text) + 6, y, 0xFFFF8A8A, false);
+            y += 10;
+        }
+
+        /** One input: the current one is highlighted, a missing required one is marked. */
+        private void arg(ScriptSignatures.Arg arg, boolean current, boolean missing, int indent) {
+            if (y + 9 > bottom) return;
+            if (current) graphics.fill(x - 3, y - 2, x + width + 3, y + 9, 0xFF3A3352);
+            graphics.text(font, Component.literal(trim(arg.name(), width - indent)), x + indent, y,
+                    current ? 0xFFFFD866 : 0xFFF0F1F3, false);
+            if (missing) graphics.text(font, Component.literal("missing"), x + indent + font.width(arg.name()) + 6, y,
+                    0xFFFF8A8A, false);
+            y += 10;
+            wrap(arg.about(), 0xFF8E96A3, indent + 6);
+            y += 2;
+        }
+    }
+
     // Return to the opening screen rather than forcing the player back to gameplay.
     @Override
     public void onClose() {
+        leave(this::closePanel);
+    }
+
+    private void closePanel() {
         if (!pendingAutoValues.isEmpty()) AdminPanelClient.ignoreNextClosedPanelSnapshot();
         flushAutoSave();
         lastModule = snapshot.selectedModule();

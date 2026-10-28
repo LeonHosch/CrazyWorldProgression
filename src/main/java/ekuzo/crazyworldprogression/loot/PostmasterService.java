@@ -7,7 +7,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -27,6 +26,7 @@ public final class PostmasterService {
     private PostmasterService() { }
 
     public static void initialize() {
+        PostmasterMenu.initialize();
         ServerLifecycleEvents.SERVER_STOPPED.register(OPEN::remove);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             Map<UUID, MailContainer> active = OPEN.get(server);
@@ -39,8 +39,14 @@ public final class PostmasterService {
         MailContainer mail = new MailContainer(server, player.getUUID());
         OPEN.computeIfAbsent(server, ignored -> new HashMap<>()).put(player.getUUID(), mail);
         int used = occupied(mail.contents());
-        player.openMenu(new SimpleMenuProvider((id, inventory, ignored) -> new PostmasterMenu(id, inventory, mail),
-                Component.literal("Postmaster (" + used + "/" + SLOTS + ")")));
+        player.openMenu(new net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider<Integer>() {
+            @Override public Integer getScreenOpeningData(ServerPlayer target) { return used; }
+            @Override public Component getDisplayName() { return Component.literal("Postmaster"); }
+            @Override public net.minecraft.world.inventory.AbstractContainerMenu createMenu(int id,
+                    net.minecraft.world.entity.player.Inventory inventory, net.minecraft.world.entity.player.Player opener) {
+                return new PostmasterMenu(id, inventory, mail, used);
+            }
+        });
         if (used > SLOTS / 2) player.sendSystemMessage(Component.literal(
                 "Your postmaster is more than half full (" + used + "/" + SLOTS + " slots)."));
     }

@@ -20,7 +20,8 @@ public final class RegisteredMobHandle extends EntityHandle implements MobForgeH
         return MobForge.mobs().get(definitionId)
                 .orElseThrow(() -> new IllegalStateException("MobForge definition " + definitionId + " is unavailable for entity " + id));
     }
-    @Override public Set<Identifier> abilityIds() { return definition().abilities(); }
+    /** The abilities this mob uses on its own (its definition's, unless switched off, plus attached ones). */
+    @Override public Set<Identifier> abilityIds() { definition(); return MobAbilities.of(entity()); }
     @Override public Set<String> tags() { return definition().tags(); }
     @Override public Optional<String> phase() { return MobForgeEntityData.phase(entity()); }
     @Override public MobRuntime runtime() { return MobRuntime.of(entity()).orElseThrow(); }
@@ -33,26 +34,8 @@ public final class RegisteredMobHandle extends EntityHandle implements MobForgeH
     @Override public boolean castAbility(Identifier abilityId) {
         return castAbility(abilityId, null);
     }
+    /** Scripts may make the mob cast any registered ability, also one it does not carry. */
     @Override public boolean castAbility(Identifier abilityId, Entity target) {
-        if (!abilityIds().contains(abilityId)) throw new IllegalArgumentException("Mob " + mobDefinitionId() + " does not have ability " + abilityId);
-        MobAbility ability = MobForge.abilities().get(abilityId)
-                .orElseThrow(() -> new IllegalStateException("Unknown MobForge ability " + abilityId)).get();
-        if (ability == null) throw new IllegalStateException("MobForge ability factory returned null: " + abilityId);
-        long cooldown = ability.cooldownTicks();
-        if (cooldown < 0 || cooldown > 1_728_000) throw new IllegalStateException("Cooldown for MobForge ability " + abilityId + " must be between 0 and 1,728,000 ticks");
-        long now = level.getGameTime();
-        Entity entity = entity();
-        if (MobForgeEntityData.cooldown(entity, abilityId) > now) return false;
-        MobAbilityContext context = new MobAbilityContext(this, target, level, entity.position());
-        if (!ability.canCast(context)) return false;
-        MobForgeEvents.abilityStarted(this, abilityId);
-        try { ability.execute(context); }
-        catch (RuntimeException exception) {
-            MobForgeEvents.abilityFailed(this, abilityId, exception);
-            throw exception;
-        }
-        if (cooldown > 0) MobForgeEntityData.setCooldown(entity, abilityId, Math.addExact(now, cooldown));
-        MobForgeEvents.abilityCompleted(this, abilityId);
-        return true;
+        return MobAbilities.cast(this, abilityId, target);
     }
 }

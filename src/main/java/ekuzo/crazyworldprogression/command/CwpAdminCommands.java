@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import ekuzo.crazyworldprogression.admin.AdminPanelNetworking;
+import ekuzo.crazyworldprogression.CrazyWorldProgression;
 import ekuzo.crazyworldprogression.currency.CurrencyDefinition;
 import ekuzo.crazyworldprogression.currency.CurrencyRegistry;
 import ekuzo.crazyworldprogression.events.RandomEventDefinition;
@@ -475,36 +476,54 @@ public final class CwpAdminCommands {
         return String.join(" ", parts);
     }
 
-    // Parse a namespaced command argument and report malformed identifiers without throwing into Brigadier.
+    // Plain CWP names resolve existing IDs, including legacy cwp:name entries.
     private static Identifier argumentId(CommandContext<CommandSourceStack> context, String argument) {
-        String value = StringArgumentType.getString(context, argument);
-        Identifier id = Identifier.tryParse(value);
-        if (id == null || !value.contains(":")) {
-            context.getSource().sendFailure(Component.literal("Expected a complete namespaced ID, for example mod:event"));
+        String value = StringArgumentType.getString(context, argument).trim();
+        Identifier id = Identifier.tryParse(value.contains(":") ? value : CrazyWorldProgression.MOD_ID + ":" + value);
+        if (id == null) {
+            context.getSource().sendFailure(Component.literal("Invalid ID: " + value));
             return null;
         }
-        return id;
+        if (value.contains(":")) return id;
+        List<Identifier> existing = switch (argument) {
+            case "event" -> RandomEventManager.definitions().stream().map(RandomEventDefinition::id).toList();
+            case "currency" -> CurrencyRegistry.values().stream().map(CurrencyDefinition::id).toList();
+            case "tree" -> SkillTreeManager.getSkillTrees().stream().map(SkillTreeDefinition::id).toList();
+            default -> List.of();
+        };
+        List<Identifier> matches = existing.stream().filter(candidate -> candidate.getPath().equals(value))
+                .distinct().toList();
+        if (matches.size() > 1) {
+            context.getSource().sendFailure(Component.literal("Several IDs use '" + value + "'. Enter mod:name."));
+            return null;
+        }
+        return matches.isEmpty() ? id : matches.getFirst();
+    }
+
+    private static String displayId(Identifier id) {
+        return id.getNamespace().equals(CrazyWorldProgression.MOD_ID) || id.getNamespace().equals("cwp")
+                ? id.getPath() : id.toString();
     }
 
     // Return loaded event identifiers for Brigadier autocomplete.
     private static List<String> eventIds() {
-        return RandomEventManager.definitions().stream().map(event -> event.id().toString()).toList();
+        return RandomEventManager.definitions().stream().map(event -> displayId(event.id())).toList();
     }
 
     // Return active event identifiers for the stop-command autocomplete provider.
     private static List<String> activeEventIds(CommandContext<CommandSourceStack> context) {
         return RandomEventService.activeEvents(context.getSource().getServer()).stream()
-                .map(event -> event.id().toString()).toList();
+                .map(event -> displayId(event.id())).toList();
     }
 
     // Return registered currency identifiers for Brigadier autocomplete.
     private static List<String> currencyIds() {
-        return CurrencyRegistry.values().stream().map(currency -> currency.id().toString()).toList();
+        return CurrencyRegistry.values().stream().map(currency -> displayId(currency.id())).toList();
     }
 
     // Return loaded skill-tree identifiers for Brigadier autocomplete.
     private static List<String> skillTreeIds() {
-        return SkillTreeManager.getSkillTrees().stream().map(tree -> tree.id().toString()).toList();
+        return SkillTreeManager.getSkillTrees().stream().map(tree -> displayId(tree.id())).toList();
     }
 
     // Validate a requested page and calculate its bounded list slice.

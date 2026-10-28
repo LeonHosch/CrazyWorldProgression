@@ -2,7 +2,7 @@
 
 For the current Python-like `.mfs` script format, see the [scripting manual](mobforge-scripting.md). Existing YAML scripts remain readable and convert to `.mfs` when saved through the admin editor.
 
-MobForge is the mob encounter system built into Crazy World Progression for Minecraft 26.2. Install the CWP JAR on the client and server; no separate MobForge JAR is needed. For template-defined mobs, YAML files in `config/mobforge/templates/` are the single source of truth. Open `/cwp admin` → **MobForge** to create and edit mob templates and scripts, spawn registered mobs, run scripts, and inspect content-mod registrations. The in-game script editor saves Python-like `.mfs` files through server-validated packets.
+MobForge is the mob encounter system built into Crazy World Progression for Minecraft 26.2. Install the CWP JAR on the client and server; no separate MobForge JAR is needed. For template-defined mobs, YAML files in `config/mobforge/templates/` are the single source of truth. Open `/cwp admin` → **MobForge** to create and edit mob templates and scripts, spawn registered mobs, run scripts, and inspect content-mod registrations. The in-game script editor is a text editor for the Python-like `.mfs` files; the server validates every save.
 
 Content mods can also register namespaced mobs, abilities, and behaviors through the [developer API](mobforge-api.md). YAML templates remain the source of truth for template-defined mobs; registered Java definitions are immutable code registrations. Both can be spawned through CWP's unified spawn service.
 
@@ -59,7 +59,7 @@ properties:
   despawn_behavior: vanilla
 loot:
   drop_vanilla_loot: false
-  xp: 0
+  xp: 0          # fighting skill XP for the killer; -1 = default for the mob type; never vanilla XP orbs
   loot_pool: cwp:raid_rewards
 tags:
   - raid
@@ -86,7 +86,7 @@ Movement speed above `0.70` (absolute, or default times multiplier) is rejected 
 
 ## Legacy YAML wave scripts
 
-Scripts are loaded from `config/mobforge/scripts/`. They execute `steps` from top to bottom. Numeric sleep values are seconds; explicit units such as `40t`, `5s`, `500ms`, and `2m` are also supported.
+Scripts are loaded from `config/mobforge/scripts/`. They execute `steps` from top to bottom. Numeric wait durations are seconds; explicit units such as `40t`, `5s`, `500ms`, and `2m` are also supported.
 
 ```yaml
 id: three_wave_invasion
@@ -109,7 +109,7 @@ steps:
         target: {x: 0, y: 80, z: 0}
         arrival_radius: 4
 
-  - sleep: 10s
+  - wait: {duration: 10s}
 
   - spawn:
       template: elite_skeleton
@@ -117,7 +117,7 @@ steps:
       offset: 12
       count: 10
 
-  - sleep: 5s
+  - wait: {duration: 5s}
 
   - type: spawn
     template: boss_warden
@@ -139,12 +139,12 @@ Currency rewards require a registered player-scoped currency. Item rewards accep
 
 The in-panel editor and `.mfs` scripts support **Variable**, **Watch event**, **Event box**, **Redstone sensor**, **If / Else / End if**, **Loop / End loop**, and **Portal location** steps. Variables, kill counts, portal use counts, event boxes, and watches belong to one script run in one active pocket instance. A watch changes its variable when its condition changes from false to true. Bare `${kills.raid_add}` and `${portal.cwp:raid_gate}` watches instead fire once per new kill or successful portal use. Mob tags are Minecraft entity tags, including custom MobForge template tags. Event box counts use players' feet; its maximum block is included. Redstone sensors check both a block's own powered state and incoming power.
 
-Conditions accepted by **If**, **Loop**, **Wait until**, and **Watch event** include `${var.charge >= 3}`, `${box.plate >= 2}`, `${kills.raid_add >= 6}`, `${redstone.switch == true}`, and `${portal.cwp:raid_gate >= 1}`, alongside existing mob death, health, and phase checks. Variable values may be whole numbers or `true`/`false` (represented as 1/0). Loops are bounded by their configured maximum iterations; scripts also execute at most 256 steps per server tick. Add a Sleep step inside loops that wait for player or world actions.
+Conditions accepted by **If**, **Loop**, **Wait until**, and **Watch event** include `${var.charge >= 3}`, `${box.plate >= 2}`, `${kills.raid_add >= 6}`, `${redstone.switch == true}`, and `${portal.cwp:raid_gate >= 1}`, alongside existing mob death, health, and phase checks. Variable values may be whole numbers or `true`/`false` (represented as 1/0). Loops are bounded by their configured maximum iterations; scripts also execute at most 256 steps per server tick. Add a Wait duration step inside loops that wait for player or world actions.
 
 **Portal location** uses the ID of a saved portal as a preset. Disable **Initial portal active** in the portal editor to make a preset with no starting location. `add` places or replaces a named location, `remove` deletes one named location, and `clear` removes all script locations and hides the preset's original projected location in that instance. Multiple named locations of the same portal ID can be active together. Its links, style, schedule, and entry policy are shared by every location. Script placements are scoped to the running pocket instance and disappear when that instance expires. All authored XYZ positions are translated from the pocket editor to each active instance.
 
 `/mobforge purge` kills currently loaded MobForge entities but deliberately leaves scripts running. `/mobforge script purge <id>` cancels every active run of that script and kills its currently loaded entities. Script-spawned entities carry persistent script and run metadata.
 
-The **MobForge** tab in `/cwp admin` opens separate mob and script lists. Each YAML mob has an in-panel editor for identity, attributes, equipment, properties, loot, tags, and AI. A pocket's **Mob scripts** section can attach existing scripts, create scripts, open the in-panel editor, and remove attachments. `/mobforge script editor [id]` opens the full in-panel editor. The editor supports Spawn and Sleep plus named `mob_spawn`, `wait`, `mob_cast`, `mob_phase`, `trigger`, `reward_currency`, `reward_item`, and `reward_loot` steps. The admin editor offers ID suggestions and validates the complete script on save. Each Spawn step can keep its template AI or override it with `vanilla`, `target_position`, `target_player`, or `nearest_player` settings. Invalid saves report the server error and retain the draft. Attached scripts start for each newly created portal instance and are canceled on expiry.
+The **MobForge** tab in `/cwp admin` opens separate mob and script lists. Each YAML mob has an in-panel editor for identity, attributes, equipment, properties, loot, tags, and AI. A pocket's **Mob scripts** section can attach existing scripts, create scripts, open the in-panel editor, and remove attachments. `/mobforge script editor [id]` opens the in-panel editor, which edits the script's `.mfs` text with Tab completion and an inputs panel (see the [scripting manual](mobforge-scripting.md#in-game-editor)). The server validates the complete script on save; invalid saves report the error and keep the text. Attached scripts start for each newly created portal instance and are canceled on expiry.
 
 Build CWP with Java 25 using `./gradlew build`.

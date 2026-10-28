@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.client;
 
+import ekuzo.crazyworldprogression.client.style.PanelStyle;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -9,10 +10,12 @@ import ekuzo.crazyworldprogression.portals.Parties;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
@@ -24,11 +27,12 @@ import org.lwjgl.glfw.GLFW;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 /** Party screen: your party on the left, the party browser on the right. The server checks every action. */
 public final class PartyScreen extends Screen {
-    private static final int PANEL_WIDTH = 460;
-    private static final int PANEL_HEIGHT = 262;
+    private static final int PANEL_WIDTH = 560;
+    private static final int PANEL_HEIGHT = 330;
     private static final int ROW = 20;
     private static KeyMapping openKey;
 
@@ -36,7 +40,11 @@ public final class PartyScreen extends Screen {
     private JsonObject state;
     private int left;
     private int top;
+    private int panelHeight;
+    private int dividerX;
     private int browserScroll;
+    private int memberScroll;
+    private static final boolean VOICE_AVAILABLE = FabricLoader.getInstance().isModLoaded("voicechat");
     private String draftName = "";
     private String draftInvite = "";
     private String draftVisibility = "PRIVATE";
@@ -87,21 +95,24 @@ public final class PartyScreen extends Screen {
     protected void init() {
         labels.clear();
         int panelWidth = Math.min(PANEL_WIDTH, width - 16);
+        panelHeight = Math.min(PANEL_HEIGHT, height - 16);
         left = (width - panelWidth) / 2;
-        top = Math.max(8, (height - PANEL_HEIGHT) / 2);
-        int column = (panelWidth - 30) / 2;
+        top = (height - panelHeight) / 2;
+        int partyWidth = (panelWidth - 30) * 2 / 3;
+        int browserWidth = panelWidth - 30 - partyWidth;
+        dividerX = left + 15 + partyWidth;
         int myX = left + 10;
-        int browserX = left + 20 + column;
-        buildMyParty(myX, top + 26, column);
-        buildBrowser(browserX, top + 26, column);
+        int browserX = left + 20 + partyWidth;
+        buildMyParty(myX, top + 26, partyWidth);
+        buildBrowser(browserX, top + 26, browserWidth);
         addRenderableWidget(Button.builder(Component.literal("Done"), ignored -> onClose())
-                .bounds(left + panelWidth - 90, top + PANEL_HEIGHT - 28, 80, 20).build());
+                .bounds(left + panelWidth - 90, top + panelHeight - 28, 80, 20).build());
     }
 
     private void buildMyParty(int x, int y, int width) {
         JsonObject party = state.has("party") ? state.getAsJsonObject("party") : null;
         if (party == null) {
-            labels.add(new Label("You are not in a party", x, y, 0xFFE6DFFF));
+            labels.add(new Label("You are not in a party", x, y, PanelStyle.get().heading()));
             y += 14;
             nameBox = new EditBox(font, x, y, width - 4, 18, Component.literal("Party name"));
             nameBox.setMaxLength(24);
@@ -121,27 +132,31 @@ public final class PartyScreen extends Screen {
                     ignored -> send("create", nameBox.getValue(), draftVisibility)).bounds(x, y, width - 4, 20).build());
             y += ROW + 10;
             JsonArray invites = state.getAsJsonArray("invites");
-            if (!invites.isEmpty()) labels.add(new Label("Invites", x, y, 0xFFE0B040));
+            if (!invites.isEmpty()) labels.add(new Label("Invites", x, y, PanelStyle.get().heading()));
             y += 12;
             for (JsonElement element : invites) {
                 JsonObject invite = element.getAsJsonObject();
                 String id = invite.get("id").getAsString();
                 labels.add(new Label(trim(invite.get("name").getAsString() + " (" + invite.get("leader").getAsString() + ")",
-                        width - 92), x, y + 5, 0xFFD8D8D8));
+                        width - 92), x, y + 5, PanelStyle.get().text()));
                 addRenderableWidget(Button.builder(Component.literal("Accept"), ignored -> send("accept_invite", id, ""))
                         .bounds(x + width - 90, y, 44, 18).build());
                 addRenderableWidget(Button.builder(Component.literal("No"), ignored -> send("decline_invite", id, ""))
                         .bounds(x + width - 44, y, 40, 18).build());
                 y += ROW;
-                if (y > top + PANEL_HEIGHT - 50) break;
+                if (y > top + panelHeight - 50) break;
             }
             return;
         }
         boolean leader = party.get("leader").getAsBoolean();
         String visibility = party.get("visibility").getAsString();
-        labels.add(new Label(trim(party.get("name").getAsString(), width - 4), x, y, 0xFFE6DFFF));
+        labels.add(new Label(trim(party.get("name").getAsString(), width - 4), x, y, PanelStyle.get().heading()));
         String activity = party.get("activity").getAsString();
-        labels.add(new Label(label(visibility) + (activity.isEmpty() ? "" : " · in " + activity), x, y + 11, 0xFF9CA3AF));
+        boolean pvp = party.has("pvp") && party.get("pvp").getAsBoolean();
+        boolean privateVoice = party.has("private_voice") && party.get("private_voice").getAsBoolean();
+        labels.add(new Label(label(visibility) + (pvp ? " · PvP on" : " · PvP off")
+                + (privateVoice ? " · Private voice" : " · Open voice")
+                + (activity.isEmpty() ? "" : " · in " + activity), x, y + 11, PanelStyle.get().muted()));
         y += 24;
         if (leader) {
             nameBox = new EditBox(font, x, y, width - 58, 18, Component.literal("Party name"));
@@ -153,43 +168,76 @@ public final class PartyScreen extends Screen {
                 send("rename", nameBox.getValue(), "");
             }).bounds(x + width - 56, y, 52, 18).build());
             y += ROW;
+            int half = (width - 92) / 2;
             addRenderableWidget(Button.builder(Component.literal(label(visibility)),
-                    ignored -> send("visibility", next(visibility), "")).bounds(x, y, width - 92, 18).build());
+                    ignored -> send("visibility", next(visibility), "")).bounds(x, y, half - 1, 18).build());
+            addRenderableWidget(Button.builder(Component.literal(pvp ? "PvP: On" : "PvP: Off"),
+                    ignored -> send("pvp", Boolean.toString(!pvp), "")).bounds(x + half + 1, y, width - 92 - half - 1, 18)
+                    .build());
             int max = party.get("max").getAsInt();
             addRenderableWidget(Button.builder(Component.literal("-"), ignored -> send("max_size", Integer.toString(max - 1), ""))
                     .bounds(x + width - 88, y, 18, 18).build());
-            labels.add(new Label("Max " + max, x + width - 66, y + 5, 0xFFD8D8D8));
+            labels.add(new Label("Max " + max, x + width - 66, y + 5, PanelStyle.get().text()));
             addRenderableWidget(Button.builder(Component.literal("+"), ignored -> send("max_size", Integer.toString(max + 1), ""))
                     .bounds(x + width - 22, y, 18, 18).build());
             y += ROW + 2;
+            addRenderableWidget(Button.builder(Component.literal(privateVoice ? "Voice: Private" : "Voice: Open"),
+                    ignored -> send("voice_mode", privateVoice ? "open" : "private", ""))
+                    .bounds(x, y, width - 4, 18)
+                    .tooltip(Tooltip.create(Component.literal("Open: party voice and nearby players hear each other. Private: only party members hear party voice.")))
+                    .build());
+            y += ROW;
         }
         JsonArray members = party.getAsJsonArray("members");
-        labels.add(new Label("Members " + members.size() + "/" + party.get("max").getAsInt(), x, y, 0xFFE0B040));
+        int memberSpace = top + panelHeight - 52 - (y + 12);
+        int visibleMembers = Math.min(members.size(), Math.min(6, Math.max(1, memberSpace / 19)));
+        memberScroll = Math.max(0, Math.min(memberScroll, members.size() - visibleMembers));
+        String range = members.size() > visibleMembers ? " (" + (memberScroll + 1) + "-"
+                + (memberScroll + visibleMembers) + ")" : "";
+        labels.add(new Label("Members " + members.size() + "/" + party.get("max").getAsInt() + range,
+                x, y, PanelStyle.get().heading()));
         y += 12;
-        for (JsonElement element : members) {
-            JsonObject member = element.getAsJsonObject();
+        for (int index = memberScroll; index < memberScroll + visibleMembers; index++) {
+            JsonObject member = members.get(index).getAsJsonObject();
             String id = member.get("id").getAsString();
             boolean isLeader = member.get("leader").getAsBoolean();
             boolean online = member.get("online").getAsBoolean();
-            labels.add(new Label((isLeader ? "★ " : "  ") + member.get("name").getAsString(), x, y + 4,
-                    online ? 0xFFE8E8E8 : 0xFF7A7F88));
+            boolean self = minecraft.player != null && minecraft.player.getUUID().toString().equals(id);
+            boolean compactControls = width < 230;
+            int sliderWidth = leader && !isLeader && compactControls ? 64 : 80;
+            int sliderOffset = leader && !isLeader ? (compactControls ? 112 : 150) : 86;
+            String displayName = (isLeader ? "★ " : "  ") + member.get("name").getAsString();
+            labels.add(new Label(trim(displayName, leader && !isLeader ? width - sliderOffset - 5 : width - 90), x, y + 4,
+                    online ? PanelStyle.get().text() : PanelStyle.get().muted()));
+            MemberVolumeSlider volume = new MemberVolumeSlider(UUID.fromString(id),
+                    x + width - sliderOffset, y, sliderWidth, 16);
+            volume.active = VOICE_AVAILABLE && !self;
+            volume.setTooltip(Tooltip.create(Component.literal(self ? "You do not hear your own voice."
+                    : VOICE_AVAILABLE ? "Volume for " + member.get("name").getAsString() + " (saved on this client)"
+                    : "Install Simple Voice Chat to use party voice.")));
+            addRenderableWidget(volume);
             if (leader && !isLeader) {
-                addRenderableWidget(Button.builder(Component.literal("Lead"), ignored -> send("promote", id, ""))
-                        .bounds(x + width - 82, y, 38, 16).tooltip(Tooltip.create(Component.literal("Make party leader"))).build());
-                addRenderableWidget(Button.builder(Component.literal("Kick"), ignored -> send("kick", id, ""))
-                        .bounds(x + width - 42, y, 38, 16).build());
+                addRenderableWidget(Button.builder(Component.literal(compactControls ? "L" : "Lead"),
+                                ignored -> send("promote", id, ""))
+                        .bounds(x + width - (compactControls ? 46 : 68), y, compactControls ? 20 : 32, 16)
+                        .tooltip(Tooltip.create(Component.literal("Make party leader"))).build());
+                addRenderableWidget(Button.builder(Component.literal(compactControls ? "X" : "Kick"),
+                                ignored -> send("kick", id, ""))
+                        .bounds(x + width - (compactControls ? 24 : 34), y, compactControls ? 20 : 30, 16)
+                        .tooltip(Tooltip.create(Component.literal("Remove from party"))).build());
             }
-            y += 17;
+            y += 19;
         }
         JsonArray requests = party.getAsJsonArray("requests");
         if (leader && !requests.isEmpty()) {
             y += 2;
-            labels.add(new Label("Join requests", x, y, 0xFFE0B040));
+            labels.add(new Label("Join requests", x, y, PanelStyle.get().heading()));
             y += 12;
             for (JsonElement element : requests) {
+                if (y + 17 > top + panelHeight - 52) break;
                 JsonObject request = element.getAsJsonObject();
                 String id = request.get("id").getAsString();
-                labels.add(new Label(request.get("name").getAsString(), x, y + 4, 0xFFE8E8E8));
+                labels.add(new Label(request.get("name").getAsString(), x, y + 4, PanelStyle.get().text()));
                 addRenderableWidget(Button.builder(Component.literal("Accept"), ignored -> send("accept_request", id, ""))
                         .bounds(x + width - 90, y, 46, 16).build());
                 addRenderableWidget(Button.builder(Component.literal("Deny"), ignored -> send("deny_request", id, ""))
@@ -197,7 +245,7 @@ public final class PartyScreen extends Screen {
                 y += 17;
             }
         }
-        int bottom = top + PANEL_HEIGHT - 28;
+        int bottom = top + panelHeight - 28;
         if (leader) {
             inviteBox = new EditBox(font, x, bottom - 24, width - 58, 18, Component.literal("Player name"));
             inviteBox.setMaxLength(16);
@@ -218,14 +266,15 @@ public final class PartyScreen extends Screen {
     }
 
     private void buildBrowser(int x, int y, int width) {
-        labels.add(new Label("Party browser", x, y, 0xFFE6DFFF));
+        labels.add(new Label("Party browser", x, y, PanelStyle.get().heading()));
         y += 14;
         JsonArray browser = state.getAsJsonArray("browser");
         if (browser.isEmpty()) {
-            labels.add(new Label("No public or semi-private parties", x, y + 4, 0xFF7A7F88));
+            labels.add(new Label("No public or", x, y + 4, PanelStyle.get().muted()));
+            labels.add(new Label("semi-private parties", x, y + 16, PanelStyle.get().muted()));
             return;
         }
-        int rows = (top + PANEL_HEIGHT - 40 - y) / 26;
+        int rows = (top + panelHeight - 40 - y) / 26;
         browserScroll = Math.max(0, Math.min(browserScroll, Math.max(0, browser.size() - rows)));
         boolean inParty = state.has("party");
         for (int index = browserScroll; index < browser.size() && index < browserScroll + rows; index++) {
@@ -234,9 +283,9 @@ public final class PartyScreen extends Screen {
             int members = party.get("members").getAsInt(), max = party.get("max").getAsInt();
             boolean semi = party.get("visibility").getAsString().equals("SEMI_PRIVATE");
             String activity = party.get("activity").getAsString();
-            labels.add(new Label(trim(party.get("name").getAsString(), width - 70), x, y + 2, 0xFFE8E8E8));
+            labels.add(new Label(trim(party.get("name").getAsString(), width - 70), x, y + 2, PanelStyle.get().text()));
             labels.add(new Label(trim(party.get("leader").getAsString() + " · " + members + "/" + max
-                    + (activity.isEmpty() ? "" : " · " + activity), width - 70), x, y + 13, 0xFF9CA3AF));
+                    + (activity.isEmpty() ? "" : " · " + activity), width - 70), x, y + 13, PanelStyle.get().muted()));
             String action = members >= max ? "Full" : party.get("requested").getAsBoolean() ? "Asked"
                     : semi ? "Request" : "Join";
             Button button = Button.builder(Component.literal(action), ignored -> send("join", id, ""))
@@ -248,7 +297,7 @@ public final class PartyScreen extends Screen {
             y += 26;
         }
         if (browser.size() > rows) labels.add(new Label((browserScroll + 1) + "-" + Math.min(browser.size(), browserScroll + rows)
-                + " / " + browser.size(), x, top + PANEL_HEIGHT - 40, 0xFF7A7F88));
+                + " / " + browser.size(), x, top + panelHeight - 40, PanelStyle.get().muted()));
     }
 
     private void suggestName(String typed) {
@@ -278,7 +327,17 @@ public final class PartyScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
-        if (mouseX > width / 2.0) {
+        if (mouseX < dividerX && state.has("party")) {
+            int previous = memberScroll;
+            memberScroll = Math.max(0, memberScroll + (vertical < 0 ? 1 : -1));
+            if (memberScroll != previous) {
+                if (nameBox != null) draftName = nameBox.getValue();
+                if (inviteBox != null) draftInvite = inviteBox.getValue();
+                rebuildWidgets();
+            }
+            return true;
+        }
+        if (mouseX >= dividerX) {
             int previous = browserScroll;
             browserScroll = Math.max(0, browserScroll + (vertical < 0 ? 1 : -1));
             if (browserScroll != previous) {
@@ -294,14 +353,18 @@ public final class PartyScreen extends Screen {
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         int panelWidth = Math.min(PANEL_WIDTH, width - 16);
-        graphics.fill(0, 0, width, height, 0xA0000000);
-        graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + PANEL_HEIGHT + 1, 0xFF7C5CDA);
-        graphics.fill(left, top, left + panelWidth, top + PANEL_HEIGHT, 0xF012151B);
-        int divider = left + 15 + (panelWidth - 30) / 2;
-        graphics.fill(divider, top + 24, divider + 1, top + PANEL_HEIGHT - 34, 0xFF2E3440);
-        graphics.text(font, Component.literal("Party"), left + 10, top + 9, 0xFFF2F2F5, false);
+        PanelStyle style = PanelStyle.get();
+        style.backdrop(graphics, width, height);
+        style.window(graphics, left, top, panelWidth, panelHeight);
+        style.divider(graphics, dividerX, top + 24, top + panelHeight - 34);
+        graphics.text(font, Component.literal("Party"), left + 10, top + 9, style.title(), false);
         for (Label label : labels) graphics.text(font, Component.literal(label.text()), label.x(), label.y(), label.color(), false);
-        super.extractRenderState(graphics, mouseX, mouseY, delta);
+        PanelStyle.styling(true);
+        try {
+            super.extractRenderState(graphics, mouseX, mouseY, delta);
+        } finally {
+            PanelStyle.styling(false);
+        }
     }
 
     @Override
@@ -324,15 +387,40 @@ public final class PartyScreen extends Screen {
         return switch (visibility) {
             case "PUBLIC" -> "Public";
             case "SEMI_PRIVATE" -> "Semi-private";
+            case "FRIENDS" -> "Friends only";
+            case "CLAN" -> "Clan only";
             default -> "Private";
         };
     }
 
     private static String next(String visibility) {
         return switch (visibility) {
-            case "PRIVATE" -> "SEMI_PRIVATE";
+            case "PRIVATE" -> "FRIENDS";
+            case "FRIENDS" -> "CLAN";
+            case "CLAN" -> "SEMI_PRIVATE";
             case "SEMI_PRIVATE" -> "PUBLIC";
             default -> "PRIVATE";
         };
+    }
+
+    private static final class MemberVolumeSlider extends AbstractSliderButton {
+        private final UUID member;
+
+        private MemberVolumeSlider(UUID member, int x, int y, int width, int height) {
+            super(x, y, width, height, Component.empty(), PartyVoiceVolumes.percent(member) / 200.0);
+            this.member = member;
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            if (member != null) setMessage(Component.literal(PartyVoiceVolumes.percent(member) + "%"));
+        }
+
+        @Override
+        protected void applyValue() {
+            PartyVoiceVolumes.setPercent(member, (int) Math.round(value * 200));
+            updateMessage();
+        }
     }
 }

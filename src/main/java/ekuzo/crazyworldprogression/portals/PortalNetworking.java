@@ -121,7 +121,8 @@ public final class PortalNetworking {
         return PortalService.visiblePortals(server).stream().map(portal -> new PortalSnapshot(
                 portal.id().toString(), portal.dimension().toString(), portal.shape().serializedName(),
                 portal.plane().serializedName(), portal.centerX(), portal.centerY(), portal.centerZ(),
-                portal.width(), portal.height(), portal.colorRgb(), PortalService.isOpen(portal))).toList();
+                portal.width(), portal.height(), portal.colorRgb(), PortalService.isOpen(portal), portal.effectiveDisplayName(),
+                portal.isExit() ? "exit" : portal.isCoordinates() ? "coordinates" : "pocket")).toList();
     }
 
     private static List<String> hiddenPlayerDimensions(MinecraftServer server) {
@@ -181,7 +182,7 @@ public final class PortalNetworking {
     /** Client-safe geometry and appearance for one placed portal. */
     public record PortalSnapshot(String id, String dimension, String shape, String plane,
                                  double centerX, double centerY, double centerZ,
-                                 double width, double height, int colorRgb, boolean open) {
+                                 double width, double height, int colorRgb, boolean open, String name, String kind) {
     }
 
     /** One bounded JSON snapshot carrying all placed portals to a client. */

@@ -94,6 +94,20 @@ public final class PocketEditorService {
     }
 
     private static Identifier allocate(MinecraftServer server, Identifier id, boolean reconstruct) {
+        return allocate(server, id, reconstruct, ORIGIN, null);
+    }
+
+    /**
+     * An imported pocket gets a workshop with its saved blocks rebuilt at the same place they were captured from,
+     * so its scripts' and portals' workshop coordinates stay correct.
+     */
+    static Identifier importEditor(MinecraftServer server, Identifier id, BlockPos origin, BlockPos entry) {
+        if (dimension(server, id) != null) throw new IllegalArgumentException("Pocket already has a workshop: " + id);
+        return allocate(server, id, true, origin, entry);
+    }
+
+    private static Identifier allocate(MinecraftServer server, Identifier id, boolean reconstruct, BlockPos origin,
+                                       BlockPos entry) {
         PocketEditorData data = PocketEditorData.get(server);
         for (int slot = 1; slot <= MAX_POCKETS; slot++) {
             if (data.usedSlots().contains(slot) || data.pockets().containsValue(slot)) continue;
@@ -102,7 +116,7 @@ public final class PocketEditorService {
             if (level == null) throw new IllegalStateException("Pocket editor dimension is not registered: " + dimension);
             // An existing pocket is built into its new workshop over several ticks; players who try to enter
             // meanwhile are brought in when it is ready.
-            if (reconstruct) PortalTemplateService.reconstructThen(server, level, id, ORIGIN,
+            if (reconstruct) PortalTemplateService.reconstructThen(server, level, id, origin,
                     () -> PortalService.finishWorkshop(server, dimension),
                     exception -> {
                         CrazyWorldProgression.LOGGER.error("Could not rebuild the workshop of pocket {}", id, exception);
@@ -112,11 +126,12 @@ public final class PocketEditorService {
                 level.setBlock(ORIGIN.below(), Blocks.STONE.defaultBlockState(), 3);
             }
             data.assign(id, slot);
-            data.noteBuiltChunk(id, ChunkPos.pack(ORIGIN));
+            data.noteBuiltChunk(id, ChunkPos.pack(origin));
             if (reconstruct) {
                 PortalTemplateService.TemplateInfo template = PortalTemplateService.template(server, id);
-                data.setEntry(id, ORIGIN.offset(template.spawnX(), template.spawnY(), template.spawnZ()));
-                data.setCaptureOrigin(id, ORIGIN);
+                data.setEntry(id, entry != null ? entry
+                        : origin.offset(template.spawnX(), template.spawnY(), template.spawnZ()));
+                data.setCaptureOrigin(id, origin);
             } else data.setEntry(id, ORIGIN);
             markDirty(server, id);
             return dimension;
@@ -495,9 +510,11 @@ public final class PocketEditorService {
             if (step instanceof MobScript.ExplosionStep explosion) return (MobScript.Step) new MobScript.ExplosionStep(
                     shifted(explosion.location(), delta), explosion.power());
             if (step instanceof MobScript.SoundStep sound) return (MobScript.Step) new MobScript.SoundStep(
-                    sound.soundId(), shifted(sound.location(), delta));
+                    sound.soundId(), sound.location() == null ? null : shifted(sound.location(), delta));
             if (step instanceof MobScript.EncounterEndStep end && end.spawn() != null)
                 return (MobScript.Step) new MobScript.EncounterEndStep(shifted(end.spawn(), delta));
+			if (step instanceof MobScript.FinishInstanceStep finish && finish.spawn() != null)
+				return (MobScript.Step) new MobScript.FinishInstanceStep(shifted(finish.spawn(), delta));
             if (!(step instanceof MobScript.SpawnStep spawn)) return step;
             var position = spawn.location();
             MobTemplate.Ai ai = spawn.aiOverride();

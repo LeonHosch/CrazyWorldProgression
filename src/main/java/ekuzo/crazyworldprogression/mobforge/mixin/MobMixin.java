@@ -1,6 +1,8 @@
 package ekuzo.crazyworldprogression.mobforge.mixin;
 
 import ekuzo.crazyworldprogression.mobforge.ai.MobAiRegistry;
+import ekuzo.crazyworldprogression.mobforge.ai.MobAiState;
+import org.spongepowered.asm.mixin.Unique;
 import ekuzo.crazyworldprogression.mobforge.entity.MobForgeEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
@@ -13,7 +15,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(Mob.class)
-public abstract class MobMixin {
+public abstract class MobMixin implements MobAiState.Holder {
+	@Unique private MobAiState mobforge$aiState;
+
+	@Override public MobAiState mobforge$aiState() { return mobforge$aiState; }
+	@Override public void mobforge$setAiState(MobAiState state) { mobforge$aiState = state; }
+
 	@Inject(method = "tick", at = @At("TAIL"))
 	private void mobforge$tick(CallbackInfo info) { MobAiRegistry.tick((Mob) (Object) this); }
 
@@ -24,7 +31,8 @@ public abstract class MobMixin {
 
 	@Inject(method = "getBaseExperienceReward", at = @At("HEAD"), cancellable = true)
 	private void mobforge$experience(ServerLevel level, CallbackInfoReturnable<Integer> info) {
-		MobForgeEntityData.xp((Mob) (Object) this).ifPresent(info::setReturnValue);
+		// MobForge mobs give fighting skill XP instead (SkillXp), never vanilla XP orbs.
+		if (MobForgeEntityData.template((Mob) (Object) this).isPresent()) info.setReturnValue(0);
 	}
 
 	/**
@@ -34,6 +42,7 @@ public abstract class MobMixin {
 	@ModifyExpressionValue(method = "aiStep", at = @At(value = "INVOKE",
 			target = "Lnet/minecraft/world/entity/Mob;is(Lnet/minecraft/tags/TagKey;)Z"))
 	private boolean mobforge$daylightBurning(boolean burns) {
-		return burns && MobForgeEntityData.burnsInDaylight((Mob) (Object) this).orElse(true);
+		Mob mob = (Mob) (Object) this;
+		return burns && (!mob.entityTags().contains(MobForgeEntityData.MARKER) || MobAiState.of(mob).burnsInDaylight());
 	}
 }

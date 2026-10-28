@@ -4,6 +4,7 @@ import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -59,6 +60,34 @@ class PartyBookTest {
         assertEquals(alex, party.leader());
         book.leave(alex);
         assertNull(book.party(party.id()));
+    }
+
+    @Test void inactivePartiesAreRemovedWithoutRemovingActiveParties() {
+        PartyBook book = new PartyBook();
+        PartyBook.Party active = book.create(leader, "Active", PartyBook.Visibility.PUBLIC);
+        book.join(alex, active.id());
+        PartyBook.Party inactive = book.create(sam, "Gone", PartyBook.Visibility.PUBLIC);
+        book.invite(sam, UUID.randomUUID());
+
+        assertTrue(book.disbandInactive(Set.of(alex)));
+        assertNull(book.party(inactive.id()));
+        assertNull(book.partyOf(sam));
+        assertEquals(active, book.partyOf(leader));
+        assertFalse(book.disbandInactive(Set.of(alex)));
+        assertTrue(book.disbandInactive(Set.of()));
+        assertTrue(book.all().isEmpty());
+    }
+
+    @Test void voiceModeDefaultsOpenAndOnlyTheLeaderCanChangeIt() {
+        PartyBook book = new PartyBook();
+        PartyBook.Party party = book.create(leader, "Voice", PartyBook.Visibility.PUBLIC);
+        book.join(alex, party.id());
+        assertFalse(party.privateVoice());
+        assertThrows(IllegalArgumentException.class, () -> book.setPrivateVoice(alex, true));
+        book.setPrivateVoice(leader, true);
+        assertTrue(party.privateVoice());
+        book.setPrivateVoice(leader, false);
+        assertFalse(party.privateVoice());
     }
 
     @Test void instancesBelongToThePartyIdAndLeavingMeansANewInstance() {

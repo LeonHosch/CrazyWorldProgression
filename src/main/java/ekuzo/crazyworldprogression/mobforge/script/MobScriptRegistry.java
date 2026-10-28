@@ -28,6 +28,7 @@ public final class MobScriptRegistry {
 	private final MobScriptCode code = new MobScriptCode();
 	private volatile Map<String, MobScript> scripts = Map.of();
 
+
 	public synchronized ReloadResult reload() {
 		Map<String, MobScript> loaded = new LinkedHashMap<>(); int failures = 0;
 		try {
@@ -94,6 +95,16 @@ public final class MobScriptRegistry {
 			} else if (step instanceof MobScript.RewardLootStep reward) {
 				if (reward.rolls() < 1 || reward.rolls() > 32)
 					throw new IllegalArgumentException("steps[" + i + "].rolls must be from 1 to 32");
+			} else if (step instanceof MobScript.SkillXpStep xp) {
+				try { ekuzo.crazyworldprogression.skills.Skills.Skill.parse(xp.skill()); }
+				catch (IllegalArgumentException exception) { throw new IllegalArgumentException("steps[" + i + "] " + exception.getMessage()); }
+				if (xp.amount() < 1 || xp.amount() > 100_000)
+					throw new IllegalArgumentException("steps[" + i + "].amount must be from 1 to 100000");
+				String player = xp.playerId();
+				if (!player.isBlank() && !player.matches("[a-z][a-z0-9_]*")
+						&& !player.matches("\\$\\{[a-z][a-z0-9_]*}")
+						&& !player.matches("[0-9a-fA-F-]{36}"))
+					throw new IllegalArgumentException("steps[" + i + "] player must be a player variable or UUID");
 			} else if (step instanceof MobScript.LootPoolStep loot) {
 				String player = loot.playerId();
 				if (!player.isBlank() && !player.matches("[a-z][a-z0-9_]*")
@@ -129,7 +140,7 @@ public final class MobScriptRegistry {
 				if (distances.view() < 0 && distances.simulation() < 0)
 					throw new IllegalArgumentException("steps[" + i + "] distances needs view or simulation");
 			} else if (step instanceof MobScript.SoundStep sound) {
-				if (!finite(sound.location().x(), sound.location().y(), sound.location().z())
+				if (sound.location() != null && !finite(sound.location().x(), sound.location().y(), sound.location().z())
 						|| BuiltInRegistries.SOUND_EVENT.getValue(sound.soundId()) == null)
 					throw new IllegalArgumentException("steps[" + i + "] has unknown sound or invalid location");
 			} else if (step instanceof MobScript.EffectStep effect) {
@@ -166,27 +177,43 @@ public final class MobScriptRegistry {
 				if (!finite(spawn.offset().x(), spawn.offset().y(), spawn.offset().z())
 						|| spawn.offset().x() < 0 || spawn.offset().y() < 0 || spawn.offset().z() < 0)
 					throw new IllegalArgumentException("steps[" + i + "].offset must be finite and non-negative");
-			} else if (step instanceof MobScript.SleepStep sleep && (sleep.ticks() < 0 || sleep.ticks() > 1_728_000))
-				throw new IllegalArgumentException("steps[" + i + "] sleep must be between 0 and 24 hours");
+			} else if (step instanceof MobScript.WaitDurationStep wait && (wait.ticks() < 0 || wait.ticks() > 1_728_000))
+				throw new IllegalArgumentException("steps[" + i + "] wait duration must be between 0 and 24 hours");
 		}
 	}
 
 	public Optional<MobScript> get(String id) { return Optional.ofNullable(scripts.get(id)); }
 	public Collection<MobScript> all() { return scripts.values().stream().sorted(Comparator.comparing(MobScript::id)).toList(); }
+	public synchronized String source(String id) throws IOException {
+		MobScript script = get(id).orElseThrow(() -> new IllegalArgumentException("Unknown MobForge script: " + id));
+		Path file = directory.resolve(script.id() + ".mfs").normalize();
+		if (!file.getParent().equals(directory.normalize())) throw new IOException("unsafe script path");
+		if (Files.isSymbolicLink(file)) throw new IOException("script source cannot be a symbolic link");
+		return Files.isRegularFile(file) ? Files.readString(file, StandardCharsets.UTF_8) : code.encode(script);
+	}
 	public synchronized void save(MobScript script) throws IOException {
+		validate(script);
+		saveSource(code.encode(script));
+	}
+	public synchronized void saveSource(String source) throws IOException {
+		writeSource(directory, source);
+		reload();
+	}
+	static void writeSource(Path directory, String source) throws IOException {
+		MobScriptCode code = new MobScriptCode();
+		MobScript script = code.decode(source);
 		validate(script); Files.createDirectories(directory);
 		Path destination = directory.resolve(script.id() + ".mfs").normalize();
 		if (!destination.getParent().equals(directory.normalize())) throw new IOException("unsafe script path");
 		Path temporary = Files.createTempFile(directory, script.id() + "-", ".tmp");
 		try {
-			Files.writeString(temporary, code.encode(script), StandardCharsets.UTF_8);
+			Files.writeString(temporary, source, StandardCharsets.UTF_8);
 			MobScript roundTrip = code.decode(Files.readString(temporary, StandardCharsets.UTF_8)); validate(roundTrip);
 			try { Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
 			catch (AtomicMoveNotSupportedException ignored) { Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING); }
 			Files.deleteIfExists(directory.resolve(script.id() + ".yml"));
 			Files.deleteIfExists(directory.resolve(script.id() + ".yaml"));
 		} finally { Files.deleteIfExists(temporary); }
-		reload();
 	}
 	public synchronized boolean delete(String id) throws IOException {
 		if (!MobTemplateValidator.SAFE_ID.matcher(id).matches()) return false;

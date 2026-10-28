@@ -1,5 +1,6 @@
 package ekuzo.crazyworldprogression.currency;
 
+import ekuzo.crazyworldprogression.api.CwpIdentifiers;
 import net.minecraft.resources.Identifier;
 
 import java.util.LinkedHashMap;
@@ -17,6 +18,7 @@ public final class CurrencyRegistry {
 
     // Add one definition while rejecting identifiers and command aliases already claimed by another currency.
     public static synchronized CurrencyDefinition register(CurrencyDefinition currency) {
+        CwpIdentifiers.requireCustomRegistration(currency.id());
         for (String command : currency.commands()) {
             Identifier owner = COMMAND_OWNERS.get(command);
             if (owner != null) {

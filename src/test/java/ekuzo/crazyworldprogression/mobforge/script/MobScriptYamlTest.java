@@ -11,13 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class MobScriptYamlTest {
 	private final MobScriptYaml yaml = new MobScriptYaml();
 
-	@Test void raidCompletionRoundTrips() {
-		MobScript script = yaml.decode("id: raid\nsteps:\n  - raid_complete: true\n");
-		assertInstanceOf(MobScript.RaidCompleteStep.class, script.steps().get(0));
-		assertInstanceOf(MobScript.RaidCompleteStep.class, yaml.decode(yaml.encode(script)).steps().get(0));
+	@Test void finishInstanceRoundTripsWithOptionalSpawn() {
+		MobScript script = yaml.decode("id: raid\nsteps:\n  - finish_instance: {spawn: {x: 10, y: 64, z: 5}}\n");
+		assertEquals(new MobScript.Position(10, 64, 5),
+				((MobScript.FinishInstanceStep) script.steps().get(0)).spawn());
+		assertEquals(script, yaml.decode(yaml.encode(script)));
+		assertEquals(new MobScript.FinishInstanceStep(),
+				yaml.decode("id: raid\nsteps:\n  - finish_instance: true\n").steps().get(0));
 	}
 
-	@Test void parsesOrderedSpawnAndSleepBlocks() {
+	@Test void parsesOrderedSpawnAndWaitBlocks() {
 		MobScript script = yaml.decode("""
 				id: invasion
 				steps:
@@ -31,7 +34,7 @@ class MobScriptYamlTest {
 				        combat: true
 				        target: {x: 0, y: 80, z: 0}
 				        arrival_radius: 4
-				  - sleep: 5s
+				  - wait: {duration: 5s}
 				  - type: spawn
 				    template: raid_zombie
 				    location: {x: 0, y: 80, z: 0}
@@ -43,7 +46,7 @@ class MobScriptYamlTest {
 		assertEquals(30, first.count());
 		assertEquals(8, first.offset().x());
 		assertEquals("target_position", first.aiOverride().mode());
-		assertEquals(100, assertInstanceOf(MobScript.SleepStep.class, script.steps().get(1)).ticks());
+		assertEquals(100, assertInstanceOf(MobScript.WaitDurationStep.class, script.steps().get(1)).ticks());
 		assertEquals(script, yaml.decode(yaml.encode(script)));
 	}
 
@@ -62,6 +65,14 @@ class MobScriptYamlTest {
 
 	@Test void rejectsUnknownStepTypes() {
 		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: bad\nsteps:\n  - type: explode\n"));
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: old\nsteps:\n  - sleep: 5s\n"));
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: old\nsteps:\n  - type: sleep\n    duration: 5s\n"));
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: mixed\nsteps:\n  - wait: {duration: 5s, condition: 'true'}\n"));
+	}
+
+	@Test void typedWaitDurationParses() {
+		MobScript script = yaml.decode("id: typed\nsteps:\n  - type: wait\n    duration: 5s\n");
+		assertEquals(new MobScript.WaitDurationStep(100), script.steps().getFirst());
 	}
 
 	@Test void rewardStepsRoundTripAndRejectInvalidAmounts() {
@@ -92,7 +103,7 @@ class MobScriptYamlTest {
 				  - event: {condition: '${box.plate >= 2}', variable: charge, operation: increment, value: 1}
 				  - event: {condition: '${kills.raid_add}', variable: charge, operation: increment, value: 1}
 				  - loop: {condition: '${var.charge < 3}', max_iterations: 1000}
-				  - sleep: 1s
+				  - wait: {duration: 1s}
 				  - end_loop: true
 				  - if: '${redstone.switch == true}'
 				  - portal_location: {portal: cwp:raid_gate, action: add, location: arena, position: {x: 5, y: 65, z: 5}}
@@ -116,7 +127,7 @@ class MobScriptYamlTest {
 				id: broken
 				steps:
 				  - if: '${var.charge}'
-				  - sleep: 1s
+				  - wait: {duration: 1s}
 				"""));
 	}
 }

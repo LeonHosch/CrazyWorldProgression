@@ -15,7 +15,6 @@ import net.minecraft.resources.Identifier;
 
 import ekuzo.crazyworldprogression.mobforge.ai.MobAiRegistry;
 import ekuzo.crazyworldprogression.mobforge.command.MobForgeCommand;
-import ekuzo.crazyworldprogression.mobforge.networking.MobForgeNetworking;
 import ekuzo.crazyworldprogression.mobforge.template.MobTemplateRegistry;
 import ekuzo.crazyworldprogression.mobforge.template.MobTemplateValidator;
 import ekuzo.crazyworldprogression.mobforge.script.MobScriptExecutor;
@@ -46,8 +45,8 @@ public final class MobForge {
 
 	public static void initialize() {
 		MobAiRegistry.initialize();
+		MobAbilityRuntime.initialize();
 		MobForgeCommand.initialize();
-		MobForgeNetworking.initialize();
 		ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, amount, damageTaken, blocked) -> {
 			if (damageTaken > 0 && MobForgeEntityData.definition(entity).flatMap(MOBS::get).isPresent())
 				MobForgeEvents.damaged(new RegisteredMobHandle(entity), damageTaken);
@@ -77,12 +76,17 @@ public final class MobForge {
 		LOGGER.info("MobForge initialized.");
 	}
 
-	/** The player who lands the killing blow (also with a projectile) gets one roll in the mob's loot pool. */
+	/**
+	 * The player who lands the killing blow (also with a projectile) gets one roll in the mob's loot pool, and a second
+	 * one by chance with their Fighting level (Skills.bonusRoll).
+	 */
 	private static void rollKillLoot(net.minecraft.world.entity.LivingEntity entity, net.minecraft.world.damagesource.DamageSource source) {
 		var pool = MobForgeEntityData.lootPool(entity).map(Identifier::tryParse).orElse(null);
 		if (pool == null || !(source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) return;
 		try {
 			ekuzo.crazyworldprogression.loot.LootPoolService.roll(player.level().getServer(), player, pool);
+			if (ekuzo.crazyworldprogression.skills.Skills.bonusRoll(player, ekuzo.crazyworldprogression.skills.Skills.Skill.FIGHTING))
+				ekuzo.crazyworldprogression.loot.LootPoolService.roll(player.level().getServer(), player, pool);
 		} catch (RuntimeException exception) {
 			LOGGER.warn("Could not roll loot pool {} for {} killing {}: {}", pool, player.getName().getString(),
 					MobForgeEntityData.template(entity).orElse("a MobForge mob"), exception.getMessage());

@@ -21,7 +21,7 @@ final class ScriptSignatures {
     private static final String OFFSET = "{\"x\":0,\"y\":0,\"z\":0}";
 
     /** Value lists the client reads from its own registries; every other list comes from the server. */
-    static final Set<String> CLIENT_VALUES = Set.of("sound", "effect", "particle", "item", "entity");
+    static final Set<String> CLIENT_VALUES = Set.of("sound", "effect", "particle", "item", "entity", "block");
     /** Value lists read from the script being edited. */
     static final Set<String> SCRIPT_VALUES = Set.of("script_tag", "script_box", "script_var");
 
@@ -265,11 +265,13 @@ final class ScriptSignatures {
                 List.of(text("achievement_id", "Advancement ID, e.g. mymod:story/root").values("advancement")),
                 List.of(text("player", "Player list variable or UUID; omit for everyone").values("script_var")),
                 "achievement(achievement_id=\"mymod:story/root\", player=\"entered\")");
-        command("building", "Pastes a saved building with its minimum corner here, or clears the pasted range.",
+        command("building", "Pastes a saved building with its minimum corner here, or removes it. By default only "
+                        + "its own blocks are placed and removed (air is skipped); mode=\"replace\" clears its whole box.",
                 List.of(text("build_id", "Saved building ID, e.g. cwp:bridge").values("building"),
                         value("action", "\"add\"", "add or delete"),
                         position("location", "Minimum corner")),
-                List.of(), "building(build_id=\"cwp:bridge\", action=\"add\", location={\"x\":5,\"y\":64,\"z\":5})");
+                List.of(value("mode", "\"skip_air\"", "skip_air (keep blocks in its air) or replace (whole box); "
+                        + "omit for the server default")), "building(build_id=\"cwp:bridge\", action=\"add\", location={\"x\":5,\"y\":64,\"z\":5})");
         command("distances", "Changes this instance's view and simulation distance in chunks (2-32). 0 returns to "
                         + "the portal's setting.", List.of(),
                 List.of(value("view", "8", "View distance in chunks"),
@@ -328,8 +330,47 @@ final class ScriptSignatures {
                         value("offset", OFFSET, "Random spread around the location"),
                         text("tag", "Name for kills, dead, health_percent, phase, mob_cast"),
                         value("ai", "{\"mode\":\"nearest_player\",\"combat\":true,\"range\":32}",
-                                "AI override; template only")),
+                                "AI override; template only"),
+                        text("area", "mob_id only: keep the mobs in this area; only players inside can hurt them"),
+                        value("per_player", "1", "mob_id only: this many more per player in the area beyond the first"),
+                        value("max", "8", "mob_id only: at most this many with per_player"),
+                        value("health", "2", "mob_id only: health multiplier"),
+                        value("damage", "1.5", "mob_id only: damage multiplier"),
+                        value("fireproof", "true", "mob_id only: no burning in daylight"),
+                        value("cap", "8", "mob_id only: never more than this many living mobs with the tag"),
+                        value("cap_per_player", "3", "mob_id only: the cap grows by this per player beyond cap_after"),
+                        value("cap_after", "2", "mob_id only: players counted for the cap from this many on (default 1)"),
+                        value("cap_max", "20", "mob_id only: the cap never goes above this")),
                 "mob_spawn(template=\"raid_zombie\", location={\"x\":0,\"y\":64,\"z\":0}, count=3, tag=\"adds\")");
+        command("area", "A round event area. Players inside join its list; who leaves is warned and taken off "
+                        + "the list after the grace time.",
+                List.of(text("name", "Area name"), position("center", "Center"), value("radius", "40", "Radius in blocks")),
+                List.of(value("height", "32", "Blocks up and down from the center (default 32)"),
+                        text("grace", "Time to come back after leaving, e.g. 20s"),
+                        text("player_variable", "List of the players taking part"),
+                        text("count_variable", "How many take part")),
+                "area(name=\"star\", center={\"x\":0,\"y\":64,\"z\":0}, radius=40, grace=\"20s\", player_variable=\"present\")");
+        command("replace_blocks", "Replaces every block of one type with another in an area or event box, or a range.",
+                List.of(text("from", "Block ID, e.g. minecraft:ancient_debris").values("block"),
+                        text("to", "Block ID, e.g. minecraft:cobblestone").values("block")),
+                List.of(text("area", "Area or event box name"), position("min", "Lowest corner"), position("max", "Highest corner")),
+                "replace_blocks(from=\"minecraft:ancient_debris\", to=\"minecraft:cobblestone\", area=\"core\")");
+        command("aura", "A stacking effect: every interval, players in the radius get one level more, up to max_stacks.",
+                List.of(text("name", "Aura name"), text("effect_id", "Effect ID").values("effect"),
+                        position("center", "Center"), value("radius", "8", "Radius in blocks")),
+                List.of(text("interval", "One more level this often (default 2s)"),
+                        value("max_stacks", "5", "Highest level (default 1)"),
+                        text("duration", "How long each level lasts (default 3s)"),
+                        text("action", "remove ends the aura")),
+                "aura(name=\"heat\", effect_id=\"echelon-core:unbearable_heat\", center={\"x\":0,\"y\":64,\"z\":0}, radius=8, interval=\"2s\", max_stacks=5)");
+        command("message", "Shows text to the players in a list variable, or everyone in the world.",
+                List.of(text("text", "The text")),
+                List.of(text("player", "Player list variable or UUID").values("script_var"),
+                        text("style", "chat, actionbar or title (default chat)"),
+                        text("color", "Colour name, e.g. red or gold")),
+                "message(text=\"The star is charging!\", player=\"present\", style=\"title\", color=\"dark_purple\")");
+        command("mob_despawn", "Removes every living mob with this tag.",
+                List.of(text("mob", "Mob tag")), List.of(), "mob_despawn(mob=\"guards\")");
         command("particles", "Shows a particle effect.",
                 List.of(text("particle_id", "Particle ID, e.g. minecraft:flame").values("particle"),
                         position("location", "Center")),

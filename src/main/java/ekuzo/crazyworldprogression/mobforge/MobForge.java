@@ -47,6 +47,8 @@ public final class MobForge {
 		MobAiRegistry.initialize();
 		MobAbilityRuntime.initialize();
 		MobForgeCommand.initialize();
+		// Mobs a script keeps in an event area can only be hurt from inside that area.
+		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> SCRIPT_EXECUTOR.allowDamage(entity, source));
 		ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, amount, damageTaken, blocked) -> {
 			if (damageTaken > 0 && MobForgeEntityData.definition(entity).flatMap(MOBS::get).isPresent())
 				MobForgeEvents.damaged(new RegisteredMobHandle(entity), damageTaken);

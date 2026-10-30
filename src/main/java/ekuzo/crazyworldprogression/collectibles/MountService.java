@@ -86,6 +86,11 @@ public final class MountService {
         CwpMount mount = definition.type().create(level, EntitySpawnReason.MOB_SUMMONED);
         if (mount == null) return;
         mount.snapTo(player.getX(), player.getY(), player.getZ(), player.getYRot(), 0);
+        // Facing where the player looks: the body and head turn too, not only the entity's yaw.
+        mount.setYBodyRot(player.getYRot());
+        mount.yBodyRotO = player.getYRot();
+        mount.setYHeadRot(player.getYRot());
+        mount.yHeadRotO = player.getYRot();
         mount.setUp(player.getUUID(), definition);
         level.addFreshEntity(mount);
         level.sendParticles(ParticleTypes.POOF, mount.getX(), mount.getY() + 0.8, mount.getZ(), 12, 0.6, 0.4, 0.6, 0.02);

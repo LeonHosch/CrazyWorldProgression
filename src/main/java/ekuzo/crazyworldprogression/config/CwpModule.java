@@ -25,7 +25,8 @@ public enum CwpModule {
             "ArrowEffectsMixin", "LivingEntityBodkinMixin"),
     AMMO("ammo", "Ammo slots and switching ammo (R).", "PlayerAmmoMixin"),
     ACCESSORIES("accessories", "Accessory slots and the buff food slot.",
-            "InventoryMenuAccessoryMixin", "InventoryDropAccessoriesMixin", "client.InventoryScreenAccessoryMixin"),
+            "InventoryMenuAccessoryMixin", "InventoryDropAccessoriesMixin", "client.InventoryScreenAccessoryMixin",
+            "client.CreativeInventorySlotsMixin"),
     FARMING("farming", "Farming levels, produce quality, crossbreeding and animal produce (milking, egg collecting).",
             "ChickenEggMixin", "ItemEntityEggQualityMixin", "HopperProduceMixin"),
     COOKING("cooking", "Cooking dishes and food quality.", "FoodQualityMixin"),
@@ -49,7 +50,7 @@ public enum CwpModule {
             "BonusAreaSpawnRulesMixin", "BonusAreaPatrolMixin", "BonusAreaPhantomMixin", "BonusAreaCreeperMixin"),
     PORTALS("portals", "Portals, pockets and their workshops, instances, raids, parties, buildings and waypoints.",
             "InstanceFireSpreadMixin", "InstanceMobSpawnMixin", "InstanceRandomTickMixin", "PocketBuildTrackingMixin",
-            "PocketWeatherMixin", "LevelLightEngineBatchMixin", "client.EntityVisibilityMixin"),
+            "PocketWeatherMixin", "LevelLightEngineBatchMixin", "client.EntityVisibilityMixin", "client.WorkshopMoveClickMixin"),
     MOBFORGE("mobforge", "MobForge: custom mobs, their AI and encounter scripts.", "EntityNoVehicleMixin");
 
     private final String key;

@@ -157,6 +157,17 @@ public final class CwpAdminModule {
                 MOB_EDIT + (templateId == null ? "@new" : templateId));
     }
 
+    /** Opens a pocket's editor page (workshop shortcut). */
+    public static boolean openPocketEditor(ServerPlayer player, Identifier pocket) {
+        return AdminPanelNetworking.openPage(player, CrazyWorldProgression.id("admin"), POCKET_EDIT + pocket);
+    }
+
+    /** Opens one of a pocket's attached scripts in the pocket's script editor (workshop shortcut). */
+    public static boolean openPocketScript(ServerPlayer player, Identifier pocket, String scriptId) {
+        return AdminPanelNetworking.openPage(player, CrazyWorldProgression.id("admin"),
+                POCKET_EDIT + pocket + SCRIPT_SEGMENT + scriptId);
+    }
+
     public static boolean openScriptEditor(ServerPlayer player, String scriptId) {
         return AdminPanelNetworking.openPage(player, CrazyWorldProgression.id("admin"),
                 MOB_SCRIPT_EDIT + (scriptId == null ? "@new" : scriptId));
@@ -392,7 +403,8 @@ public final class CwpAdminModule {
         entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Build dimension",
                 "Enter this pocket to build and edit its blocks.", List.of(),
                 List.of(new AdminPanelRegistry.AdminAction("pocket.enter", "Enter", false),
-                        new AdminPanelRegistry.AdminAction("pocket.leave", "Leave", false))));
+                        new AdminPanelRegistry.AdminAction("pocket.leave", "Leave", false),
+                        new AdminPanelRegistry.AdminAction("pocket.helpers", "Helpers", false))));
         entries.add(AdminPanelRegistry.AdminEntry.editor("Pocket", "Build capture",
                 "Build and spawn changes save automatically. Entry uses a safe floor near these coordinates.",
                 List.of(textField("pocket_spawn_x", "Spawn X", Integer.toString(PocketEditorService.entry(server, requestedId).getX()), "0", 12, List.of()),
@@ -1083,6 +1095,12 @@ public final class CwpAdminModule {
             AreaSelectionService.clear(player);
             PortalService.enterPocketEditor(player, id);
             return AdminPanelRegistry.ActionResult.success("Entered pocket " + id);
+        }
+        if (actionId.equals("pocket.helpers")) {
+            pocketPageId(pageId);
+            return ekuzo.crazyworldprogression.portals.WorkshopHelpers.openMenu(player)
+                    ? AdminPanelRegistry.ActionResult.success("Opened workshop helpers")
+                    : AdminPanelRegistry.ActionResult.failure("Workshop helpers need CWP on your game");
         }
         if (actionId.equals("pocket.leave")) {
             pocketPageId(pageId);

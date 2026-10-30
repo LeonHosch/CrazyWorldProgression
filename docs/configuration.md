@@ -7,6 +7,8 @@ The file has three sections:
 - **modules:** turns each part of the framework on or off.
 - **worlds:** sets how many instance and workshop worlds CWP creates.
 - **performance:** the tick time budget for block work, in milliseconds. These settings used to live in `crazy-world-progression-performance.properties`. CWP copies them over once, and after that it no longer reads the old file.
+- **permissions:** who is a builder (may use creative and spectator, helpers and workshops).
+- **buildings:** how script `building` steps without their own `mode` place and remove saved buildings.
 
 ## Parts
 
@@ -90,3 +92,21 @@ performance:
 ```
 
 See [performance](performance.md) for how the budget is shared between scripts, instance building and cleanup.
+
+## Permissions
+
+```yaml
+permissions:
+  builder: op2
+```
+
+`op2` (default): operator level 2 or higher is a builder. `op1`: level 1 or higher. Only builders may be in creative or spectator mode. See [workshop helpers](workshop-helpers.md#builders-and-creative-mode).
+
+## Buildings
+
+```yaml
+buildings:
+  placement_mode: skip_air
+```
+
+`skip_air` (default) places only a building's own blocks and removes only those. `replace` writes its air as well and clears its whole box on removal (the behaviour before this setting). A step's own `mode` wins. See [workshop helpers](workshop-helpers.md#building-placement-mode).

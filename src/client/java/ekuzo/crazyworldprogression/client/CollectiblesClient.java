@@ -18,6 +18,9 @@ public final class CollectiblesClient {
     private CollectiblesClient() { }
 
     public static void initialize() {
+        MountJumpClient.initialize();
+        // Content mods register their mini pets in their main initializer, which has run by now.
+        MiniPetRenderer.registerAll();
         mountKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.crazy-world-progression.mount",
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_H, CATEGORY));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {

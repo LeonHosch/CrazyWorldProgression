@@ -483,7 +483,8 @@ public final class PocketEditorService {
         }
     }
 
-    static MobScript translate(MobScript script, BlockPos delta) {
+    /** The script with every position moved by {@code delta} (pocket instances, scripts placed in the world). */
+    public static MobScript translate(MobScript script, BlockPos delta) {
         List<MobScript.Step> steps = script.steps().stream().map(step -> {
             if (step instanceof MobScript.EventBoxStep box) return (MobScript.Step) new MobScript.EventBoxStep(
                     box.name(), shifted(box.min(), delta), shifted(box.max(), delta), box.mode(), box.mobId(),
@@ -501,10 +502,18 @@ public final class PocketEditorService {
             if (step instanceof MobScript.PortalLocationStep portal) return (MobScript.Step) new MobScript.PortalLocationStep(
                     portal.portalId(), portal.action(), portal.locationId(), shifted(portal.position(), delta),
                     portal.target() == null ? null : shifted(portal.target(), delta));
-            if (step instanceof MobScript.SpawnMobsStep spawn) return (MobScript.Step) new MobScript.SpawnMobsStep(
-                    spawn.mobId(), shifted(spawn.location(), delta), spawn.offset(), spawn.count(), spawn.tag());
+            if (step instanceof MobScript.SpawnMobsStep spawn) return (MobScript.Step) spawn.at(shifted(spawn.location(), delta));
+            if (step instanceof MobScript.AreaStep area) return (MobScript.Step) new MobScript.AreaStep(area.name(),
+                    shifted(area.center(), delta), area.radius(), area.height(), area.graceTicks(), area.playerVariable(),
+                    area.countVariable(), area.defendRadius());
+            if (step instanceof MobScript.ReplaceBlocksStep replace && replace.min() != null)
+                return (MobScript.Step) new MobScript.ReplaceBlocksStep(replace.from(), replace.to(), replace.area(),
+                        shifted(replace.min(), delta), shifted(replace.max(), delta));
+            if (step instanceof MobScript.AuraStep aura && aura.center() != null)
+                return (MobScript.Step) new MobScript.AuraStep(aura.name(), aura.effectId(), shifted(aura.center(), delta),
+                        aura.radius(), aura.intervalTicks(), aura.maxStacks(), aura.durationTicks(), aura.action());
             if (step instanceof MobScript.BuildingStep building) return (MobScript.Step) new MobScript.BuildingStep(
-                    building.buildId(), building.action(), shifted(building.location(), delta));
+                    building.buildId(), building.action(), shifted(building.location(), delta), building.mode());
             if (step instanceof MobScript.ParticleStep particles) return (MobScript.Step) new MobScript.ParticleStep(
                     particles.particleId(), shifted(particles.location(), delta), particles.offset(),
                     particles.count(), particles.speed());

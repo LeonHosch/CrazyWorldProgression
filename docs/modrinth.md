@@ -82,7 +82,19 @@ CWP is in beta (0.x). Expect changes before 1.0.
 
 ---
 
-## 2. Version 0.5.0 changelog
+## 2. Version 0.6.0 changelog
+
+```markdown
+- Workshop helpers: inside a workshop, builders see event boxes, areas, mob, portal, building and player spawns, sensors and more, with labels and facing arrows; a menu (F8) switches categories, teleports between helpers and lists them
+- Move mode (F9): select helpers with left click and move them with the arrow keys (Shift: 5 blocks, Alt: up/down); scripts keep their comments
+- F6/F7 open the workshop's pocket editor and script
+- In creative, builders can also show and move portals, anomalies and bonus areas outside workshops (never in instances)
+- Builders (operator level 2+, configurable) are the only players allowed in creative or spectator; creative has its own inventory
+- Accessory, buff food and ammo slots in the creative inventory
+- Buildings placed by scripts skip air by default and remove only their own blocks; `mode="replace"` or `buildings.placement_mode: replace` keeps the old behaviour
+```
+
+## Version 0.5.0 changelog
 
 ```markdown
 First public beta.
@@ -116,9 +128,9 @@ First public beta.
 
 | Field | Value |
 |---|---|
-| File | `crazy-world-progression-0.5.0.jar` (not the `-sources` jar) |
-| Version number | `0.5.0` |
-| Version title | `0.5.0` |
+| File | `crazy-world-progression-0.6.0.jar` (not the `-sources` jar) |
+| Version number | `0.6.0` |
+| Version title | `0.6.0` |
 | Release channel | **Beta** |
 | Loaders | Fabric |
 | Game versions | 26.2 |

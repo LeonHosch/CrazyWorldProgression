@@ -44,6 +44,7 @@ public class CrazyWorldProgressionClient implements ClientModInitializer {
 			WaypointClient.initialize();
 			PortalPlayerVisibility.initialize();
 			BuildingPreviewRenderer.initialize();
+			WorkshopHelperClient.initialize();
 			PortalEntryPromptClient.initialize();
 			PartyScreen.initialize();
 			PartyVoiceVolumes.initialize();
@@ -57,6 +58,7 @@ public class CrazyWorldProgressionClient implements ClientModInitializer {
 			StudyScreen.initialize();
 		}
 		if (CwpModule.FLETCHING.enabled()) FletchingScreen.initialize();
+		if (CwpModule.ACCESSORIES.enabled()) CreativeSlotsClient.initialize();
 		if (CwpModule.AMMO.enabled()) AmmoClient.initialize();
 		if (CwpModule.SOCIAL.enabled()) {
 			ChestLockClient.initialize();

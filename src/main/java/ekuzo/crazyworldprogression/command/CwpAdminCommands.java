@@ -69,6 +69,7 @@ public final class CwpAdminCommands {
                 .then(skillTreesBranch())
                 .then(statsBranch())
                 .then(PortalCommands.adminBranch())
+                .then(ekuzo.crazyworldprogression.portals.WorkshopHelpers.commandBranch())
                 .then(Commands.literal("sources").executes(CwpAdminCommands::sources))
                 .then(Commands.literal("reload").executes(CwpAdminCommands::reload))
                 .then(Commands.literal("wipe").executes(context -> {
@@ -179,6 +180,7 @@ public final class CwpAdminCommands {
         line(context.getSource(), "/cwp skilltrees list|info", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp stats [refresh]", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp portals - templates, placed portals, schedules, and instances", ChatFormatting.GRAY);
+        line(context.getSource(), "/cwp workshop [menu|list|next|previous|nearest] [category] - workshop helpers", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp sources - registered integration sources", ChatFormatting.GRAY);
         line(context.getSource(), "/cwp reload - reload YAML and refresh online stats", ChatFormatting.GRAY);
         return 1;

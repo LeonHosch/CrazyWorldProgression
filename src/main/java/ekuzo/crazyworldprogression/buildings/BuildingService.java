@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.levelgen.structure.templatesystem.BlockIgnoreProcessor;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.storage.LevelResource;
@@ -100,32 +101,66 @@ public final class BuildingService {
     }
 
     /**
-     * Places a saved building a slice at a time within the script time budget; returns the next block index,
-     * or -1 when the building is complete.
+     * Whether a building step with this mode replaces its whole box: "replace" does, "skip_air" does not, and a
+     * blank mode follows {@code buildings.placement_mode} in the CWP config (skip_air unless set).
      */
+    public static boolean replaces(String mode) {
+        if (MobScript.BuildingStep.REPLACE.equals(mode)) return true;
+        if (MobScript.BuildingStep.SKIP_AIR.equals(mode)) return false;
+        return ekuzo.crazyworldprogression.config.CwpConfig.get().replaceBuildings();
+    }
+
+    /** Air (and structure void) in a saved building: written only when replacing, never removed as its block. */
+    private static boolean empty(StructureTemplate.StructureBlockInfo block) {
+        return block.state().isAir() || block.state().is(Blocks.STRUCTURE_VOID);
+    }
+
+    /** The saved blocks in capture order, or null when the building or its file is gone. */
+    private static List<StructureTemplate.StructureBlockInfo> savedBlocks(MinecraftServer server, Identifier id) {
+        StructureTemplate template = server.getStructureManager().get(structureId(id)).orElse(null);
+        if (template == null) return null;
+        var palettes = ((ekuzo.crazyworldprogression.mixin.StructureTemplateAccessor) template).cwp$palettes();
+        return palettes.isEmpty() ? List.of() : palettes.getFirst().blocks();
+    }
+
+    /** Places with the config's default mode; see {@link #spawnBatch(ServerLevel, Identifier, BlockPos, long, boolean)}. */
     public static long spawnBatch(ServerLevel level, Identifier id, BlockPos origin, long start) {
+        return spawnBatch(level, id, origin, start, replaces(""));
+    }
+
+    /**
+     * Places a saved building a slice at a time within the script time budget; returns the next block index,
+     * or -1 when the building is complete. Without {@code replace} the building's air is skipped, so blocks already
+     * standing in its empty space stay.
+     */
+    public static long spawnBatch(ServerLevel level, Identifier id, BlockPos origin, long start, boolean replace) {
         BuildingInfo info = building(level.getServer(), id);
         if (info == null) throw new IllegalArgumentException("Unknown building " + id);
-        StructureTemplate template = level.getServer().getStructureManager().get(structureId(id))
-                .orElseThrow(() -> new IllegalStateException("Missing saved blocks for building " + id));
-        var palettes = ((ekuzo.crazyworldprogression.mixin.StructureTemplateAccessor) template).cwp$palettes();
-        List<StructureTemplate.StructureBlockInfo> blocks = palettes.isEmpty() ? List.of() : palettes.getFirst().blocks();
+        List<StructureTemplate.StructureBlockInfo> blocks = savedBlocks(level.getServer(), id);
+        if (blocks == null) throw new IllegalStateException("Missing saved blocks for building " + id);
         int index = (int) start;
         try (var slice = ekuzo.crazyworldprogression.cleanup.TickBudget.start(level.getServer(), ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT)) {
             int done = 0;
-            while (index < blocks.size() && slice.more(done++)) {
-                ekuzo.crazyworldprogression.portals.InstanceBuilds.placeOne(level, origin, blocks.get(index));
-                index++;
+            while (index < blocks.size() && slice.more(done)) {
+                StructureTemplate.StructureBlockInfo block = blocks.get(index++);
+                if (!replace && empty(block)) continue;
+                ekuzo.crazyworldprogression.portals.InstanceBuilds.placeOne(level, origin, block);
+                done++;
             }
         }
         if (index < blocks.size()) return index;
         if (PortalRegistry.instanceSlots().contains(level.dimension().identifier()))
             BuildingData.get(level.getServer()).addPlacement(level.dimension().identifier(),
-                    new BuildingData.Placement(id, origin.asLong(), info.sizeX(), info.sizeY(), info.sizeZ()));
+                    new BuildingData.Placement(id, origin.asLong(), info.sizeX(), info.sizeY(), info.sizeZ(), replace));
         return -1L;
     }
 
+    /** Places at once with the config's default mode. */
     public static void spawn(ServerLevel level, Identifier id, BlockPos origin) {
+        spawn(level, id, origin, replaces(""));
+    }
+
+    public static void spawn(ServerLevel level, Identifier id, BlockPos origin, boolean replace) {
         BuildingInfo info = building(level.getServer(), id);
         if (info == null) throw new IllegalArgumentException("Unknown building " + id);
         StructureTemplate template = level.getServer().getStructureManager().get(structureId(id))
@@ -134,19 +169,33 @@ public final class BuildingService {
                 || template.getSize().getZ() != info.sizeZ())
             throw new IllegalStateException("Building size does not match saved blocks for " + id);
         int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
-        if (!template.placeInWorld(level, origin, origin, new StructurePlaceSettings()
-                .setKnownShape(true).setIgnoreEntities(true), level.getRandom(), flags))
+        StructurePlaceSettings settings = new StructurePlaceSettings().setKnownShape(true).setIgnoreEntities(true);
+        if (!replace) settings.addProcessor(BlockIgnoreProcessor.STRUCTURE_AND_AIR);
+        if (!template.placeInWorld(level, origin, origin, settings, level.getRandom(), flags))
             throw new IllegalStateException("Could not spawn building " + id);
         if (PortalRegistry.instanceSlots().contains(level.dimension().identifier()))
             BuildingData.get(level.getServer()).addPlacement(level.dimension().identifier(),
-                    new BuildingData.Placement(id, origin.asLong(), info.sizeX(), info.sizeY(), info.sizeZ()));
+                    new BuildingData.Placement(id, origin.asLong(), info.sizeX(), info.sizeY(), info.sizeZ(), replace));
     }
 
-    /** Clear at most one server-tick slice; return the next index or -1 when finished. */
+    /** Removes with the config's default mode; see {@link #clearBatch(ServerLevel, Identifier, BlockPos, long, boolean)}. */
     public static long clearBatch(ServerLevel level, Identifier id, BlockPos origin, long start) {
+        return clearBatch(level, id, origin, start, replaces(""));
+    }
+
+    /**
+     * Clear at most one server-tick slice; return the next index or -1 when finished. A building recorded in an
+     * instance is removed the way it was placed; elsewhere {@code replace} decides: the whole box, or only the
+     * building's own (non-air) block positions.
+     */
+    public static long clearBatch(ServerLevel level, Identifier id, BlockPos origin, long start, boolean replace) {
         BuildingInfo info = building(level.getServer(), id);
         if (info == null) throw new IllegalArgumentException("Unknown building " + id);
-        long next = clearRangeBatch(level, origin, info.sizeX(), info.sizeY(), info.sizeZ(), start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT);
+        boolean wholeBox = BuildingData.get(level.getServer()).placements(level.dimension().identifier()).stream()
+                .filter(placement -> placement.origin() == origin.asLong()).findFirst()
+                .map(BuildingData.Placement::replace).orElse(replace);
+        long next = clearPlacementBatch(level, id, origin, info.sizeX(), info.sizeY(), info.sizeZ(), wholeBox, start,
+                ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT);
         if (next < 0) BuildingData.get(level.getServer()).removePlacement(level.dimension().identifier(), origin.asLong());
         return next;
     }
@@ -157,8 +206,8 @@ public final class BuildingService {
         BuildingData data = BuildingData.get(level.getServer());
         for (BuildingData.Placement placement : List.copyOf(data.placements(level.dimension().identifier()))) {
             if (placement.origin() != origin.asLong()) continue;
-            long next = clearRangeBatch(level, origin, placement.sizeX(), placement.sizeY(), placement.sizeZ(),
-                    start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT);
+            long next = clearPlacementBatch(level, placement.id(), origin, placement.sizeX(), placement.sizeY(),
+                    placement.sizeZ(), placement.replace(), start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority.SCRIPT);
             if (next >= 0) return next;
             data.removePlacement(level.dimension().identifier(), placement.origin());
             return data.placements(level.dimension().identifier()).stream()
@@ -172,8 +221,8 @@ public final class BuildingService {
         BuildingData data = BuildingData.get(level.getServer());
         for (BuildingData.Placement placement : List.copyOf(data.placements(level.dimension().identifier()))) {
             BlockPos origin = BlockPos.of(placement.origin());
-            long next = clearRangeBatch(level, origin, placement.sizeX(), placement.sizeY(),
-                    placement.sizeZ(), start, priority);
+            long next = clearPlacementBatch(level, placement.id(), origin, placement.sizeX(), placement.sizeY(),
+                    placement.sizeZ(), placement.replace(), start, priority);
             if (next >= 0) return next;
             data.removePlacement(level.dimension().identifier(), placement.origin());
             return data.placements(level.dimension().identifier()).isEmpty() ? -1L : 0L;
@@ -226,6 +275,31 @@ public final class BuildingService {
     public static void clearScheduledState(MinecraftServer server) { SCHEDULED_CLEARS.remove(server); }
 
     private record ScheduledClear(ServerLevel level, long nextIndex, Runnable continuation) { }
+
+    /**
+     * One slice of removing a placement: its whole box when it replaced, otherwise only the positions of the
+     * building's own blocks (the whole box when its saved blocks are gone).
+     */
+    private static long clearPlacementBatch(ServerLevel level, Identifier id, BlockPos origin, int sizeX, int sizeY,
+                                            int sizeZ, boolean replace, long start,
+                                            ekuzo.crazyworldprogression.cleanup.TickBudget.Priority priority) {
+        List<StructureTemplate.StructureBlockInfo> blocks = replace ? null : savedBlocks(level.getServer(), id);
+        if (blocks == null) return clearRangeBatch(level, origin, sizeX, sizeY, sizeZ, start, priority);
+        int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int index = (int) start;
+        try (var slice = ekuzo.crazyworldprogression.cleanup.TickBudget.start(level.getServer(), priority)) {
+            int done = 0;
+            while (index < blocks.size() && slice.more(done)) {
+                StructureTemplate.StructureBlockInfo block = blocks.get(index++);
+                if (empty(block)) continue;
+                cursor.setWithOffset(origin, block.pos());
+                if (!level.getBlockState(cursor).isAir()) level.setBlock(cursor, Blocks.AIR.defaultBlockState(), flags);
+                done++;
+            }
+        }
+        return index >= blocks.size() ? -1 : index;
+    }
 
     private static long clearRangeBatch(ServerLevel level, BlockPos origin, int sizeX, int sizeY,
                                         int sizeZ, long start, ekuzo.crazyworldprogression.cleanup.TickBudget.Priority priority) {

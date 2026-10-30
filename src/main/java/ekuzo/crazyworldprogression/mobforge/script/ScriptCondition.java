@@ -17,9 +17,13 @@ import net.minecraft.world.entity.Mob;
 
 /** Deliberately small, capability-based condition grammar; no expression evaluation or reflection. */
 public final class ScriptCondition {
-    private static final Pattern CONDITION = Pattern.compile("\\$\\{([a-z][a-z0-9_]*)\\.(dead|health_percent|phase)(?:\\s*(<=|>=|==|!=|<|>)\\s*([a-z0-9_./-]+))?}");
+    private static final Pattern CONDITION = Pattern.compile("\\$\\{([a-z][a-z0-9_]*)\\.(dead|alive|health_percent|phase)(?:\\s*(<=|>=|==|!=|<|>)\\s*([a-z0-9_./-]+))?}");
     private static final Pattern SENSOR = Pattern.compile("\\$\\{(var|box|box_triggers|kills|portal|redstone)\\.([a-z0-9_:/.-]+)(?:\\s*(<=|>=|==|!=|<|>)\\s*(true|false|-?[0-9]+))?}");
-    private static final Pattern FUNCTION = Pattern.compile("(kills|portal_used|players_in|box_triggers|powered|var|dead|health_percent|phase)\\(\\s*['\"]([a-z0-9_:/.-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(['\"]?[a-z0-9_./-]+['\"]?))?");
+    private static final Pattern FUNCTION = Pattern.compile("(kills|portal_used|players_in|box_triggers|powered|var|dead|alive|health_percent|phase)\\(\\s*['\"]([a-z0-9_:/.-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(['\"]?[a-z0-9_./-]+['\"]?))?");
+    /** blocks("core", "minecraft:ancient_debris") counts that block in an event box. */
+    private static final Pattern BLOCKS = Pattern.compile("blocks\\(\\s*['\"]([a-z][a-z0-9_]*)['\"]\\s*,\\s*['\"]([a-z0-9_.-]+:[a-z0-9_./-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(-?[0-9]+))?");
+    /** elapsed() is the number of seconds since the script run started. */
+    private static final Pattern ELAPSED = Pattern.compile("elapsed\\(\\s*\\)\\s*(<=|>=|==|!=|<|>)\\s*([0-9]+)");
     private static final Pattern POWER_POSITION = Pattern.compile("powered\\(\\s*(-?[0-9]+)\\s*,\\s*(-?[0-9]+)\\s*,\\s*(-?[0-9]+)\\s*\\)(?:\\s*(==|!=)\\s*(true|false))?");
     private ScriptCondition() { }
     /** A mob tag (or legacy handle), written as boss or ${boss}. */
@@ -41,7 +45,7 @@ public final class ScriptCondition {
         int and = operator(atom, " and ");
         if (and >= 0) { validate(atom.substring(0, and)); validate(atom.substring(and + 5)); return; }
         if (atom.startsWith("not ")) { validate(atom.substring(4)); return; }
-        if (POWER_POSITION.matcher(atom).matches()) return;
+        if (POWER_POSITION.matcher(atom).matches() || BLOCKS.matcher(atom).matches() || ELAPSED.matcher(atom).matches()) return;
         atom = normalize(atom);
         if (SENSOR.matcher(atom).matches()) return;
         parse(atom);
@@ -76,7 +80,13 @@ public final class ScriptCondition {
     }
     public record Context(ServerLevel level, Map<String, Long> variables, Map<String, Box> boxes,
                           Map<String, BlockPos> redstone, Map<String, Long> kills,
-                          Map<Identifier, Long> portalUses, Map<String, Long> boxTriggers) {
+                          Map<Identifier, Long> portalUses, Map<String, Long> boxTriggers,
+                          Map<String, MobScript.AreaStep> areas, long elapsedTicks) {
+        public Context(ServerLevel level, Map<String, Long> variables, Map<String, Box> boxes,
+                       Map<String, BlockPos> redstone, Map<String, Long> kills,
+                       Map<Identifier, Long> portalUses, Map<String, Long> boxTriggers) {
+            this(level, variables, boxes, redstone, kills, portalUses, boxTriggers, Map.of(), 0);
+        }
         public Context(ServerLevel level, Map<String, Long> variables, Map<String, Box> boxes,
                        Map<String, BlockPos> redstone, Map<String, Long> kills,
                        Map<Identifier, Long> portalUses) {
@@ -109,6 +119,13 @@ public final class ScriptCondition {
             boolean powered = powered(context.level(), pos);
             return position.group(4) == null ? powered : position.group(4).equals("==") == (powered == Boolean.parseBoolean(position.group(5)));
         }
+        var blocks = BLOCKS.matcher(atom);
+        if (blocks.matches()) {
+            long count = countBlocks(context, blocks.group(1), Identifier.parse(blocks.group(2)));
+            return blocks.group(3) == null ? count > 0 : compare(count, blocks.group(3), Long.parseLong(blocks.group(4)));
+        }
+        var elapsed = ELAPSED.matcher(atom);
+        if (elapsed.matches()) return compare(context.elapsedTicks() / 20, elapsed.group(1), Long.parseLong(elapsed.group(2)));
         atom = normalize(atom);
         var sensor = SENSOR.matcher(atom);
         if (!sensor.matches()) return evaluate(atom, handles);
@@ -124,6 +141,9 @@ public final class ScriptCondition {
                 yield powered(context.level(), pos) ? 1L : 0L;
             }
             case "box" -> {
+                MobScript.AreaStep area = context.areas().get(name);
+                if (area != null) yield context.level().players().stream()
+                        .filter(player -> !player.isSpectator() && area.contains(player.position())).count();
                 Box box = context.boxes().get(name);
                 if (box == null) throw new IllegalArgumentException("Unknown event box " + name);
                 yield box.count(context.level());
@@ -152,6 +172,10 @@ public final class ScriptCondition {
         if (handle == null) throw new IllegalArgumentException("Unknown script handle " + match.group(1));
         String field = match.group(2), op = match.group(3), expected = match.group(4);
         if (field.equals("dead")) return !handle.isAlive();
+        if (field.equals("alive")) {
+            long living = handle instanceof TagGroup group ? group.living().size() : handle.isAlive() ? 1 : 0;
+            return compare(living, op, Long.parseLong(expected));
+        }
         if (field.equals("phase")) {
             String actual;
             if (handle instanceof TagGroup group) actual = group.phase();
@@ -180,12 +204,40 @@ public final class ScriptCondition {
         String field = match.group(2), op = match.group(3);
         if (field.equals("dead") && op != null) throw new IllegalArgumentException("dead condition takes no comparison");
         if (!field.equals("dead") && op == null) throw new IllegalArgumentException(field + " condition needs a comparison");
+        if (field.equals("alive") && !match.group(4).matches("[0-9]+")) throw new IllegalArgumentException("alive() compares with a whole number");
         if (field.equals("phase") && !op.equals("==") && !op.equals("!=")) throw new IllegalArgumentException("phase supports == and != only");
         if (field.equals("health_percent")) {
             try { double value = Double.parseDouble(match.group(4)); if (!Double.isFinite(value) || value < 0 || value > 1) throw new NumberFormatException(); }
             catch (NumberFormatException exception) { throw new IllegalArgumentException("health_percent threshold must be between 0 and 1"); }
         }
         return match;
+    }
+
+    private static boolean compare(long actual, String operator, long expected) {
+        return switch (operator) {
+            case "<" -> actual < expected;
+            case "<=" -> actual <= expected;
+            case ">" -> actual > expected;
+            case ">=" -> actual >= expected;
+            case "==" -> actual == expected;
+            case "!=" -> actual != expected;
+            default -> throw new IllegalArgumentException("Unknown comparison " + operator);
+        };
+    }
+
+    /** How many blocks of this type are in the event box (event boxes only: areas are too big to count every tick). */
+    private static long countBlocks(Context context, String boxName, Identifier blockId) {
+        Box box = context.boxes().get(boxName);
+        if (box == null) throw new IllegalArgumentException("blocks() needs an event box, not " + boxName);
+        var block = BuiltInRegistries.BLOCK.getValue(blockId);
+        long volume = (long) (box.max().x() - box.min().x() + 1) * (long) (box.max().y() - box.min().y() + 1)
+                * (long) (box.max().z() - box.min().z() + 1);
+        if (volume > 65_536) throw new IllegalArgumentException("blocks() event box " + boxName + " is too big (max 65536 blocks)");
+        long count = 0;
+        for (BlockPos pos : BlockPos.betweenClosed(BlockPos.containing(box.min().x(), box.min().y(), box.min().z()),
+                BlockPos.containing(box.max().x(), box.max().y(), box.max().z())))
+            if (context.level().getBlockState(pos).is(block)) count++;
+        return count;
     }
 
     private static boolean powered(ServerLevel level, BlockPos pos) {
@@ -205,7 +257,7 @@ public final class ScriptCondition {
             case "players_in" -> "box";
             case "box_triggers" -> "box_triggers";
             case "powered" -> "redstone";
-            case "dead", "health_percent", "phase" -> null;
+            case "dead", "alive", "health_percent", "phase" -> null;
             default -> match.group(1);
         };
         String suffix = match.group(3) == null ? "" : " " + match.group(3) + " " + match.group(4).replace("\"", "").replace("'", "");

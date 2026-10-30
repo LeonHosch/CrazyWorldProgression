@@ -4,6 +4,7 @@
   "package": "ekuzo.crazyworldprogression.mixin",
   "mixins": [
     "PackRepositoryWorldsMixin",
+    "ServerPlayerGameModeMixin",
     "LivingEntityNoLootDropMixin",
     "FishingHookLevelMixin",
     "EntityMountCooldownMixin",
@@ -68,6 +69,9 @@
   ],
   "client": [
     "client.AbstractContainerScreenBoundsMixin",
+    "client.EntityWaterAccessor",
+    "client.TropicalFishVariantInvoker",
+    "client.WalkAnimationStateAccessor",
     "client.AbstractContainerScreenLockMixin",
     "client.ChestRendererQualityMixin",
     "client.ChestRenderStateQualityMixin",
@@ -87,7 +91,9 @@
     "client.PauseScreenSettingsMixin",
     "client.PlayerTabTitleMixin",
     "client.RenderPipelinesAccessor",
-    "client.RenderTypeAccessor"
+    "client.RenderTypeAccessor",
+    "client.WorkshopMoveClickMixin",
+    "client.CreativeInventorySlotsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

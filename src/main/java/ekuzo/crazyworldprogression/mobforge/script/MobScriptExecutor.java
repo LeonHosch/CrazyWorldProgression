@@ -54,8 +54,14 @@ public final class MobScriptExecutor {
 	private final Map<UUID, ActiveRun> active = new LinkedHashMap<>();
 	private final Map<UUID, ActiveRun> pending = new LinkedHashMap<>();
 	private final Set<UUID> canceled = new HashSet<>();
+	/** Mobs spawned with mob_spawn(area=...): they stay in that area (see {@link #keepInArea}). */
+	private final Map<UUID, Bound> bound = new HashMap<>();
 	private boolean ticking;
 	private long clock;
+
+	private record Bound(ServerLevel level, MobScript.AreaStep area, UUID run) { }
+	/** How likely a mob kept in an area turns on a player at its center, each time it checks (every 3 seconds). */
+	private static final float DEFEND_CHANCE = 0.65F;
 
 	public UUID run(MobScript script, ServerLevel level) {
 		return run(script, level, Map.of(), null, null);
@@ -170,12 +176,60 @@ public final class MobScriptExecutor {
 
 	public int activeRunCount() { return active.size(); }
 
+	/**
+	 * Bound mobs walk back when they stray past their area's edge (and are put back in the middle when far out), and
+	 * forget targets outside the area.
+	 */
+	private void keepInArea() {
+		bound.entrySet().removeIf(entry -> {
+			Entity entity = entry.getValue().level().getEntity(entry.getKey());
+			// A mob in an unloaded chunk keeps its area while its script still runs.
+			if (entity == null) return !active.containsKey(entry.getValue().run()) && !pending.containsKey(entry.getValue().run());
+			if (!entity.isAlive()) return true;
+			if (!(entity instanceof net.minecraft.world.entity.Mob mob)) return false;
+			MobScript.AreaStep area = entry.getValue().area();
+			if (mob.getTarget() != null && !area.contains(mob.getTarget().position())) mob.setTarget(null);
+			if (area.defendRadius() > 0 && (mob.tickCount + mob.getId()) % 60 == 0
+					&& mob.getRandom().nextFloat() < DEFEND_CHANCE) {
+				// Every 3 seconds, most likely (not always) switch to whoever is at the center, mining what the
+				// guards defend.
+				Vec3 center = new Vec3(area.center().x(), area.center().y(), area.center().z());
+				var intruder = entry.getValue().level().players().stream()
+						.filter(player -> !player.isSpectator() && !player.isCreative()
+								&& player.position().distanceTo(center) <= area.defendRadius())
+						.min(java.util.Comparator.comparingDouble(player -> player.distanceToSqr(mob))).orElse(null);
+				if (intruder != null) mob.setTarget(intruder);
+			}
+			if (!area.contains(mob.position())) {
+				double dx = mob.getX() - area.center().x(), dz = mob.getZ() - area.center().z();
+				double outside = Math.sqrt(dx * dx + dz * dz) - area.radius();
+				if (outside > 8 || Math.abs(mob.getY() - area.center().y()) > area.height() + 8) {
+					Vec3 middle = findGround(entry.getValue().level(), area.center().x(), area.center().y(), area.center().z());
+					if (middle != null) mob.teleportTo(middle.x, middle.y, middle.z);
+				} else {
+					mob.getNavigation().moveTo(area.center().x(), area.center().y(), area.center().z(), 1.2);
+				}
+			}
+			return false;
+		});
+	}
+
+	/** Bound mobs can only be hurt by players (and their projectiles) inside their area. */
+	public boolean allowDamage(Entity victim, net.minecraft.world.damagesource.DamageSource source) {
+		Bound binding = bound.get(victim.getUUID());
+		if (binding == null) return true;
+		Entity attacker = source.getEntity();
+		if (!(attacker instanceof net.minecraft.world.entity.player.Player player)) return true;
+		return binding.area().contains(player.position());
+	}
+
 	public int activeRuns(String scriptId) {
 		return (int) active.values().stream().filter(run -> run.script.id().equals(scriptId)).count();
 	}
 
 	public void tick(MinecraftServer server) {
 		clock++;
+		keepInArea();
 		ticking = true;
 		Iterator<ActiveRun> iterator = active.values().iterator();
 		while (iterator.hasNext()) {
@@ -249,7 +303,7 @@ public final class MobScriptExecutor {
 	}
 
 	private boolean advance(ActiveRun run) {
-		ScriptCondition.Context context = run.context();
+		ScriptCondition.Context context = run.context(clock);
 		for (var entry : run.boxes.entrySet()) {
 			ScriptCondition.Box box = entry.getValue();
 			if (box.mode().equals("players") && !box.playerVariable().isEmpty()) {
@@ -288,6 +342,8 @@ public final class MobScriptExecutor {
 			if (current && !watch.previous) changeVariable(run, watch.step.variable(), watch.step.operation(), watch.step.value());
 			watch.previous = current;
 		}
+		trackAreas(run);
+		tickAuras(run);
 		if (run.resumeFrom != null) {
 			MobScript.EncounterEndStep checkpoint = run.resumeFrom;
 			run.resumeFrom = null;
@@ -354,7 +410,8 @@ public final class MobScriptExecutor {
 				rewardLoot(run, reward);
 			} else if (step instanceof MobScript.LootPoolStep loot) {
 				run.step++;
-				if (run.pocketInstanceId == null) throw new IllegalStateException("Loot rewards require a pocket instance");
+				if (run.pocketInstanceId == null && loot.playerId().isBlank())
+					throw new IllegalStateException("Outside pocket instances loot() needs player= (for example an area's player list)");
 				for (UUID playerId : playerTargets(run, loot.playerId())) {
 					var player = run.level.getServer().getPlayerList().getPlayer(playerId);
 					if (player == null || player.level() != run.level) continue;
@@ -437,7 +494,8 @@ public final class MobScriptExecutor {
 					return false;
 				}
 				run.buildingClearIndex = 0;
-					long placed = BuildingService.spawnBatch(run.level, building.buildId(), origin, run.buildingPlaceIndex);
+					long placed = BuildingService.spawnBatch(run.level, building.buildId(), origin, run.buildingPlaceIndex,
+							BuildingService.replaces(building.mode()));
 					if (placed >= 0) {
 						run.buildingPlaceIndex = placed;
 						run.wakeTick = clock + 1;
@@ -447,7 +505,7 @@ public final class MobScriptExecutor {
 					run.step++;
 				} else {
 					long next = BuildingService.clearBatch(run.level, building.buildId(), origin,
-							run.buildingClearIndex);
+							run.buildingClearIndex, BuildingService.replaces(building.mode()));
 					if (next >= 0) {
 						run.buildingClearIndex = next;
 						run.wakeTick = clock + 1;
@@ -522,10 +580,148 @@ public final class MobScriptExecutor {
 			} else if (step instanceof MobScript.WipeStep) {
 				run.step++;
 				RaidService.forceWipe(run.level);
+			} else if (step instanceof MobScript.AreaStep area) {
+				run.step++;
+				run.areas.put(area.name(), area);
+			} else if (step instanceof MobScript.ReplaceBlocksStep replace) {
+				run.step++;
+				replaceBlocks(run, replace);
+			} else if (step instanceof MobScript.AuraStep aura) {
+				run.step++;
+				if (aura.action().equals("remove")) run.auras.remove(aura.name());
+				else run.auras.put(aura.name(), aura);
+			} else if (step instanceof MobScript.MessageStep message) {
+				run.step++;
+				message(run, message);
+			} else if (step instanceof MobScript.DespawnStep despawn) {
+				run.step++;
+				ScriptEntityHandle handle = run.handles.get(despawn.tag());
+				List<ScriptEntityHandle> members = handle instanceof TagGroup group ? group.living()
+						: handle == null ? List.of() : List.of(handle);
+				for (ScriptEntityHandle member : members) {
+					Entity entity = run.level.getEntity(member.uuid());
+					if (entity == null || !entity.isAlive()) continue;
+					run.level.sendParticles(net.minecraft.core.particles.ParticleTypes.POOF, entity.getX(),
+							entity.getY() + entity.getBbHeight() / 2, entity.getZ(), 10, 0.3, 0.4, 0.3, 0.02);
+					entity.discard();
+				}
 			}
 		}
 		return run.watches.isEmpty();
 	}
+	/**
+	 * Players inside an area join its player list; someone on the list who is outside gets a countdown in the action
+	 * bar and is taken off the list when the grace time runs out.
+	 */
+	private void trackAreas(ActiveRun run) {
+		for (MobScript.AreaStep area : run.areas.values()) {
+			Set<UUID> listed = area.playerVariable().isEmpty() ? new LinkedHashSet<>()
+					: run.playerVariables.computeIfAbsent(area.playerVariable(), ignored -> new LinkedHashSet<>());
+			Map<UUID, Long> left = run.areaLeft.computeIfAbsent(area.name(), ignored -> new HashMap<>());
+			for (var player : run.level.players()) {
+				if (player.isSpectator() || !area.contains(player.position())) continue;
+				if (!area.playerVariable().isEmpty()) {
+					run.variables.remove(area.playerVariable());
+					if (listed.add(player.getUUID())) player.sendSystemMessage(net.minecraft.network.chat.Component
+							.literal("You joined the event. Stay in the area to keep your reward.")
+							.withStyle(net.minecraft.ChatFormatting.GOLD));
+				}
+				if (left.remove(player.getUUID()) != null)
+					player.sendOverlayMessage(net.minecraft.network.chat.Component.literal("Back in the event area")
+							.withStyle(net.minecraft.ChatFormatting.GREEN));
+			}
+			for (Iterator<UUID> iterator = listed.iterator(); iterator.hasNext(); ) {
+				UUID id = iterator.next();
+				var player = run.level.getServer().getPlayerList().getPlayer(id);
+				boolean inside = player != null && player.level() == run.level && !player.isSpectator()
+						&& area.contains(player.position());
+				if (inside) continue;
+				long since = left.computeIfAbsent(id, ignored -> clock);
+				long remaining = area.graceTicks() - (clock - since);
+				if (remaining <= 0) {
+					iterator.remove();
+					left.remove(id);
+					if (player != null) player.sendSystemMessage(net.minecraft.network.chat.Component
+							.literal("You left the event area and no longer take part.")
+							.withStyle(net.minecraft.ChatFormatting.RED));
+				} else if (player != null && (clock - since) % 20 == 0) {
+					player.sendOverlayMessage(net.minecraft.network.chat.Component.literal("Return to the event area: "
+							+ ((remaining + 19) / 20) + "s").withStyle(net.minecraft.ChatFormatting.RED));
+				}
+			}
+			if (!area.countVariable().isEmpty()) {
+				run.playerVariables.remove(area.countVariable());
+				run.variables.put(area.countVariable(), (long) listed.size());
+			}
+		}
+	}
+
+	/** Every interval, one more level of each aura's effect for players near it. */
+	private void tickAuras(ActiveRun run) {
+		for (MobScript.AuraStep aura : run.auras.values()) {
+			if (aura.intervalTicks() <= 0 || clock % aura.intervalTicks() != 0) continue;
+			var effect = BuiltInRegistries.MOB_EFFECT.get(ResourceKey.create(Registries.MOB_EFFECT, aura.effectId()))
+					.orElseThrow(() -> new IllegalArgumentException("Unknown effect " + aura.effectId()));
+			Vec3 center = new Vec3(aura.center().x(), aura.center().y(), aura.center().z());
+			for (var player : run.level.players()) {
+				if (player.isSpectator() || player.isCreative() || player.position().distanceTo(center) > aura.radius()) continue;
+				MobEffectInstance current = player.getEffect(effect);
+				int level = current == null ? 0 : Math.min(aura.maxStacks() - 1, current.getAmplifier() + 1);
+				// Stacked effects show on the left side as stacks, not as a vanilla icon.
+				boolean stacked = ekuzo.crazyworldprogression.progression.equipment.StackedEffects.contains(aura.effectId());
+				player.addEffect(new MobEffectInstance(effect, (int) Math.max(1, aura.durationTicks()), level, false, !stacked, !stacked));
+			}
+		}
+	}
+
+	private static void replaceBlocks(ActiveRun run, MobScript.ReplaceBlocksStep replace) {
+		var from = BuiltInRegistries.BLOCK.getValue(replace.from());
+		var to = BuiltInRegistries.BLOCK.getValue(replace.to());
+		if (from == null || to == null || replace.from().equals(BuiltInRegistries.BLOCK.getDefaultKey()) && !replace.from().getPath().equals("air"))
+			throw new IllegalArgumentException("Unknown block in replace_blocks");
+		BlockPos min, max;
+		MobScript.AreaStep area = replace.area().isEmpty() ? null : run.areas.get(replace.area());
+		if (!replace.area().isEmpty()) {
+			if (area != null) {
+				min = BlockPos.containing(area.center().x() - area.radius(), area.center().y() - area.height(), area.center().z() - area.radius());
+				max = BlockPos.containing(area.center().x() + area.radius(), area.center().y() + area.height(), area.center().z() + area.radius());
+			} else {
+				ScriptCondition.Box box = run.boxes.get(replace.area());
+				if (box == null) throw new IllegalArgumentException("Unknown area or event box " + replace.area());
+				min = BlockPos.containing(box.min().x(), box.min().y(), box.min().z());
+				max = BlockPos.containing(box.max().x(), box.max().y(), box.max().z());
+			}
+		} else {
+			min = BlockPos.containing(replace.min().x(), replace.min().y(), replace.min().z());
+			max = BlockPos.containing(replace.max().x(), replace.max().y(), replace.max().z());
+		}
+		long volume = (long) (max.getX() - min.getX() + 1) * (max.getY() - min.getY() + 1) * (max.getZ() - min.getZ() + 1);
+		if (volume > 4_000_000) throw new IllegalArgumentException("replace_blocks covers too many blocks (max 4 million)");
+		var state = to.defaultBlockState();
+		for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+			if (area != null && !area.contains(Vec3.atCenterOf(pos))) continue;
+			if (run.level.getBlockState(pos).is(from)) run.level.setBlock(pos, state, 3);
+		}
+	}
+
+	private static void message(ActiveRun run, MobScript.MessageStep message) {
+		var text = net.minecraft.network.chat.Component.literal(message.text())
+				.withStyle(java.util.Objects.requireNonNullElse(MobScriptYaml.color(message.color()),
+						net.minecraft.ChatFormatting.WHITE));
+		for (UUID playerId : playerTargets(run, message.playerId())) {
+			var player = run.level.getServer().getPlayerList().getPlayer(playerId);
+			if (player == null || player.level() != run.level) continue;
+			switch (message.style()) {
+				case "actionbar" -> player.sendOverlayMessage(text);
+				case "title" -> {
+					player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket(5, 40, 10));
+					player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket(text));
+				}
+				default -> player.sendSystemMessage(text);
+			}
+		}
+	}
+
 	private static Set<UUID> playerTargets(ActiveRun run, String playerId) {
 		Set<UUID> targets = new LinkedHashSet<>();
 		if (playerId.isBlank()) {
@@ -656,7 +852,25 @@ public final class MobScriptExecutor {
 
 	private void spawnMobs(ActiveRun run, MobScript.SpawnMobsStep step) {
 		ThreadLocalRandom random = ThreadLocalRandom.current();
-		for (int i = 0; i < step.count(); i++) {
+		MobScript.AreaStep area = step.area().isEmpty() ? null : run.areas.get(step.area());
+		if (!step.area().isEmpty() && area == null) throw new IllegalArgumentException("Unknown area " + step.area());
+		int count = step.count();
+		if (area != null && step.perPlayer() > 0) {
+			long players = run.level.players().stream().filter(player -> !player.isSpectator() && area.contains(player.position())).count();
+			count += step.perPlayer() * (int) Math.max(0, players - 1);
+		}
+		if (step.maxCount() > 0) count = Math.min(count, Math.max(step.count(), step.maxCount()));
+		if (step.cap() > 0) {
+			long players = area != null
+					? run.level.players().stream().filter(player -> !player.isSpectator() && area.contains(player.position())).count()
+					: run.level.players().size();
+			int limit = step.cap() + step.capPerPlayer() * (int) Math.max(0, players - step.capAfter());
+			if (step.capMax() > 0) limit = Math.min(limit, step.capMax());
+			ScriptEntityHandle tagged = run.handles.get(step.tag());
+			int living = tagged instanceof TagGroup group ? group.living().size() : tagged != null && tagged.isAlive() ? 1 : 0;
+			count = Math.min(count, Math.max(0, limit - living));
+		}
+		for (int i = 0; i < count; i++) {
 			Vec3 position = new Vec3(step.location().x() + spread(random, step.offset().x()),
 					step.location().y() + spread(random, step.offset().y()),
 					step.location().z() + spread(random, step.offset().z()));
@@ -665,8 +879,25 @@ public final class MobScriptExecutor {
 					position, 0, 0, run.encounterId, run.pocketInstanceId, run.id, Map.of()));
 			Entity entity = run.level.getEntity(handle.uuid());
 			if (entity != null) MobForgeEntityData.setScript(entity, run.script.id(), run.id.toString());
+			if (entity instanceof net.minecraft.world.entity.Mob mob) {
+				mob.setPersistenceRequired();
+				boost(mob, net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH, step.health());
+				boost(mob, net.minecraft.world.entity.ai.attributes.Attributes.ATTACK_DAMAGE, step.damage());
+				mob.setHealth(mob.getMaxHealth());
+				if (step.fireproof()) mob.addEffect(new MobEffectInstance(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, -1, 0, false, false));
+				if (area != null) bound.put(mob.getUUID(), new Bound(run.level, area, run.id));
+			}
 			tagSpawned(run, handle, step.tag());
 		}
+	}
+
+	private static void boost(net.minecraft.world.entity.Mob mob,
+	                          net.minecraft.core.Holder<net.minecraft.world.entity.ai.attributes.Attribute> attribute, double factor) {
+		var instance = mob.getAttribute(attribute);
+		if (instance == null || factor == 1) return;
+		instance.addPermanentModifier(new net.minecraft.world.entity.ai.attributes.AttributeModifier(
+				Identifier.fromNamespaceAndPath(CrazyWorldProgression.MOD_ID, "script_boost"), factor - 1,
+				net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
 	}
 
 	private static double spread(ThreadLocalRandom random, double offset) { return offset == 0 ? 0 : random.nextDouble(-offset, offset); }
@@ -733,6 +964,11 @@ public final class MobScriptExecutor {
 		private final Map<Identifier, Long> portalUses = new HashMap<>();
 		private final Map<Integer, Integer> loopCounts = new HashMap<>();
 		private final Map<Integer, Watch> watches = new HashMap<>();
+		private final Map<String, MobScript.AreaStep> areas = new LinkedHashMap<>();
+		/** Per area: players on its list who are outside, and the tick they left. */
+		private final Map<String, Map<UUID, Long>> areaLeft = new HashMap<>();
+		private final Map<String, MobScript.AuraStep> auras = new LinkedHashMap<>();
+		private long startClock = -1;
 		private int step;
 		private MobScript.EncounterEndStep resumeFrom;
 		private int encountersCompleted;
@@ -747,10 +983,13 @@ public final class MobScriptExecutor {
 			this.pocketInstanceId = pocketInstanceId; this.groundSpawns = groundSpawns;
 			this.flow = MobScriptFlow.compile(script.steps());
 		}
-		private ScriptCondition.Context context() {
-			return new ScriptCondition.Context(level, variables, boxes, redstone, kills, portalUses, boxTriggers);
+		private ScriptCondition.Context context(long clock) {
+			if (startClock < 0) startClock = clock;
+			return new ScriptCondition.Context(level, variables, boxes, redstone, kills, portalUses, boxTriggers, areas,
+					clock - startClock);
 		}
 		private void clearState() {
+			areas.clear(); areaLeft.clear(); auras.clear();
 			variables.clear(); playerVariables.clear(); boxes.clear(); boxPlayers.clear();
 			boxOccupied.clear(); boxTriggers.clear(); kills.clear(); portalUses.clear(); watches.clear();
 		}

@@ -522,6 +522,7 @@ CWP generates commands from every registered currency. In these examples, `renow
 | `/cwp portals pockets export <id>` | Game master | Write the pocket and everything it uses to `cwp_pockets/<id>.cwppocket` |
 | `/cwp portals pockets import <file>` | Game master | Import a `.cwppocket` file from `cwp_pockets`; never overwrites |
 | `/cwp portals pockets spawn <id> <x> <y> <z>` | Game master | Set the preferred spawn in that pocket's editor |
+| `/cwp workshop [menu\|list\|next\|previous\|nearest] [category]` | Game master | Workshop helper menu (also **F8**, in creative also outside workshops; F6 pocket editor, F7 script, F9 move mode), list, teleport between and identify helpers; see [workshop helpers](docs/workshop-helpers.md) |
 | `/cwp portals create <portal> <template> <shape> <plane> <width> <height> <lifetime_minutes> [color]` | Game master | Place and directly link a portal at the command source; color defaults to purple |
 | `/cwp portals exits create <portal>` | Game master | Create a return portal at your position inside a pocket editor |
 | `/cwp portals building <portal> <true\|false>` | Game master | Allow or deny player block edits in this portal's instances |
@@ -589,7 +590,7 @@ Clone the repository and run commands from its root:
 .\gradlew.bat runServer
 ```
 
-Build output is written to `build/libs/crazy-world-progression-0.5.0.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
+Build output is written to `build/libs/crazy-world-progression-0.6.0.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
 
 The repository includes the Gradle wrapper, so a separate Gradle installation is not required. A Java 25 JDK must be available.
 

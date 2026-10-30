@@ -51,6 +51,11 @@ public final class RestrictionService {
     private static final Map<MinecraftServer, Map<UUID, SafePosition>> SAFE_POSITIONS = new WeakHashMap<>();
     private static final Map<MinecraftServer, Map<UUID, Map<Identifier, SafePosition>>> CONTAINED_POSITIONS =
             new WeakHashMap<>();
+    /** States single players see instead of a restriction's own (see {@link #setPlayerState}). */
+    private static final Map<MinecraftServer, Map<UUID, Map<Identifier, Restriction.RestrictionState>>> PLAYER_STATES =
+            new WeakHashMap<>();
+    /** Collision indexes of players with their own states, rebuilt when those states or the runtime change. */
+    private static final Map<UUID, PlayerIndexes> PLAYER_INDEXES = new HashMap<>();
 
     // Prevent instantiation of the server-side restriction service.
     private RestrictionService() {
@@ -75,6 +80,10 @@ public final class RestrictionService {
             synchronized (CONTAINED_POSITIONS) {
                 CONTAINED_POSITIONS.remove(server);
             }
+            synchronized (PLAYER_STATES) {
+                PLAYER_STATES.remove(server);
+                PLAYER_INDEXES.clear();
+            }
         });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> sendSnapshot(handler.getPlayer()));
         AttackBlockCallback.EVENT.register((player, level, hand, pos, direction) ->
@@ -93,6 +102,105 @@ public final class RestrictionService {
             enforcePlayerBoundaries(server);
             if (server.getTickCount() % 20 == 0) rebuild(server, false);
         });
+    }
+
+    /**
+     * Makes one player see and collide with a restriction in {@code state} instead of its own states (for example a
+     * hidden, passable area that turns solid and visible for a player who may not come back in). Other players keep
+     * the restriction's own states. Not persisted: callers set it again after a restart if it still applies.
+     */
+    public static void setPlayerState(MinecraftServer server, UUID player, Identifier restriction,
+                                      Restriction.RestrictionState state) {
+        synchronized (PLAYER_STATES) {
+            PLAYER_STATES.computeIfAbsent(server, ignored -> new HashMap<>())
+                    .computeIfAbsent(player, ignored -> new HashMap<>()).put(restriction, state);
+            PLAYER_INDEXES.remove(player);
+        }
+        resend(server, player);
+    }
+
+    // Return one player to a restriction's own states.
+    public static void clearPlayerState(MinecraftServer server, UUID player, Identifier restriction) {
+        boolean changed;
+        synchronized (PLAYER_STATES) {
+            Map<UUID, Map<Identifier, Restriction.RestrictionState>> players = PLAYER_STATES.get(server);
+            Map<Identifier, Restriction.RestrictionState> states = players == null ? null : players.get(player);
+            changed = states != null && states.remove(restriction) != null;
+            if (states != null && states.isEmpty()) players.remove(player);
+            PLAYER_INDEXES.remove(player);
+        }
+        if (changed) resend(server, player);
+    }
+
+    // Return every player to a restriction's own states.
+    public static void clearPlayerStates(MinecraftServer server, Identifier restriction) {
+        List<UUID> changed = new ArrayList<>();
+        synchronized (PLAYER_STATES) {
+            Map<UUID, Map<Identifier, Restriction.RestrictionState>> players = PLAYER_STATES.get(server);
+            if (players == null) return;
+            players.forEach((player, states) -> {
+                if (states.remove(restriction) != null) changed.add(player);
+            });
+            players.values().removeIf(Map::isEmpty);
+            changed.forEach(PLAYER_INDEXES::remove);
+        }
+        changed.forEach(player -> resend(server, player));
+    }
+
+    // Send a fresh snapshot to one online player after their own states changed.
+    private static void resend(MinecraftServer server, UUID player) {
+        ServerPlayer online = server.getPlayerList().getPlayer(player);
+        if (online != null) sendSnapshot(online);
+    }
+
+    // The player's own states, or none.
+    private static Map<Identifier, Restriction.RestrictionState> playerStates(MinecraftServer server, UUID player) {
+        synchronized (PLAYER_STATES) {
+            Map<Identifier, Restriction.RestrictionState> states = PLAYER_STATES.getOrDefault(server, Map.of()).get(player);
+            return states == null ? Map.of() : Map.copyOf(states);
+        }
+    }
+
+    // Replace restrictions the player has their own state for with a copy holding only that state.
+    private static List<Restriction> forPlayer(MinecraftServer server, ServerPlayer player, List<Restriction> restrictions) {
+        Map<Identifier, Restriction.RestrictionState> states = playerStates(server, player.getUUID());
+        if (states.isEmpty()) return restrictions;
+        return restrictions.stream().map(restriction -> {
+            Restriction.RestrictionState state = states.get(restriction.id());
+            return state == null ? restriction : withOnly(restriction, state);
+        }).toList();
+    }
+
+    // A copy of the restriction whose only state (at level 0) is the given one.
+    private static Restriction withOnly(Restriction restriction, Restriction.RestrictionState state) {
+        return new Restriction(restriction.id(), restriction.dimension(), restriction.shape(), restriction.centerX(),
+                restriction.centerY(), restriction.centerZ(), restriction.sizeX(), restriction.sizeY(), restriction.sizeZ(),
+                restriction.boundaryMode(), List.of(new Restriction.RestrictionState(0, state.collision(),
+                state.visibility(), state.blockInteraction())));
+    }
+
+    // Collision indexes for a player with their own states (null without), cached until those states or the runtime change.
+    private static PlayerIndexes playerIndexes(MinecraftServer server, ServerPlayer player, RuntimeState runtime) {
+        Map<Identifier, Restriction.RestrictionState> states = playerStates(server, player.getUUID());
+        if (states.isEmpty()) return null;
+        synchronized (PLAYER_STATES) {
+            PlayerIndexes cached = PLAYER_INDEXES.get(player.getUUID());
+            if (cached != null && cached.runtime() == runtime) return cached;
+        }
+        RestrictionSpatialIndex solid = new RestrictionSpatialIndex();
+        RestrictionSpatialIndex keepOut = new RestrictionSpatialIndex();
+        for (Restriction restriction : runtime.restrictions()) {
+            Restriction.RestrictionState own = states.get(restriction.id());
+            Restriction.RestrictionState state = own != null ? own : restriction.stateAt(runtime.boundaryLevel());
+            if (state.collision() != SOLID) continue;
+            solid.add(restriction);
+            if (restriction.boundaryMode() == KEEP_OUT) keepOut.add(restriction);
+        }
+        PlayerIndexes indexes = new PlayerIndexes(runtime, solid, keepOut);
+        synchronized (PLAYER_STATES) {
+            PLAYER_INDEXES.put(player.getUUID(), indexes);
+        }
+        return indexes;
     }
 
     // Return all persisted restriction definitions in deterministic identifier order.
@@ -160,20 +268,23 @@ public final class RestrictionService {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             Identifier dimension = player.level().dimension().identifier();
             Vec3 bodyCenter = player.position().add(0.0, 0.9, 0.0);
-            Restriction keepOut = containing(runtime.keepOutIndex(), dimension, bodyCenter);
+            PlayerIndexes own = playerIndexes(server, player, runtime);
+            RestrictionSpatialIndex keepOutIndex = own == null ? runtime.keepOutIndex() : own.keepOut();
+            RestrictionSpatialIndex solidIndex = own == null ? runtime.solidIndex() : own.solid();
+            Restriction keepOut = containing(keepOutIndex, dimension, bodyCenter);
             if (keepOut == null) {
                 safePositions.put(player.getUUID(), new SafePosition(dimension, player.position()));
             } else {
                 player.stopRiding();
-                boolean teleported = tryNearbyRejection(player, runtime.solidIndex(), dimension);
+                boolean teleported = tryNearbyRejection(player, solidIndex, dimension);
                 if (!teleported) {
                     SafePosition remembered = safePositions.get(player.getUUID());
-                    teleported = tryRememberedPosition(player, runtime.solidIndex(), dimension, remembered);
+                    teleported = tryRememberedPosition(player, solidIndex, dimension, remembered);
                 }
                 if (!teleported) {
-                    teleported = tryHorizontalBoundaryRejection(player, runtime.solidIndex(), dimension, keepOut);
+                    teleported = tryHorizontalBoundaryRejection(player, solidIndex, dimension, keepOut);
                 }
-                if (!teleported) forceOutside(player, runtime.solidIndex(), dimension, keepOut, bodyCenter);
+                if (!teleported) forceOutside(player, solidIndex, dimension, keepOut, bodyCenter);
                 safePositions.put(player.getUUID(), new SafePosition(dimension, player.position()));
                 CrazyWorldProgression.LOGGER.info("Restriction {} rejected {} with a chorus teleport",
                         keepOut.id(), player.getGameProfile().name());
@@ -488,7 +599,7 @@ public final class RestrictionService {
             RUNTIMES.put(server, current);
         }
         server.getPlayerList().getPlayers().forEach(player ->
-                RestrictionNetworking.send(player, current.boundaryLevel(), current.restrictions()));
+                RestrictionNetworking.send(player, current.boundaryLevel(), forPlayer(server, player, current.restrictions())));
         CrazyWorldProgression.LOGGER.info("Indexed {} solid Restriction/restrictions ({} keep-out, {} keep-in) and {} "
                         + "block-protected restriction/restrictions out of {} at Advanced World Boundary level {}", solidIndex.restrictionCount(),
                 keepOutIndex.restrictionCount(), keepInIndex.restrictionCount(), interactionIndex.restrictionCount(),
@@ -517,8 +628,9 @@ public final class RestrictionService {
 
     // Send the current resolved level and complete definitions to one newly connected client.
     private static void sendSnapshot(ServerPlayer player) {
-        RuntimeState runtime = runtime(player.level().getServer());
-        RestrictionNetworking.send(player, runtime.boundaryLevel(), runtime.restrictions());
+        MinecraftServer server = player.level().getServer();
+        RuntimeState runtime = runtime(server);
+        RestrictionNetworking.send(player, runtime.boundaryLevel(), forPlayer(server, player, runtime.restrictions()));
     }
 
     // Return initialized runtime state even if a movement hook runs unusually early during startup.
@@ -547,6 +659,10 @@ public final class RestrictionService {
             restrictions = List.copyOf(restrictions);
             keepInById = Map.copyOf(keepInById);
         }
+    }
+
+    /** A player's collision indexes with their own restriction states applied. */
+    private record PlayerIndexes(RuntimeState runtime, RestrictionSpatialIndex solid, RestrictionSpatialIndex keepOut) {
     }
 
     /** A server-observed player feet position on the permitted side of a one-way restriction boundary. */

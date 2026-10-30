@@ -9,6 +9,32 @@ import static org.junit.jupiter.api.Assertions.*;
 class MobScriptCodeTest {
     private final MobScriptCode code = new MobScriptCode();
 
+    @Test void replacingStepsKeepsEveryOtherLineAndComments() {
+        String source = """
+                script moved
+                # arena entrance
+                eventbox(name="gate", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2})  # trigger
+                if kills("adds") > 0:
+                    building(build_id="cwp:wall", action="add", location={"x":5,"y":64,"z":5})
+                """;
+        MobScript script = code.decode(source);
+        String replaced = code.replaceSteps(source, java.util.Map.of(
+                0, new MobScript.EventBoxStep("gate", new MobScript.Position(1, 64, 0), new MobScript.Position(3, 66, 2)),
+                2, new MobScript.BuildingStep(net.minecraft.resources.Identifier.parse("cwp:wall"), "add",
+                        new MobScript.Position(5, 65, 5), "replace")));
+        String[] lines = replaced.split("\n", -1);
+        assertEquals("# arena entrance", lines[1]);
+        assertTrue(lines[2].startsWith("eventbox(") && lines[2].endsWith("# trigger"));
+        assertTrue(lines[4].startsWith("    building("));
+        assertEquals(source.split("\n", -1)[3], lines[3]);
+        MobScript moved = code.decode(replaced);
+        assertEquals(new MobScript.Position(1, 64, 0), ((MobScript.EventBoxStep) moved.steps().get(0)).min());
+        assertEquals("replace", ((MobScript.BuildingStep) moved.steps().get(2)).mode());
+        assertEquals(script.steps().size(), moved.steps().size());
+        assertThrows(IllegalArgumentException.class, () -> code.replaceSteps(source,
+                java.util.Map.of(3, new MobScript.ElseStep())));
+    }
+
     @Test void achievementUnlockSupportsPlayerListsAndRoundTrips() {
         MobScript script = code.decode("""
                 script achievement_example

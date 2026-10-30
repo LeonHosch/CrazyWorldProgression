@@ -44,6 +44,11 @@ Use conditions in `if`, `while`, `wait`, and `event`. Combine them with `and`, `
 | `dead(tag)` | `dead("boss")` | True once every mob spawned with this tag is dead. |
 | `health_percent(tag)` | `health_percent("boss") <= 0.5` | Combined health of the living mobs with this tag, as a fraction of their combined maximum. |
 | `phase(tag)` | `phase("boss") == "enraged"` | Phase of the first living MobForge mob with this tag. |
+| `blocks(box, block)` | `blocks("core", "minecraft:ancient_debris") > 0` | How many blocks of that type are in an event box (at most 65,536 blocks big). |
+| `elapsed()` | `elapsed() < 1800` | Seconds since this script run started. |
+| `alive(tag)` | `alive("guards") < 14` | How many mobs with this tag are alive (mobs in unloaded chunks count as alive). |
+
+`players_in(name)` also works for an `area`: it counts the players inside it right now.
 
 The older `${kills.raid_add >= 6}` style still works in imported scripts and in the in-game condition fields. Conditions are deliberately limited: arithmetic, arbitrary function calls, and general Python expressions are not supported.
 
@@ -63,7 +68,7 @@ All IDs that refer to registered content use their full namespace, such as `cwp:
 | `event` | `event(condition="kills(\"raid_add\")", variable="charge", operation="increment", value="1")` | Register a watch. A bare `kills` or `portal_used` condition fires for each new occurrence; other conditions fire on false-to-true changes. |
 | `eventbox` | `eventbox(name="plate", min={"x":0,"y":64,"z":0}, max={"x":2,"y":66,"z":2}, mode="players", player_variable="entered", count_variable="inside")` | Save every entering player's ID in `entered`, and continuously update the current occupancy in numeric variable `inside`. With `mode="mobs", mob_id="minecraft:zombie"`, the count tracks matching mobs. The maximum block is included. |
 | `portal` | `portal(portal="cwp:gate", action="add", location="arena", position={"x":20,"y":64,"z":10})` | Place a copy of a saved portal preset at this position in this world or instance. `location` is the name of this copy: one preset can have several copies with different names, adding the same name again moves that copy, and `action="delete", location="arena"` removes just that copy. `action="delete"` without a location removes every copy of the preset in this instance, including its original placement. Coordinates portals also accept `target={...}`. |
-| `building` | `building(build_id="cwp:bridge", action="add", location={"x":5,"y":64,"z":5})` | Paste saved blocks with their minimum corner here. `action="delete"` clears the entire pasted range, including player changes. |
+| `building` | `building(build_id="cwp:bridge", action="add", location={"x":5,"y":64,"z":5})` | Paste saved blocks with their minimum corner here. By default only the building's own blocks are placed and `action="delete"` removes only those; `mode="replace"` also writes its air and clears its whole box on delete. See [workshop helpers](workshop-helpers.md#building-placement-mode). |
 | `particles` | `particles(particle_id="minecraft:flame", location={"x":0,"y":65,"z":0}, offset={"x":1,"y":1,"z":1}, count=20, speed=0.1)` | Show a particle effect. Particles that require extra data are unsupported. |
 | `explosion` | `explosion(location={"x":0,"y":65,"z":0}, power=2)` | Create an explosion that damages entities but leaves blocks intact. |
 | `distances` | `distances(view=8, simulation=4)` | Change this instance's view and simulation distance in chunks (2–32). Leave one out to keep it; 0 returns to the portal's setting. Saving the portal or closing the instance applies the portal's setting again. Mobs only move inside the simulation distance of some player. |
@@ -81,6 +86,21 @@ All IDs that refer to registered content use their full namespace, such as `cwp:
 | `loot` | `loot(lootpool_id="cwp:raid_rewards", player="entered")` | Roll a saved CWP loot pool for players stored in `entered`. Omit `player` to roll separately for every player in the pocket instance. A literal player UUID also works. |
 | `achievement` | `achievement(achievement_id="echelon-core:mysteries/root", player="entered")` | Complete a real Minecraft advancement for players saved in `entered`. Omit `player` for everyone in the script's world. A literal player UUID also works. Advancements can unlock titles. |
 | `finish_instance` | `finish_instance(spawn={"x":-15,"y":64,"z":-10})` | Mark the instance finished and clear this raid portal's checkpoints for everyone admitted to or recorded as visiting this instance. Once no players remain, the instance is cleaned up even if scripts are still running. Optional `spawn` changes the rally, respawn and rejoin point for this instance; omit it to keep the current point. |
+| `area` | `area(name="star", center={"x":0,"y":64,"z":0}, radius=40, height=24, grace="20s", player_variable="present", count_variable="taking_part")` | A round event area: `radius` around the center, `height` blocks up and down (default 32). Players who enter join the list `present` and get a message. Someone on the list who leaves sees "Return to the event area: Ns" and is taken off the list when `grace` runs out; back in time, they stay on it. Give rewards with `player="present"` so only those still taking part get them. `count_variable` holds how many are on the list. With `defend_radius=7`, mobs kept in the area check every 3 seconds and most likely (65%) turn on a player within 7 blocks of the center (for example someone mining what the mobs guard). |
+| `replace_blocks` | `replace_blocks(from="minecraft:ancient_debris", to="minecraft:cobblestone", area="core")` | Replace every block of one type with another, in a named area or event box, or between `min=` and `max=` (up to 4 million blocks). |
+| `aura` | `aura(name="heat", effect_id="echelon-core:unbearable_heat", center={"x":0,"y":64,"z":0}, radius=9, interval="2s", max_stacks=5, duration="3s")` | A stacking effect: every `interval`, players within `radius` get one level more (up to `max_stacks`), each level lasting `duration`. It runs until `aura(name="heat", action="remove")` or the end of the run. Creative and spectator players are left out. |
+| `message` | `message(text="Get away from the star!", player="present", style="title", color="dark_purple")` | Show text as `chat`, `actionbar` or `title` to a player list, or everyone in the world. `color` is a Minecraft colour name. |
+| `mob_despawn` | `mob_despawn(mob="guards")` | Remove every living mob with this tag, with a puff of smoke. |
+
+`mob_spawn` with `mob_id=` also takes:
+
+- `area="star"`: the mobs stay in that area (they walk back from its edge and are put back in the middle when far out), drop targets outside it, and can only be hurt by players inside it.
+- `per_player=1, max=6`: one more mob per player in the area beyond the first, but never more than `max`.
+- `health=2, damage=1.5`: multiply the mob's health and attack damage.
+- `fireproof=true`: undead mobs don't burn in daylight.
+- `cap=8, cap_per_player=3, cap_after=2, cap_max=20` (needs `tag`): never more than 8 living mobs with this tag, 3 more for every player in the area beyond the second, and never more than 20. A spawn that would go over the cap spawns fewer (or none).
+
+Scripts can also run outside pocket instances, for example placed in the overworld by a content mod's event (Echelon's Fallen Star). There, `loot()` needs `player=` (an area's player list).
 
 The keys inside `ai={...}` use the existing MobForge AI fields: `mode`, `combat`, `target` (a position), `arrival_radius`, `player`, `range`, and any template-specific AI settings. `template_default` means omit `ai` entirely.
 

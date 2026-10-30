@@ -193,6 +193,6 @@ public final class Accessories {
         @Override public int getMaxStackSize() { return 1; }
 
         /** The creative inventory lays slots out on its own and has no place for these. */
-        @Override public boolean isActive() { return !player.isCreative(); }
+        @Override public boolean isActive() { return true; }
     }
 }

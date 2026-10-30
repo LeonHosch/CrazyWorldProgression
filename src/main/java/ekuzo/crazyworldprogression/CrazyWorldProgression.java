@@ -78,6 +78,7 @@ public class CrazyWorldProgression implements ModInitializer {
 		if (CwpModule.ACCESSORIES.enabled()) {
 			ekuzo.crazyworldprogression.accessory.Accessories.initialize();
 			ekuzo.crazyworldprogression.accessory.BuffFood.initialize();
+			ekuzo.crazyworldprogression.creative.CreativeSlots.initialize();
 		}
 		if (CwpModule.COLLECTIBLES.enabled()) ekuzo.crazyworldprogression.collectibles.Collectibles.initialize();
 		if (CwpModule.MOB_LOOT.enabled()) ekuzo.crazyworldprogression.loot.MobLoot.initialize();
@@ -100,6 +101,7 @@ public class CrazyWorldProgression implements ModInitializer {
 			ekuzo.crazyworldprogression.smithing.ChestQuality.initialize();
 			ekuzo.crazyworldprogression.storage.StorageNetworking.initialize();
 		}
+		ekuzo.crazyworldprogression.creative.CreativeAccess.initialize();
 		if (CwpModule.FLETCHING.enabled()) ekuzo.crazyworldprogression.fletching.Fletching.initialize();
 		if (CwpModule.AMMO.enabled()) ekuzo.crazyworldprogression.ammo.AmmoPouch.initialize();
 		if (CwpModule.SOCIAL.enabled()) ekuzo.crazyworldprogression.social.Social.initialize();
@@ -119,6 +121,8 @@ public class CrazyWorldProgression implements ModInitializer {
 			PortalNetworking.registerPayloadType();
 			ekuzo.crazyworldprogression.portals.PortalPreviewNetworking.registerPayloadType();
 			ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.registerPayloadType();
+			ekuzo.crazyworldprogression.portals.WorkshopHelpers.registerPayloadTypes();
+			ekuzo.crazyworldprogression.portals.WorldHelperProviders.register();
 			PortalNetworking.registerServerReceiver();
 			PortalService.initialize();
 			PortalBuildProtection.initialize();

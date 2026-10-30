@@ -54,6 +54,13 @@ public abstract class CwpMount extends AbstractHorse {
     @Override
     public boolean isSaddled() { return true; }
 
+    /**
+     * No horse jump bar to charge: the rider's game jumps the mount as soon as jump is pressed, and letting go early
+     * makes the jump lower (MountJumpClient).
+     */
+    @Override
+    public boolean canJump() { return false; }
+
     @Override
     public boolean isFood(ItemStack stack) { return false; }
 
@@ -78,6 +85,10 @@ public abstract class CwpMount extends AbstractHorse {
 
     @Override
     public boolean isPushable() { return false; }
+
+    /** It cannot be hurt, so the rider keeps seeing their own food bar instead of its hearts. */
+    @Override
+    public boolean showVehicleHealth() { return false; }
 
     /** Gone a moment after nobody rides it any more. */
     @Override

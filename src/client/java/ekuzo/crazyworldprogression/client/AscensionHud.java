@@ -16,7 +16,9 @@ import net.minecraft.sounds.SoundEvents;
 
 /**
  * Hubris's Ascension stacks on the left side of the screen, like buff stacks in Destiny: a framed icon with the
- * stack count, the name beside it, and a thin bar filling up towards the next stack.
+ * stack count, the name beside it, and a thin bar filling up towards the next stack. Below them come the effects
+ * registered as {@link ekuzo.crazyworldprogression.progression.equipment.StackedEffects}: their level as stacks and a
+ * bar for the time the current stack has left.
  */
 final class AscensionHud {
     private static final Identifier ICON = CrazyWorldProgression.id("textures/gui/ascension.png");
@@ -28,6 +30,8 @@ final class AscensionHud {
     private static final Identifier LUST_ICON = CrazyWorldProgression.id("textures/gui/blood_lust.png");
     private static int lust;
     private static long downfallAt;
+    /** Longest duration seen for each shown stacked effect, so its bar starts full whenever a stack is added. */
+    private static final java.util.Map<Identifier, Integer> STACK_DURATION = new java.util.HashMap<>();
 
     private AscensionHud() { }
 
@@ -76,7 +80,39 @@ final class AscensionHud {
             renderDownfall(graphics, fall, x, y);
             y += SIZE + 6;
         }
-        if (lust > 0) renderLust(graphics, lust, x, y);
+        if (lust > 0) {
+            renderLust(graphics, lust, x, y);
+            y += SIZE + 6;
+        }
+        renderStackedEffects(graphics, x, y);
+    }
+
+    private static void renderStackedEffects(GuiGraphicsExtractor graphics, int x, int y) {
+        var player = Minecraft.getInstance().player;
+        if (player == null) return;
+        java.util.Set<Identifier> shown = new java.util.HashSet<>();
+        for (var instance : player.getActiveEffects()) {
+            var key = instance.getEffect().unwrapKey().map(net.minecraft.resources.ResourceKey::identifier).orElse(null);
+            if (key == null || !ekuzo.crazyworldprogression.progression.equipment.StackedEffects.contains(key)) continue;
+            shown.add(key);
+            int duration = instance.getDuration();
+            int longest = STACK_DURATION.merge(key, duration, Math::max);
+            boolean harmful = instance.getEffect().value().getCategory() == net.minecraft.world.effect.MobEffectCategory.HARMFUL;
+            var font = Minecraft.getInstance().font;
+            graphics.fill(x - 1, y - 1, x + SIZE + 1, y + SIZE + 1, harmful ? 0xFFB03030 : 0xFFB8862B);
+            graphics.fill(x, y, x + SIZE, y + SIZE, 0xD0141018);
+            Identifier icon = key.withPath("textures/mob_effect/" + key.getPath() + ".png");
+            graphics.blit(RenderPipelines.GUI_TEXTURED, icon, x + 2, y + 2, 0, 0, 16, 16, 18, 18, 18, 18);
+            String count = Integer.toString(instance.getAmplifier() + 1);
+            graphics.text(font, Component.literal(count), x + SIZE - font.width(count), y + SIZE - font.lineHeight + 1,
+                    0xFFFFFFFF, true);
+            int textX = x + SIZE + 5;
+            graphics.text(font, Component.translatable(instance.getEffect().value().getDescriptionId()), textX, y + 1,
+                    0xFF000000 | instance.getEffect().value().getColor(), true);
+            bar(graphics, textX, y + 12, longest <= 0 ? 0 : duration / (float) longest, 0xFFFFFFFF);
+            y += SIZE + 6;
+        }
+        STACK_DURATION.keySet().retainAll(shown);
     }
 
     /** Bloodletter's Lust: dark red frame, blood drop icon and stacks (it follows health, so no timer bar). */

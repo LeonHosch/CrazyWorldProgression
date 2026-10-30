@@ -8,7 +8,7 @@ import java.util.List;
 public record MobScript(String id, List<Step> steps) {
 	public MobScript { steps = steps == null ? List.of() : List.copyOf(steps); }
 
-	public sealed interface Step permits SpawnStep, SpawnMobsStep, WaitDurationStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, SkillXpStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, StopSoundStep, DistancesStep, EffectStep, EncounterStartStep, EncounterEndStep, FinishInstanceStep, WipeStep { }
+	public sealed interface Step permits SpawnStep, SpawnMobsStep, WaitDurationStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, SkillXpStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, StopSoundStep, DistancesStep, EffectStep, EncounterStartStep, EncounterEndStep, FinishInstanceStep, WipeStep, AreaStep, ReplaceBlocksStep, AuraStep, MessageStep, DespawnStep { }
 	public record Position(double x, double y, double z) { }
 	public record Offset(double x, double y, double z) {
 		public static final Offset NONE = new Offset(0, 0, 0);
@@ -22,11 +22,32 @@ public record MobScript(String id, List<Step> steps) {
 		}
 	}
 	/** One namespaced mob ID, usable for both MobForge templates and registered API mobs. */
-	/** mob_spawn(mob_id=...): mobs by entity type or MobForge ID. A non-empty tag is added to every spawned mob. */
-	public record SpawnMobsStep(Identifier mobId, Position location, Offset offset, int count, String tag) implements Step {
-		public SpawnMobsStep { offset = offset == null ? Offset.NONE : offset; tag = tag == null ? "" : tag; }
+	/**
+	 * mob_spawn(mob_id=...): mobs by entity type or MobForge ID. A non-empty tag is added to every spawned mob.
+	 * With {@code area} the mobs stay inside that event area, drop targets outside it and cannot be hurt from
+	 * outside it; {@code perPlayer} more of them spawn for every player in the area beyond the first, up to
+	 * {@code maxCount} (0: no limit). {@code health} and {@code damage} multiply the mob's values (1 keeps them), and
+	 * {@code fireproof} keeps undead from burning in daylight. With {@code cap} above 0, no more mobs spawn than keep
+	 * the number of living mobs with this tag at {@code cap}, plus {@code capPerPlayer} for every player in the area
+	 * beyond {@code capAfter}, at most {@code capMax} (0: no limit).
+	 */
+	public record SpawnMobsStep(Identifier mobId, Position location, Offset offset, int count, String tag, String area,
+	                            int perPlayer, int maxCount, double health, double damage, boolean fireproof,
+	                            int cap, int capPerPlayer, int capAfter, int capMax) implements Step {
+		public SpawnMobsStep {
+			offset = offset == null ? Offset.NONE : offset;
+			tag = tag == null ? "" : tag;
+			area = area == null ? "" : area;
+		}
+		public SpawnMobsStep(Identifier mobId, Position location, Offset offset, int count, String tag) {
+			this(mobId, location, offset, count, tag, "", 0, 0, 1, 1, false, 0, 0, 0, 0);
+		}
 		public SpawnMobsStep(Identifier mobId, Position location, Offset offset, int count) {
 			this(mobId, location, offset, count, "");
+		}
+		public SpawnMobsStep at(Position location) {
+			return new SpawnMobsStep(mobId, location, offset, count, tag, area, perPlayer, maxCount, health, damage, fireproof,
+					cap, capPerPlayer, capAfter, capMax);
 		}
 	}
 	public record WaitDurationStep(long ticks) implements Step { }
@@ -99,11 +120,20 @@ public record MobScript(String id, List<Step> steps) {
 	public record EncounterEndStep(Position spawn) implements Step {
 		public EncounterEndStep() { this(null); }
 	}
-	/** Script step "building": action "add" pastes the saved blocks, "delete" clears them (formerly spawn/despawn). */
-	public record BuildingStep(Identifier buildId, String action, Position location) implements Step {
+	/**
+	 * Script step "building": action "add" pastes the saved blocks, "delete" clears them (formerly spawn/despawn).
+	 * Mode "skip_air" places only the building's own blocks and removes only those; "replace" also writes its air,
+	 * clearing whatever stood in its box, and removal clears the whole box. Blank uses the config default.
+	 */
+	public record BuildingStep(Identifier buildId, String action, Position location, String mode) implements Step {
+		public static final String SKIP_AIR = "skip_air", REPLACE = "replace";
 		public BuildingStep {
 			if ("spawn".equals(action)) action = "add";
 			else if ("despawn".equals(action)) action = "delete";
+			if (mode == null) mode = "";
+		}
+		public BuildingStep(Identifier buildId, String action, Position location) {
+			this(buildId, action, location, "");
 		}
 	}
 	public record ParticleStep(Identifier particleId, Position location, Offset offset, int count, double speed) implements Step { }
@@ -116,4 +146,34 @@ public record MobScript(String id, List<Step> steps) {
 	public record StopSoundStep(Identifier soundId) implements Step { }
 	/** A blank playerId targets every player in this run's world or pocket instance. */
 	public record EffectStep(Identifier effectId, String playerId, String action, int amplifier) implements Step { }
+	/**
+	 * A round event area: {@code radius} blocks around {@code center}, {@code height} blocks up and down. Players
+	 * inside are listed in {@code playerVariable}; someone who leaves is warned and counted down for
+	 * {@code graceTicks}, then taken off the list (back inside in time, they stay on it). {@code countVariable} holds
+	 * how many are on the list. With {@code defendRadius} above 0, mobs kept in the area are likely to go after players
+	 * within that distance of the center (guards defending what lies there).
+	 */
+	public record AreaStep(String name, Position center, double radius, double height, long graceTicks,
+	                       String playerVariable, String countVariable, double defendRadius) implements Step {
+		public AreaStep(String name, Position center, double radius, double height, long graceTicks,
+		                String playerVariable, String countVariable) {
+			this(name, center, radius, height, graceTicks, playerVariable, countVariable, 0);
+		}
+		public boolean contains(net.minecraft.world.phys.Vec3 point) {
+			double dx = point.x - center.x(), dz = point.z - center.z();
+			return dx * dx + dz * dz <= radius * radius && Math.abs(point.y - center.y()) <= height;
+		}
+	}
+	/** Replaces every block {@code from} with {@code to} in a named area or event box, or between min and max. */
+	public record ReplaceBlocksStep(Identifier from, Identifier to, String area, Position min, Position max) implements Step { }
+	/**
+	 * A stacking effect around {@code center}: every {@code intervalTicks}, players within {@code radius} get one
+	 * level more of the effect (up to {@code maxStacks}), lasting {@code durationTicks}. Action "remove" ends it.
+	 */
+	public record AuraStep(String name, Identifier effectId, Position center, double radius, long intervalTicks,
+	                       int maxStacks, long durationTicks, String action) implements Step { }
+	/** Shows text to players: style "chat", "actionbar" or "title"; a blank playerId targets the whole world. */
+	public record MessageStep(String text, String playerId, String style, String color) implements Step { }
+	/** Removes every living mob with this tag (with a puff of smoke), for example when an event ends. */
+	public record DespawnStep(String tag) implements Step { }
 }

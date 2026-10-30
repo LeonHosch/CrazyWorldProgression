@@ -73,6 +73,12 @@ public final class MobScriptYaml {
 		if (step.containsKey("encounter_start")) return new MobScript.EncounterStartStep();
 		if (step.containsKey("wipe")) return new MobScript.WipeStep();
 		if (step.containsKey("encounter_end")) return encounterEnd(step.get("encounter_end"), field + ".encounter_end");
+		// "area" and "message" are also argument names, so the short form only counts when it is the step's only key.
+		if (step.size() == 1 && step.containsKey("area")) return area(map(step.get("area"), field + ".area"), field);
+		if (step.size() == 1 && step.containsKey("replace_blocks")) return replaceBlocks(map(step.get("replace_blocks"), field + ".replace_blocks"), field);
+		if (step.size() == 1 && step.containsKey("aura")) return aura(map(step.get("aura"), field + ".aura"), field);
+		if (step.size() == 1 && step.containsKey("message")) return message(map(step.get("message"), field + ".message"), field);
+		if (step.containsKey("mob_despawn")) return new MobScript.DespawnStep(name(map(step.get("mob_despawn"), field + ".mob_despawn").get("mob"), field + ".mob_despawn.mob"));
 		String type = string(step.get("type"), field + ".type");
 		return switch (type) {
 			case "mob_spawn" -> mobSpawn(step, field);
@@ -110,6 +116,11 @@ public final class MobScriptYaml {
 			case "encounter_start" -> new MobScript.EncounterStartStep();
 			case "wipe" -> new MobScript.WipeStep();
 			case "encounter_end" -> encounterEnd(step, field);
+			case "area" -> area(step, field);
+			case "replace_blocks" -> replaceBlocks(step, field);
+			case "aura" -> aura(step, field);
+			case "message" -> message(step, field);
+			case "mob_despawn" -> new MobScript.DespawnStep(name(step.get("mob"), field + ".mob"));
 			default -> throw new IllegalArgumentException(field + ".type is unknown: " + type);
 		};
 	}
@@ -200,8 +211,11 @@ public final class MobScriptYaml {
 		String action = string(value.get("action"), field + ".action");
 		if (!List.of("add", "delete", "spawn", "despawn").contains(action))
 			throw new IllegalArgumentException("Building action must be add or delete");
+		String mode = value.get("mode") == null ? "" : string(value.get("mode"), field + ".mode");
+		if (!List.of("", MobScript.BuildingStep.SKIP_AIR, MobScript.BuildingStep.REPLACE).contains(mode))
+			throw new IllegalArgumentException("Building mode must be skip_air or replace");
 		return new MobScript.BuildingStep(namespaced(value.get("build_id"), field + ".build_id"), action,
-				position(map(value.get("location"), field + ".location"), field + ".location"));
+				position(map(value.get("location"), field + ".location"), field + ".location"), mode);
 	}
 	private MobScript.Step particles(Map<String, Object> value, String field) {
 		return new MobScript.ParticleStep(namespaced(value.get("particle_id"), field + ".particle_id"),
@@ -325,10 +339,98 @@ public final class MobScriptYaml {
 	}
 
 	private MobScript.SpawnMobsStep spawnMobs(Map<String, Object> value, String field) {
+		String area = String.valueOf(value.getOrDefault("area", ""));
+		if (!area.isEmpty() && !area.matches("[a-z][a-z0-9_]*")) throw new IllegalArgumentException(field + ".area must be an area name");
+		int perPlayer = integer(value.getOrDefault("per_player", 0), field + ".per_player");
+		int maxCount = integer(value.getOrDefault("max", 0), field + ".max");
+		double health = number(value.getOrDefault("health", 1), field + ".health");
+		double damage = number(value.getOrDefault("damage", 1), field + ".damage");
+		if (perPlayer < 0 || maxCount < 0 || health <= 0 || damage <= 0 || health > 100 || damage > 100)
+			throw new IllegalArgumentException(field + ": per_player and max must be 0 or more, health and damage above 0");
+		Object fireproof = value.getOrDefault("fireproof", false);
+		int cap = integer(value.getOrDefault("cap", 0), field + ".cap");
+		int capPerPlayer = integer(value.getOrDefault("cap_per_player", 0), field + ".cap_per_player");
+		int capAfter = integer(value.getOrDefault("cap_after", 1), field + ".cap_after");
+		int capMax = integer(value.getOrDefault("cap_max", 0), field + ".cap_max");
+		if (cap < 0 || capPerPlayer < 0 || capAfter < 0 || capMax < 0)
+			throw new IllegalArgumentException(field + ": cap values must be 0 or more");
+		if (cap > 0 && tag(value, field).isEmpty()) throw new IllegalArgumentException(field + ".cap needs a tag to count");
 		return new MobScript.SpawnMobsStep(namespaced(value.get("mob_id"), field + ".mob_id"),
 				position(map(value.get("location"), field + ".location"), field + ".location"),
 				offset(value.get("offset"), field + ".offset"),
-				integer(value.getOrDefault("count", 1), field + ".count"), tag(value, field));
+				integer(value.getOrDefault("count", 1), field + ".count"), tag(value, field), area, perPlayer, maxCount,
+				health, damage, Boolean.TRUE.equals(fireproof) || "true".equals(String.valueOf(fireproof)),
+				cap, capPerPlayer, capAfter, capMax);
+	}
+
+	/** A text colour by its Minecraft name (red, gold, dark_purple, ...), or null; the first 16 formats are the colours. */
+	public static net.minecraft.ChatFormatting color(String name) {
+		for (net.minecraft.ChatFormatting format : net.minecraft.ChatFormatting.values())
+			if (format.ordinal() < 16 && format.name().toLowerCase(java.util.Locale.ROOT).equals(name)) return format;
+		return null;
+	}
+
+	private static String name(Object value, String field) {
+		String name = string(value, field);
+		if (!name.matches("[a-z][a-z0-9_]*")) throw new IllegalArgumentException(field + " must use lowercase letters, digits or _");
+		return name;
+	}
+
+	private static String optionalName(Object value, String field) {
+		return value == null || String.valueOf(value).isEmpty() ? "" : name(value, field);
+	}
+
+	private MobScript.Step area(Map<String, Object> value, String field) {
+		double radius = number(value.get("radius"), field + ".radius");
+		double height = number(value.getOrDefault("height", 32), field + ".height");
+		if (radius < 1 || radius > 512 || height < 1 || height > 512)
+			throw new IllegalArgumentException(field + ": radius and height must be from 1 to 512");
+		String players = optionalName(value.get("player_variable"), field + ".player_variable");
+		String count = optionalName(value.get("count_variable"), field + ".count_variable");
+		if (!players.isEmpty() && players.equals(count))
+			throw new IllegalArgumentException("Player list and count need different variable names");
+		double defend = number(value.getOrDefault("defend_radius", 0), field + ".defend_radius");
+		if (defend < 0 || defend > radius) throw new IllegalArgumentException(field + ".defend_radius must be from 0 to the radius");
+		return new MobScript.AreaStep(name(value.get("name"), field + ".name"),
+				position(map(value.get("center"), field + ".center"), field + ".center"), radius, height,
+				value.containsKey("grace") ? duration(value.get("grace"), field + ".grace") : 0, players, count, defend);
+	}
+
+	private MobScript.Step replaceBlocks(Map<String, Object> value, String field) {
+		boolean named = value.containsKey("area");
+		if (named == (value.containsKey("min") || value.containsKey("max")))
+			throw new IllegalArgumentException(field + " needs either area= or min= and max=");
+		MobScript.Position min = named ? null : position(map(value.get("min"), field + ".min"), field + ".min");
+		MobScript.Position max = named ? null : position(map(value.get("max"), field + ".max"), field + ".max");
+		if (!named) new ScriptCondition.Box(min, max);
+		return new MobScript.ReplaceBlocksStep(namespaced(value.get("from"), field + ".from"),
+				namespaced(value.get("to"), field + ".to"), named ? name(value.get("area"), field + ".area") : "", min, max);
+	}
+
+	private MobScript.Step aura(Map<String, Object> value, String field) {
+		String action = String.valueOf(value.getOrDefault("action", "add"));
+		if (!List.of("add", "remove").contains(action)) throw new IllegalArgumentException(field + ".action must be add or remove");
+		String name = name(value.get("name"), field + ".name");
+		if (action.equals("remove")) return new MobScript.AuraStep(name, null, null, 0, 0, 0, 0, action);
+		double radius = number(value.get("radius"), field + ".radius");
+		int stacks = integer(value.getOrDefault("max_stacks", 1), field + ".max_stacks");
+		if (radius <= 0 || radius > 256 || stacks < 1 || stacks > 255)
+			throw new IllegalArgumentException(field + ": radius from 0 to 256, max_stacks from 1 to 255");
+		return new MobScript.AuraStep(name, namespaced(value.get("effect_id"), field + ".effect_id"),
+				position(map(value.get("center"), field + ".center"), field + ".center"), radius,
+				duration(value.getOrDefault("interval", "2s"), field + ".interval"), stacks,
+				duration(value.getOrDefault("duration", "3s"), field + ".duration"), action);
+	}
+
+	private MobScript.Step message(Map<String, Object> value, String field) {
+		String style = String.valueOf(value.getOrDefault("style", "chat"));
+		if (!List.of("chat", "actionbar", "title").contains(style))
+			throw new IllegalArgumentException(field + ".style must be chat, actionbar or title");
+		String color = String.valueOf(value.getOrDefault("color", "white"));
+		if (color(color) == null)
+			throw new IllegalArgumentException(field + ".color must be a Minecraft color name such as red or gold");
+		return new MobScript.MessageStep(string(value.get("text"), field + ".text"),
+				String.valueOf(value.getOrDefault("player", "")), style, color);
 	}
 
 	private MobTemplate.Ai ai(Object value, String field) {
@@ -368,7 +470,65 @@ public final class MobScriptYaml {
 				body.put("offset", position(spawn.offset().x(), spawn.offset().y(), spawn.offset().z()));
 				body.put("count", spawn.count());
 				if (!spawn.tag().isEmpty()) body.put("tag", spawn.tag());
+				if (!spawn.area().isEmpty()) body.put("area", spawn.area());
+				if (spawn.perPlayer() != 0) body.put("per_player", spawn.perPlayer());
+				if (spawn.maxCount() != 0) body.put("max", spawn.maxCount());
+				if (spawn.health() != 1) body.put("health", spawn.health());
+				if (spawn.damage() != 1) body.put("damage", spawn.damage());
+				if (spawn.fireproof()) body.put("fireproof", true);
+				if (spawn.cap() > 0) {
+					body.put("cap", spawn.cap());
+					if (spawn.capPerPlayer() > 0) body.put("cap_per_player", spawn.capPerPlayer());
+					if (spawn.capAfter() != 1) body.put("cap_after", spawn.capAfter());
+					if (spawn.capMax() > 0) body.put("cap_max", spawn.capMax());
+				}
 				steps.add(Map.of("mob_spawn", body));
+			}
+			else if (step instanceof MobScript.AreaStep area) {
+				Map<String, Object> body = new LinkedHashMap<>();
+				body.put("name", area.name());
+				body.put("center", position(area.center().x(), area.center().y(), area.center().z()));
+				body.put("radius", area.radius());
+				body.put("height", area.height());
+				if (area.graceTicks() > 0) body.put("grace", formatDuration(area.graceTicks()));
+				if (!area.playerVariable().isEmpty()) body.put("player_variable", area.playerVariable());
+				if (!area.countVariable().isEmpty()) body.put("count_variable", area.countVariable());
+				if (area.defendRadius() > 0) body.put("defend_radius", area.defendRadius());
+				steps.add(Map.of("area", body));
+			}
+			else if (step instanceof MobScript.ReplaceBlocksStep replace) {
+				Map<String, Object> body = new LinkedHashMap<>();
+				body.put("from", replace.from().toString());
+				body.put("to", replace.to().toString());
+				if (!replace.area().isEmpty()) body.put("area", replace.area());
+				else {
+					body.put("min", position(replace.min().x(), replace.min().y(), replace.min().z()));
+					body.put("max", position(replace.max().x(), replace.max().y(), replace.max().z()));
+				}
+				steps.add(Map.of("replace_blocks", body));
+			}
+			else if (step instanceof MobScript.AuraStep aura) {
+				Map<String, Object> body = new LinkedHashMap<>();
+				body.put("name", aura.name());
+				if (aura.action().equals("remove")) body.put("action", "remove");
+				else {
+					body.put("effect_id", aura.effectId().toString());
+					body.put("center", position(aura.center().x(), aura.center().y(), aura.center().z()));
+					body.put("radius", aura.radius());
+					body.put("interval", formatDuration(aura.intervalTicks()));
+					body.put("max_stacks", aura.maxStacks());
+					body.put("duration", formatDuration(aura.durationTicks()));
+				}
+				steps.add(Map.of("aura", body));
+			}
+			else if (step instanceof MobScript.DespawnStep despawn) steps.add(Map.of("mob_despawn", Map.of("mob", despawn.tag())));
+			else if (step instanceof MobScript.MessageStep message) {
+				Map<String, Object> body = new LinkedHashMap<>();
+				body.put("text", message.text());
+				if (!message.playerId().isEmpty()) body.put("player", message.playerId());
+				body.put("style", message.style());
+				if (!message.color().equals("white")) body.put("color", message.color());
+				steps.add(Map.of("message", body));
 			}
 			else if (step instanceof MobScript.SpawnEntityStep spawn) steps.add(Map.of("spawn_entity", Map.of("id", spawn.id().toString(), "at", spawn.at(), "save_as", spawn.saveAs())));
 			else if (step instanceof MobScript.WaitUntilStep wait) steps.add(Map.of("wait", Map.of("condition", wait.condition(), "timeout", formatDuration(wait.timeoutTicks()))));
@@ -407,9 +567,14 @@ public final class MobScriptYaml {
 				if (portal.target() != null) body.put("target", position(portal.target().x(), portal.target().y(), portal.target().z()));
 				steps.add(Map.of("portal", body));
 			}
-			else if (step instanceof MobScript.BuildingStep building) steps.add(Map.of("building",
-					Map.of("build_id", building.buildId().toString(), "action", building.action(),
-							"location", position(building.location().x(), building.location().y(), building.location().z()))));
+			else if (step instanceof MobScript.BuildingStep building) {
+				Map<String, Object> body = new LinkedHashMap<>();
+				body.put("build_id", building.buildId().toString());
+				body.put("action", building.action());
+				body.put("location", position(building.location().x(), building.location().y(), building.location().z()));
+				if (!building.mode().isEmpty()) body.put("mode", building.mode());
+				steps.add(Map.of("building", body));
+			}
 			else if (step instanceof MobScript.ParticleStep particles) steps.add(Map.of("particles",
 					Map.of("particle_id", particles.particleId().toString(),
 							"location", position(particles.location().x(), particles.location().y(), particles.location().z()),

@@ -584,6 +584,7 @@ public final class PortalService {
         PocketEditorService.tickAutoSave(server);
         ekuzo.crazyworldprogression.buildings.BuildingPreviewNetworking.tick(server);
         PortalPreviewNetworking.tick(server);
+        WorkshopHelpers.tick(server);
         // Block work by priority after scripts: instance creation (and its clears), then deletion cleanup.
         BuildingService.tickScheduledClears(server);
         InstanceBuilds.tick(server);

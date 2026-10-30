@@ -24,6 +24,11 @@ public final class MobScriptCode {
     private final MobScriptYaml yaml = new MobScriptYaml();
 
     public MobScript decode(String source) {
+        return decode(source, new ArrayList<>());
+    }
+
+    /** {@code at} receives, for every decoded step, the source line it came from (-1 for implied block ends). */
+    private MobScript decode(String source, List<Integer> at) {
         if (source == null || source.length() > 1_000_000) throw new IllegalArgumentException("Script source is too large");
         String id = null;
         List<Object> steps = new ArrayList<>();
@@ -45,22 +50,24 @@ public final class MobScriptCode {
                 continue;
             }
             if (text.startsWith("else")) {
-                while (blocks.size() > depth + 1) close(blocks, steps, lineNumber);
+                while (blocks.size() > depth + 1) close(blocks, steps, at, lineNumber);
                 if (!text.equals("else:") || blocks.size() != depth + 1 || blocks.isEmpty()
                         || !blocks.peek().kind.equals("if") || blocks.peek().elseSeen)
                     throw error(lineNumber, "else: must match the preceding if block");
                 if (steps.size() == blocks.peek().bodyStart) throw error(lineNumber, "if block is empty");
                 Block previous = blocks.pop();
                 steps.add(Map.of("else", true));
+                at.add(lineNumber);
                 blocks.push(new Block("if", true, steps.size()));
                 continue;
             }
             if (depth > blocks.size()) throw error(lineNumber, "Unexpected indentation");
-            while (blocks.size() > depth) close(blocks, steps, lineNumber);
+            while (blocks.size() > depth) close(blocks, steps, at, lineNumber);
             if (text.startsWith("if ") && text.endsWith(":")) {
                 String condition = text.substring(3, text.length() - 1).trim();
                 ScriptCondition.validate(condition);
                 steps.add(Map.of("if", condition));
+                at.add(lineNumber);
                 blocks.push(new Block("if", false, steps.size()));
             } else if (text.startsWith("while ") && text.endsWith(":")) {
                 String header = text.substring(6, text.length() - 1).trim();
@@ -74,6 +81,7 @@ public final class MobScriptCode {
                 }
                 ScriptCondition.validate(header);
                 steps.add(Map.of("loop", Map.of("condition", header, "max_iterations", limit)));
+                at.add(lineNumber);
                 blocks.push(new Block("while", false, steps.size()));
             } else {
                 Matcher call = CALL.matcher(text);
@@ -85,10 +93,11 @@ public final class MobScriptCode {
 				if ((name.equals("finish_instance") || name.equals("encounter_start") || name.equals("encounter_end")
 						|| name.equals("wipe")) && body instanceof Map<?, ?> map && map.isEmpty()) body = true;
                 steps.add(Map.of(name, body));
+                at.add(lineNumber);
             }
         }
         if (id == null) throw new IllegalArgumentException("First line must be script <id>");
-        while (!blocks.isEmpty()) close(blocks, steps, lines.length);
+        while (!blocks.isEmpty()) close(blocks, steps, at, lines.length);
         return yaml.decode(dump.dumpToString(Map.of("id", id, "steps", steps)));
     }
 
@@ -137,10 +146,35 @@ public final class MobScriptCode {
         return fields;
     }
 
-    private static void close(ArrayDeque<Block> blocks, List<Object> steps, int line) {
+    private static void close(ArrayDeque<Block> blocks, List<Object> steps, List<Integer> at, int line) {
         Block block = blocks.pop();
         if (steps.size() == block.bodyStart) throw error(line, block.kind + " block is empty");
         steps.add(Map.of(block.kind.equals("if") ? "end_if" : "end_loop", true));
+        at.add(-1);
+    }
+
+    /**
+     * The source with only the given steps (by index) rewritten in place: each keeps its line, indentation and
+     * trailing comment, and every other line stays exactly as written. Only single-line command steps can be replaced.
+     */
+    public String replaceSteps(String source, Map<Integer, MobScript.Step> replacements) {
+        List<Integer> at = new ArrayList<>();
+        MobScript script = decode(source, at);
+        String[] lines = source.split("\\R", -1);
+        for (Map.Entry<Integer, MobScript.Step> entry : replacements.entrySet()) {
+            int index = entry.getKey();
+            if (index < 0 || index >= at.size() || at.get(index) < 0)
+                throw new IllegalArgumentException("No source line for step " + (index + 1));
+            String[] encoded = encode(new MobScript(script.id(), List.of(entry.getValue()))).split("\n");
+            if (encoded.length != 3 || encoded[2].isBlank())
+                throw new IllegalArgumentException("Step " + (index + 1) + " is not a single command");
+            String original = lines[at.get(index)];
+            int spaces = 0;
+            while (spaces < original.length() && original.charAt(spaces) == ' ') spaces++;
+            String comment = original.substring(stripComment(original).length());
+            lines[at.get(index)] = original.substring(0, spaces) + encoded[2] + (comment.isEmpty() ? "" : "  " + comment);
+        }
+        return String.join(source.contains("\r\n") ? "\r\n" : "\n", lines);
     }
 
     private static String stripComment(String line) {

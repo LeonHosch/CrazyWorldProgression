@@ -58,13 +58,15 @@ final class BuildingData extends SavedData {
         }
     }
 
-    record Placement(Identifier id, long origin, int sizeX, int sizeY, int sizeZ) {
+    /** {@code replace}: placed over its whole box, so removal clears the box; placements saved before 0.6.0 did. */
+    record Placement(Identifier id, long origin, int sizeX, int sizeY, int sizeZ, boolean replace) {
         static final Codec<Placement> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Identifier.CODEC.fieldOf("id").forGetter(Placement::id),
                 Codec.LONG.fieldOf("origin").forGetter(Placement::origin),
                 Codec.INT.fieldOf("size_x").forGetter(Placement::sizeX),
                 Codec.INT.fieldOf("size_y").forGetter(Placement::sizeY),
-                Codec.INT.fieldOf("size_z").forGetter(Placement::sizeZ)
+                Codec.INT.fieldOf("size_z").forGetter(Placement::sizeZ),
+                Codec.BOOL.optionalFieldOf("replace", true).forGetter(Placement::replace)
         ).apply(instance, Placement::new));
     }
 

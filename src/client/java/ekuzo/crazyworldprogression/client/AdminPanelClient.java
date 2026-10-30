@@ -12,7 +12,7 @@ import org.lwjgl.glfw.GLFW;
 
 /** Client receiver and navigation sender for CWP's server-described admin panel. */
 public final class AdminPanelClient {
-    private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
+    static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
             Identifier.fromNamespaceAndPath("crazy-world-progression", "admin"));
     private static KeyMapping openKey;
     private static boolean ignoreNextClosedPanelSnapshot;

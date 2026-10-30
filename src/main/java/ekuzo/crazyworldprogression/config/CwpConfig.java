@@ -43,6 +43,8 @@ public final class CwpConfig {
     private int instances = 8;
     private int workshops = 32;
     private double tickBufferMs = 10.0, minBudgetMs = 2.0, maxBudgetMs = 30.0, scriptMaxMs = 30.0, cleanupFloorMs = 1.0;
+    private boolean replaceBuildings = false;
+    private int builderLevel = 2;
 
     private CwpConfig() {
         for (CwpModule module : CwpModule.values()) modules.put(module, true);
@@ -83,6 +85,15 @@ public final class CwpConfig {
     public double scriptMaxMs() { return scriptMaxMs; }
 
     public double cleanupFloorMs() { return cleanupFloorMs; }
+
+    /**
+     * True when building steps without their own mode replace everything in the building's box (the old behaviour);
+     * false (the default) when they place only the building's own blocks and leave the air out.
+     */
+    public boolean replaceBuildings() { return replaceBuildings; }
+
+    /** Operator level a builder needs (permissions.builder: op1 or op2). Builders may use creative and spectator. */
+    public int builderLevel() { return builderLevel; }
 
     private void load(Path configDir) {
         Path file = configDir.resolve(FILE);
@@ -127,6 +138,16 @@ public final class CwpConfig {
             maxBudgetMs = millis(performance.get("max_budget_ms"), maxBudgetMs);
             scriptMaxMs = millis(performance.get("script_max_ms"), scriptMaxMs);
             cleanupFloorMs = millis(performance.get("cleanup_floor_ms"), cleanupFloorMs);
+        }
+        if (root.get("permissions") instanceof Map<?, ?> permissions && permissions.get("builder") != null) {
+            String builder = String.valueOf(permissions.get("builder")).trim().toLowerCase(Locale.ROOT);
+            if (builder.equals("op1") || builder.equals("op2")) builderLevel = builder.equals("op1") ? 1 : 2;
+            else LOGGER.warn("permissions.builder in {} must be op1 or op2, not {}", FILE, builder);
+        }
+        if (root.get("buildings") instanceof Map<?, ?> buildings && buildings.get("placement_mode") != null) {
+            String mode = String.valueOf(buildings.get("placement_mode")).trim().toLowerCase(Locale.ROOT);
+            if (mode.equals("replace") || mode.equals("skip_air")) replaceBuildings = mode.equals("replace");
+            else LOGGER.warn("buildings.placement_mode in {} must be skip_air or replace, not {}", FILE, mode);
         }
     }
 
@@ -227,7 +248,21 @@ public final class CwpConfig {
                   script_max_ms: %s
                   # Clearing finished instances always gets at least this much.
                   cleanup_floor_ms: %s
-                """, MAX_WORLDS, instances, workshops, tickBufferMs, minBudgetMs, maxBudgetMs, scriptMaxMs, cleanupFloorMs));
+
+                # Saved buildings pasted by scripts (building steps without their own mode).
+                buildings:
+                  # skip_air: place only the building's own blocks and keep what stands in its empty space; removing it
+                  # removes only those blocks. replace: also write its air, clearing its whole box (the old behaviour);
+                  # removing it clears the whole box. A step's own mode (mode="replace" or "skip_air") always wins.
+                  placement_mode: %s
+
+                # Who counts as a builder: op2 (operator level 2 or higher, the default) or op1 (level 1 or higher).
+                # Only builders may be in creative or spectator mode (anyone else is switched to survival; downed raid
+                # players inside instances stay spectators), see and move helpers with F8/F9 and design workshops.
+                permissions:
+                  builder: op%d
+                """, MAX_WORLDS, instances, workshops, tickBufferMs, minBudgetMs, maxBudgetMs, scriptMaxMs, cleanupFloorMs,
+                replaceBuildings ? "replace" : "skip_air", builderLevel));
         return out.toString();
     }
 

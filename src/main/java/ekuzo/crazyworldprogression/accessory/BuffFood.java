@@ -158,6 +158,6 @@ public final class BuffFood {
         @Override public boolean mayPlace(ItemStack stack) { return fits(stack); }
 
         /** The creative inventory lays slots out on its own and has no place for this one. */
-        @Override public boolean isActive() { return !player.isCreative(); }
+        @Override public boolean isActive() { return true; }
     }
 }

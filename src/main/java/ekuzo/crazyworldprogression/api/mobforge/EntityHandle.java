@@ -29,15 +29,28 @@ public class EntityHandle implements ScriptEntityHandle {
     }
     @Override public UUID uuid() { return id; }
     @Override public Identifier entityId() { return BuiltInRegistries.ENTITY_TYPE.getKey(entity().getType()); }
+    /**
+     * A mob in a chunk that is not loaded (scripts in the open world, far from players) still counts as alive; its
+     * death is reported through {@link #markDead()}.
+     */
     @Override public boolean isAlive() {
         if (knownDead) return false;
         Entity current = level.getEntity(id);
-        if (current == null) throw new IllegalStateException("Runtime entity " + id + " unloaded or disappeared from " + level.dimension().identifier());
+        if (current == null) return true;
         knownDead = !current.isAlive();
         return !knownDead;
     }
-    @Override public double health() { Entity entity = entity(); return entity instanceof LivingEntity living ? living.getHealth() : (entity.isAlive() ? 1 : 0); }
-    @Override public double maxHealth() { Entity entity = entity(); return entity instanceof LivingEntity living ? living.getMaxHealth() : 1; }
+    /** Health of an unloaded mob is unknown and counts as 0 (of 0). */
+    @Override public double health() {
+        Entity entity = level.getEntity(id);
+        if (entity == null) return 0;
+        return entity instanceof LivingEntity living ? living.getHealth() : (entity.isAlive() ? 1 : 0);
+    }
+    @Override public double maxHealth() {
+        Entity entity = level.getEntity(id);
+        if (entity == null) return 0;
+        return entity instanceof LivingEntity living ? living.getMaxHealth() : 1;
+    }
     @Override public ServerLevel world() { return level; }
     @Override public Vec3 position() { return entity().position(); }
     @Override public void teleport(Vec3 position) {

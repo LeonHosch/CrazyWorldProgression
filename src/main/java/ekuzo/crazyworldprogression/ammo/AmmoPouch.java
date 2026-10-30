@@ -225,6 +225,6 @@ public final class AmmoPouch {
         @Override public int getMaxStackSize(ItemStack stack) { return MAX; }
 
         /** The creative inventory lays slots out on its own and has no place for these. */
-        @Override public boolean isActive() { return !player.isCreative(); }
+        @Override public boolean isActive() { return true; }
     }
 }

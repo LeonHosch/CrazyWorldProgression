@@ -1176,6 +1176,7 @@ public final class AdminPanelScreen extends Screen {
                 case "effect" -> BuiltInRegistries.MOB_EFFECT.keySet();
                 case "particle" -> BuiltInRegistries.PARTICLE_TYPE.keySet();
                 case "item" -> BuiltInRegistries.ITEM.keySet();
+                case "block" -> BuiltInRegistries.BLOCK.keySet();
                 default -> BuiltInRegistries.ENTITY_TYPE.keySet();
             };
             return registry.stream().map(Identifier::toString).sorted().toList();

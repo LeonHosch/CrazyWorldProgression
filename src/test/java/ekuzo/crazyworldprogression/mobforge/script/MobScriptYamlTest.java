@@ -20,6 +20,18 @@ class MobScriptYamlTest {
 				yaml.decode("id: raid\nsteps:\n  - finish_instance: true\n").steps().get(0));
 	}
 
+	@Test void buildingModeRoundTripsAndStaysOutOfOldSteps() {
+		MobScript script = yaml.decode("id: raid\nsteps:\n"
+				+ "  - building: {build_id: cwp:wall, action: add, location: {x: 1, y: 64, z: 2}}\n"
+				+ "  - building: {build_id: cwp:wall, action: delete, location: {x: 1, y: 64, z: 2}, mode: replace}\n");
+		assertEquals("", ((MobScript.BuildingStep) script.steps().get(0)).mode());
+		assertEquals("replace", ((MobScript.BuildingStep) script.steps().get(1)).mode());
+		assertEquals(script, yaml.decode(yaml.encode(script)));
+		assertEquals(1, yaml.encode(script).split("mode", -1).length - 1);
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: raid\nsteps:\n"
+				+ "  - building: {build_id: cwp:wall, action: add, location: {x: 1, y: 64, z: 2}, mode: merge}\n"));
+	}
+
 	@Test void parsesOrderedSpawnAndWaitBlocks() {
 		MobScript script = yaml.decode("""
 				id: invasion

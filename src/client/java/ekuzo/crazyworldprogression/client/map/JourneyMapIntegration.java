@@ -6,6 +6,7 @@ import ekuzo.crazyworldprogression.worldboundary.bonus.BonusAreaNetworking;
 import ekuzo.crazyworldprogression.portals.PortalNetworking;
 import journeymap.api.v2.client.IClientAPI;
 import journeymap.api.v2.client.IClientPlugin;
+import journeymap.api.v2.client.display.Displayable;
 import journeymap.api.v2.client.display.MarkerOverlay;
 import journeymap.api.v2.client.display.PolygonOverlay;
 import journeymap.api.v2.client.event.EntityRadarUpdateEvent;
@@ -36,6 +37,8 @@ import java.util.Objects;
  *   <li>the pocket and exit portals near which the player has been, as markers with their names (coordinate
  *       portals stay hidden);</li>
  *   <li>fog over everything a content mod marks as not mappable (MapData.setFogProvider);</li>
+ *   <li>the landmarks a content mod provides (MapData.setLandmarkProvider, for example boss encounters) the player
+ *       has been near, as their outline and icon with name and detail; greyed out while inactive;</li>
  *   <li>"Navigate here" in the fullscreen map's right-click menu, which points CWP's coordinate guide there.</li>
  * </ul>
  * Pocket instances and pocket editors reuse their dimensions, so after the player leaves one (or disconnects inside
@@ -48,9 +51,13 @@ public final class JourneyMapIntegration implements IClientPlugin {
     private static final String MOD_ID = CrazyWorldProgression.MOD_ID;
     private static final int ZONE_COLOR = 0xF0C95A;
     private static final int FOG_COLOR = 0x0E0B16;
+    private static final int LANDMARK_COLOR = 0xB04AE0;
+    private static final int INACTIVE_COLOR = 0x8A8A8A;
     private static final Identifier PORTAL_ICON = CrazyWorldProgression.id("textures/map/portal.png");
     private IClientAPI api;
     private String shown = "";
+    private String landmarksShown = "";
+    private final List<Displayable> landmarkOverlays = new ArrayList<>();
     private ResourceKey<Level> lastDimension;
     private ResourceKey<Level> pendingClear;
     private int clearDelay;
@@ -85,9 +92,15 @@ public final class JourneyMapIntegration implements IClientPlugin {
         ResourceKey<Level> dimension = client.level.dimension();
         MapData.Fog fog = MapData.fog(dimension);
         String state = MapData.version() + "|" + dimension.identifier() + "|" + fog + "|" + MapData.portals().size();
-        if (state.equals(shown)) return;
+        if (state.equals(shown)) {
+            refreshLandmarks(dimension);
+            return;
+        }
         shown = state;
         api.removeAll(MOD_ID);
+        landmarkOverlays.clear();
+        landmarksShown = "";
+        refreshLandmarks(dimension);
         try {
             for (BonusAreaNetworking.Zone zone : MapData.zones())
                 if (MapData.discovered(zone)) api.show(zoneOverlay(zone));
@@ -98,6 +111,53 @@ public final class JourneyMapIntegration implements IClientPlugin {
         } catch (Exception exception) {
             CrazyWorldProgression.LOGGER.warn("Could not show map overlays: {}", exception.toString());
         }
+    }
+
+    /** Redraws only the landmarks when one changed (their detail line may count down every second). */
+    private void refreshLandmarks(ResourceKey<Level> dimension) {
+        List<MapData.Landmark> landmarks = MapData.landmarks().stream()
+                .filter(landmark -> landmark.dimension().equals(dimension.identifier().toString()) && MapData.discovered(landmark))
+                .toList();
+        String state = landmarks.toString();
+        if (state.equals(landmarksShown)) return;
+        landmarksShown = state;
+        landmarkOverlays.forEach(api::remove);
+        landmarkOverlays.clear();
+        try {
+            for (MapData.Landmark landmark : landmarks) {
+                for (Displayable overlay : landmarkOverlays(dimension, landmark)) {
+                    api.show(overlay);
+                    landmarkOverlays.add(overlay);
+                }
+            }
+        } catch (Exception exception) {
+            CrazyWorldProgression.LOGGER.warn("Could not show map landmarks: {}", exception.toString());
+        }
+    }
+
+    /** A landmark's outline (circle or rectangle) and its icon with name and detail, grey while inactive. */
+    private static List<Displayable> landmarkOverlays(ResourceKey<Level> dimension, MapData.Landmark landmark) {
+        int color = landmark.active() ? LANDMARK_COLOR : INACTIVE_COLOR;
+        ShapeProperties shape = new ShapeProperties().setStrokeColor(color).setStrokeOpacity(0.9F).setStrokeWidth(2.0F)
+                .setFillColor(color).setFillOpacity(landmark.active() ? 0.12F : 0.08F);
+        MapPolygon outline = landmark.round() ? circle(landmark.x(), landmark.z(), landmark.sizeX(), 72) : new MapPolygon(
+                BlockPos.containing(landmark.x() - landmark.sizeX() / 2, 64, landmark.z() - landmark.sizeZ() / 2),
+                BlockPos.containing(landmark.x() + landmark.sizeX() / 2, 64, landmark.z() - landmark.sizeZ() / 2),
+                BlockPos.containing(landmark.x() + landmark.sizeX() / 2, 64, landmark.z() + landmark.sizeZ() / 2),
+                BlockPos.containing(landmark.x() - landmark.sizeX() / 2, 64, landmark.z() + landmark.sizeZ() / 2));
+        PolygonOverlay area = new PolygonOverlay(MOD_ID, dimension, shape, outline);
+        area.setOverlayGroupName("Boss encounters").setTitle(landmark.name()).setDisplayOrder(150);
+        // Grey and faded while inactive (the icon's own colors stay, only darkened).
+        MapImage icon = new MapImage(landmark.icon(), 0, 0, landmark.iconSize(), landmark.iconSize(), landmark.active() ? 0xFFFFFF : 0x6A6A6A,
+                landmark.active() ? 1.0F : 0.6F).setDisplayWidth(24).setDisplayHeight(24).centerAnchors();
+        MarkerOverlay marker = new MarkerOverlay(MOD_ID, BlockPos.containing(landmark.x(), 64, landmark.z()), icon);
+        String label = landmark.detail() == null || landmark.detail().isBlank() ? landmark.name()
+                : landmark.name() + " - " + landmark.detail();
+        marker.setDimension(dimension);
+        marker.setOverlayGroupName("Boss encounters").setLabel(label).setTitle(label)
+                .setTextProperties(new TextProperties().setColor(color).setOffsetY(16).setBackgroundOpacity(0.4F))
+                .setDisplayOrder(210);
+        return List.of(area, marker);
     }
 
     /** Pocket instances and pocket editors: dimensions that are reused for different pockets. */

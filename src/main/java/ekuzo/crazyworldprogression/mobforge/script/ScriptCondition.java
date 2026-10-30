@@ -19,7 +19,7 @@ import net.minecraft.world.entity.Mob;
 public final class ScriptCondition {
     private static final Pattern CONDITION = Pattern.compile("\\$\\{([a-z][a-z0-9_]*)\\.(dead|alive|health_percent|phase)(?:\\s*(<=|>=|==|!=|<|>)\\s*([a-z0-9_./-]+))?}");
     private static final Pattern SENSOR = Pattern.compile("\\$\\{(var|box|box_triggers|kills|portal|redstone)\\.([a-z0-9_:/.-]+)(?:\\s*(<=|>=|==|!=|<|>)\\s*(true|false|-?[0-9]+))?}");
-    private static final Pattern FUNCTION = Pattern.compile("(kills|portal_used|players_in|box_triggers|powered|var|dead|alive|health_percent|phase)\\(\\s*['\"]([a-z0-9_:/.-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(['\"]?[a-z0-9_./-]+['\"]?))?");
+    private static final Pattern FUNCTION = Pattern.compile("(kills|portal_used|players_in|box_triggers|powered|var|dead|alive|health_percent|phase|platform_active)\\(\\s*['\"]([a-z0-9_:/.-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(['\"]?[a-z0-9_./-]+['\"]?))?");
     /** blocks("core", "minecraft:ancient_debris") counts that block in an event box. */
     private static final Pattern BLOCKS = Pattern.compile("blocks\\(\\s*['\"]([a-z][a-z0-9_]*)['\"]\\s*,\\s*['\"]([a-z0-9_.-]+:[a-z0-9_./-]+)['\"]\\s*\\)(?:\\s*(<=|>=|==|!=|<|>)\\s*(-?[0-9]+))?");
     /** elapsed() is the number of seconds since the script run started. */
@@ -258,6 +258,8 @@ public final class ScriptCondition {
             case "box_triggers" -> "box_triggers";
             case "powered" -> "redstone";
             case "dead", "alive", "health_percent", "phase" -> null;
+            // The executor keeps each charging platform's state as a variable no script can name ("." is not allowed).
+            case "platform_active" -> "var.platform_active";
             default -> match.group(1);
         };
         String suffix = match.group(3) == null ? "" : " " + match.group(3) + " " + match.group(4).replace("\"", "").replace("'", "");

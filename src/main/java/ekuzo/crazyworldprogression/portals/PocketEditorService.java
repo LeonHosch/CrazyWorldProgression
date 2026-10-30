@@ -486,9 +486,10 @@ public final class PocketEditorService {
     /** The script with every position moved by {@code delta} (pocket instances, scripts placed in the world). */
     public static MobScript translate(MobScript script, BlockPos delta) {
         List<MobScript.Step> steps = script.steps().stream().map(step -> {
-            if (step instanceof MobScript.EventBoxStep box) return (MobScript.Step) new MobScript.EventBoxStep(
-                    box.name(), shifted(box.min(), delta), shifted(box.max(), delta), box.mode(), box.mobId(),
-                    box.playerVariable(), box.countVariable());
+            if (step instanceof MobScript.EventBoxStep box)
+                return (MobScript.Step) box.at(shifted(box.min(), delta), shifted(box.max(), delta));
+            if (step instanceof MobScript.MobHideStep hide && hide.location() != null)
+                return (MobScript.Step) new MobScript.MobHideStep(hide.tag(), hide.hidden(), shifted(hide.location(), delta));
             if (step instanceof MobScript.RedstoneStep sensor) return (MobScript.Step) new MobScript.RedstoneStep(
                     sensor.name(), shifted(sensor.position(), delta));
             if (step instanceof MobScript.IfStep test) return (MobScript.Step) new MobScript.IfStep(

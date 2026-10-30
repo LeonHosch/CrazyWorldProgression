@@ -300,8 +300,26 @@ final class ScriptSignatures {
                 List.of(value("mode", "\"players\"", "players or mobs"),
                         text("mob_id", "Entity ID to count; needed with mode=\"mobs\"").values("entity"),
                         text("player_variable", "Saves every entering player's ID here"),
-                        text("count_variable", "Live occupancy count")),
+                        text("count_variable", "Live occupancy count"),
+                        text("stack_id", "Charging platform: players inside gain stacks of this per-player counter"),
+                        value("stack_interval", "\"1s\"", "One stack per player inside every this long"),
+                        value("max_stacks", "20", "Stacks that turn into on_max"),
+                        value("charges", "1", "How often this box gives on_max; after that, full stacks kill"),
+                        text("on_max", "Effect given at max_stacks, e.g. minecraft:glowing").values("effect"),
+                        value("on_max_duration", "\"60s\"", "How long on_max lasts (omit: until removed)"),
+                        value("on_expire", "\"explode\"", "explode: the carrier explodes when on_max runs out"),
+                        value("abandon_wipe", "\"5s\"", "Once entered, empty this long: explosion and wipe"),
+                        value("abandon_recover", "0.5", "Danger ticks taken away per tick while someone is inside"),
+                        text("stack_effect", "Effect whose level shows the stacks, e.g. crazy-world-progression:charge").values("effect"),
+                        value("stack_decay", "\"5s\"", "Players on no platform of this stack_id lose a stack this often"),
+                        text("remove_effect", "Delivery box: takes this effect off players inside").values("effect"),
+                        text("on_remove_variable", "Adds 1 to this variable per removed effect")),
                 "eventbox(name=\"plate\", min={\"x\":0,\"y\":64,\"z\":0}, max={\"x\":2,\"y\":66,\"z\":2})");
+        command("mob_hide", "Hides the living mobs with this tag (invisible, invulnerable, frozen; health is kept) "
+                        + "or shows them again, optionally moving them.",
+                List.of(text("tag", "Mob tag").values("script_tag")),
+                List.of(value("hidden", "true", "true hides, false shows"), position("location", "Where they go")),
+                "mob_hide(tag=\"boss\", hidden=true, location={\"x\":0,\"y\":40,\"z\":0})");
         command("explosion", "Explosion that damages entities but leaves blocks intact.",
                 List.of(position("location", "Center")), List.of(value("power", "2", "Explosion power (default 2)")),
                 "explosion(location={\"x\":0,\"y\":65,\"z\":0}, power=2)");
@@ -435,6 +453,8 @@ final class ScriptSignatures {
                 List.of(text("id", "Tag or ID").values("script_tag")), "kills(\"adds\") >= 6");
         condition("phase", "Phase of the first living MobForge mob with this tag.",
                 List.of(text("tag", "mob_spawn tag").values("script_tag")), "phase(\"boss\") == \"enraged\"");
+        condition("platform_active", "1 once a charging platform has been entered, until it is declared again.",
+                List.of(text("box", "Charging platform name").values("script_box")), "platform_active(\"p1\") == 1");
         condition("players_in", "Players or matching mobs inside an event box.",
                 List.of(text("box", "Event box name").values("script_box")), "players_in(\"plate\") >= 2");
         condition("portal_used", "Successful uses of a portal in this run.",

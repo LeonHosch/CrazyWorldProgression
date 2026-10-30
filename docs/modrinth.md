@@ -82,7 +82,16 @@ CWP is in beta (0.x). Expect changes before 1.0.
 
 ---
 
-## 2. Version 0.6.0 changelog
+## 2. Version 0.6.1 changelog
+
+```markdown
+- Charging platforms for scripts: event boxes can give per-player stacks (shown on the left as Charge), turn full stacks into a timed effect (Overcharge, always fatal when it runs out), allow a limited number of charges per platform, let stacks fade off the platform, and wipe the encounter when an activated platform stays empty
+- Delivery boxes take an effect off players and count each delivery
+- New condition `platform_active(...)` and new step `mob_hide(...)` (hide a boss between damage phases, keeping its health)
+- Sound cues for platform activation, stacks, overcharge, the death value and deliveries
+```
+
+## Version 0.6.0 changelog
 
 ```markdown
 - Workshop helpers: inside a workshop, builders see event boxes, areas, mob, portal, building and player spawns, sensors and more, with labels and facing arrows; a menu (F8) switches categories, teleports between helpers and lists them
@@ -128,9 +137,9 @@ First public beta.
 
 | Field | Value |
 |---|---|
-| File | `crazy-world-progression-0.6.0.jar` (not the `-sources` jar) |
-| Version number | `0.6.0` |
-| Version title | `0.6.0` |
+| File | `crazy-world-progression-0.6.1.jar` (not the `-sources` jar) |
+| Version number | `0.6.1` |
+| Version title | `0.6.1` |
 | Release channel | **Beta** |
 | Loaders | Fabric |
 | Game versions | 26.2 |

@@ -590,7 +590,7 @@ Clone the repository and run commands from its root:
 .\gradlew.bat runServer
 ```
 
-Build output is written to `build/libs/crazy-world-progression-0.6.0.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
+Build output is written to `build/libs/crazy-world-progression-0.6.1.jar`. The dedicated-server run requires accepting the EULA in `run/eula.txt` after its first launch.
 
 The repository includes the Gradle wrapper, so a separate Gradle installation is not required. A Java 25 JDK must be available.
 

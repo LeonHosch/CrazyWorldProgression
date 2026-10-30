@@ -53,6 +53,7 @@ public final class MobScriptYaml {
 		if (step.containsKey("variable")) return variable(map(step.get("variable"), field + ".variable"), field);
 		if (step.containsKey("event")) return event(map(step.get("event"), field + ".event"), field);
 		if (step.containsKey("eventbox")) return eventBox(map(step.get("eventbox"), field + ".eventbox"), field);
+		if (step.containsKey("mob_hide")) return mobHide(map(step.get("mob_hide"), field + ".mob_hide"), field);
 		if (step.containsKey("event_box")) return eventBox(map(step.get("event_box"), field + ".event_box"), field);
 		if (step.containsKey("redstone_sensor")) return redstone(map(step.get("redstone_sensor"), field + ".redstone_sensor"), field);
 		if (step.containsKey("if")) return new MobScript.IfStep(condition(step.get("if"), field + ".if"));
@@ -170,7 +171,55 @@ public final class MobScriptYaml {
 			throw new IllegalArgumentException("Player list and count need different variable names");
 		if (!playerVariable.isEmpty() && !mode.equals("players"))
 			throw new IllegalArgumentException("Only player event boxes can store a player");
-		return new MobScript.EventBoxStep(name, min, max, mode, mobId, playerVariable, countVariable);
+		MobScript.Charging charging = charging(value, field);
+		MobScript.Delivery delivery = null;
+		if (value.containsKey("remove_effect")) {
+			String variable = String.valueOf(value.getOrDefault("on_remove_variable", ""));
+			if (!variable.isEmpty() && !variable.matches("[a-z][a-z0-9_]*"))
+				throw new IllegalArgumentException("Invalid event box on_remove_variable");
+			delivery = new MobScript.Delivery(namespaced(value.get("remove_effect"), field + ".remove_effect"), variable);
+		} else if (value.containsKey("on_remove_variable"))
+			throw new IllegalArgumentException("on_remove_variable needs remove_effect");
+		if ((charging != null || delivery != null) && !mode.equals("players"))
+			throw new IllegalArgumentException("Charging and delivery need a player event box");
+		return new MobScript.EventBoxStep(name, min, max, mode, mobId, playerVariable, countVariable, charging, delivery);
+	}
+	private MobScript.Step mobHide(Map<String, Object> value, String field) {
+		String tag = string(value.get("tag"), field + ".tag");
+		if (!tag.matches("[a-z0-9_:/.-]+")) throw new IllegalArgumentException("Invalid tag " + tag);
+		MobScript.Position location = value.containsKey("location")
+				? position(map(value.get("location"), field + ".location"), field + ".location") : null;
+		return new MobScript.MobHideStep(tag, bool(value.get("hidden"), true, field + ".hidden"), location);
+	}
+	/** Charging platform options; null without stack_id. */
+	private static MobScript.Charging charging(Map<String, Object> value, String field) {
+		List<String> keys = List.of("stack_interval", "max_stacks", "charges", "on_max", "on_max_duration", "on_expire",
+				"abandon_wipe", "abandon_recover", "stack_effect", "stack_decay");
+		if (!value.containsKey("stack_id")) {
+			for (String key : keys)
+				if (value.containsKey(key)) throw new IllegalArgumentException(field + "." + key + " needs stack_id");
+			return null;
+		}
+		String stackId = string(value.get("stack_id"), field + ".stack_id");
+		if (!stackId.matches("[a-z][a-z0-9_]*")) throw new IllegalArgumentException("Invalid stack_id " + stackId);
+		long interval = value.containsKey("stack_interval") ? duration(value.get("stack_interval"), field + ".stack_interval") : 20;
+		int maxStacks = value.containsKey("max_stacks") ? integer(value.get("max_stacks"), field + ".max_stacks") : 20;
+		int charges = value.containsKey("charges") ? integer(value.get("charges"), field + ".charges") : 1;
+		Identifier onMax = namespaced(value.get("on_max"), field + ".on_max");
+		long onMaxTicks = value.containsKey("on_max_duration") ? duration(value.get("on_max_duration"), field + ".on_max_duration") : 0;
+		String onExpire = String.valueOf(value.getOrDefault("on_expire", ""));
+		long abandon = value.containsKey("abandon_wipe") ? duration(value.get("abandon_wipe"), field + ".abandon_wipe") : 0;
+		double recover = value.containsKey("abandon_recover") ? number(value.get("abandon_recover"), field + ".abandon_recover") : 0.5;
+		if (interval < 1) throw new IllegalArgumentException("stack_interval must be at least 1 tick");
+		if (maxStacks < 1 || maxStacks > 1000) throw new IllegalArgumentException("max_stacks must be 1 to 1000");
+		if (charges < 0) throw new IllegalArgumentException("charges cannot be negative");
+		if (!onExpire.isEmpty() && !onExpire.equals("explode")) throw new IllegalArgumentException("on_expire must be explode");
+		if (!onExpire.isEmpty() && onMaxTicks <= 0) throw new IllegalArgumentException("on_expire needs on_max_duration");
+		if (!Double.isFinite(recover) || recover < 0) throw new IllegalArgumentException("abandon_recover cannot be negative");
+		Identifier stackEffect = value.containsKey("stack_effect") ? namespaced(value.get("stack_effect"), field + ".stack_effect") : null;
+		long decay = value.containsKey("stack_decay") ? duration(value.get("stack_decay"), field + ".stack_decay") : 0;
+		return new MobScript.Charging(stackId, interval, maxStacks, charges, onMax, onMaxTicks, onExpire, abandon, recover,
+				stackEffect, decay);
 	}
 	private MobScript.Step redstone(Map<String, Object> value, String field) {
 		String name = string(value.get("name"), field + ".name");
@@ -551,7 +600,34 @@ public final class MobScriptYaml {
 				if (box.mode().equals("mobs")) body.put("mob_id", box.mobId());
 				if (!box.playerVariable().isEmpty()) body.put("player_variable", box.playerVariable());
 				if (!box.countVariable().isEmpty()) body.put("count_variable", box.countVariable());
+				if (box.charging() != null) {
+					MobScript.Charging charging = box.charging();
+					body.put("stack_id", charging.stackId());
+					body.put("stack_interval", formatDuration(charging.intervalTicks()));
+					body.put("max_stacks", charging.maxStacks());
+					body.put("charges", charging.charges());
+					body.put("on_max", charging.onMax().toString());
+					if (charging.onMaxTicks() > 0) body.put("on_max_duration", formatDuration(charging.onMaxTicks()));
+					if (!charging.onExpire().isEmpty()) body.put("on_expire", charging.onExpire());
+					if (charging.abandonTicks() > 0) {
+						body.put("abandon_wipe", formatDuration(charging.abandonTicks()));
+						body.put("abandon_recover", charging.abandonRecover());
+					}
+					if (charging.stackEffect() != null) body.put("stack_effect", charging.stackEffect().toString());
+					if (charging.decayTicks() > 0) body.put("stack_decay", formatDuration(charging.decayTicks()));
+				}
+				if (box.delivery() != null) {
+					body.put("remove_effect", box.delivery().removeEffect().toString());
+					if (!box.delivery().variable().isEmpty()) body.put("on_remove_variable", box.delivery().variable());
+				}
 				steps.add(Map.of("eventbox", body));
+			}
+			else if (step instanceof MobScript.MobHideStep hide) {
+				Map<String, Object> body = new LinkedHashMap<>();
+				body.put("tag", hide.tag());
+				body.put("hidden", hide.hidden());
+				if (hide.location() != null) body.put("location", position(hide.location().x(), hide.location().y(), hide.location().z()));
+				steps.add(Map.of("mob_hide", body));
 			}
 			else if (step instanceof MobScript.RedstoneStep sensor) steps.add(Map.of("redstone_sensor", Map.of("name", sensor.name(), "position", position(sensor.position().x(), sensor.position().y(), sensor.position().z()))));
 			else if (step instanceof MobScript.IfStep test) steps.add(Map.of("if", test.condition()));

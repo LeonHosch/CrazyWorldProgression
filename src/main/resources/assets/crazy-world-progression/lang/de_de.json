@@ -301,5 +301,11 @@
   "screen.crazy-world-progression.workshop.category.anomaly": "Anomalien und Bossbereiche",
   "screen.crazy-world-progression.workshop.category.bonus_area": "Bonusbereiche",
   "message.crazy-world-progression.workshop.workshop_only": "F6 und F7 funktionieren nur in einer Werkstatt.",
-  "message.crazy-world-progression.builder_only": "Nur Baumeister dürfen den Kreativ- oder Zuschauermodus nutzen. Du wurdest in den Überlebensmodus versetzt."
+  "message.crazy-world-progression.builder_only": "Nur Baumeister dürfen den Kreativ- oder Zuschauermodus nutzen. Du wurdest in den Überlebensmodus versetzt.",
+  "message.crazy-world-progression.script.stacks": "Stacks %s/%s",
+  "message.crazy-world-progression.script.no_charge": "Diese Plattform hat nichts mehr zu geben.",
+  "message.crazy-world-progression.script.abandoned": "Plattform %s: Todeswert %s/%s",
+  "effect.crazy-world-progression.charge": "Aufladung",
+  "effect.crazy-world-progression.overcharge": "Überladung",
+  "message.crazy-world-progression.script.charged": "Überladen! Werde sie los, bevor sie abläuft."
 }

@@ -301,5 +301,11 @@
   "screen.crazy-world-progression.workshop.category.anomaly": "Anomalies and boss areas",
   "screen.crazy-world-progression.workshop.category.bonus_area": "Bonus areas",
   "message.crazy-world-progression.workshop.workshop_only": "F6 and F7 only work inside a workshop.",
-  "message.crazy-world-progression.builder_only": "Only builders may use creative or spectator mode. You were switched to survival."
+  "message.crazy-world-progression.builder_only": "Only builders may use creative or spectator mode. You were switched to survival.",
+  "message.crazy-world-progression.script.stacks": "Stacks %s/%s",
+  "message.crazy-world-progression.script.no_charge": "This platform has nothing left to give.",
+  "message.crazy-world-progression.script.abandoned": "Platform %s: death %s/%s",
+  "effect.crazy-world-progression.charge": "Charge",
+  "effect.crazy-world-progression.overcharge": "Overcharge",
+  "message.crazy-world-progression.script.charged": "Overcharged! Get rid of it before it runs out."
 }

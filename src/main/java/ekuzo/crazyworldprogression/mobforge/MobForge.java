@@ -44,6 +44,7 @@ public final class MobForge {
 	public static BehaviorRegistry behaviors() { return BEHAVIORS; }
 
 	public static void initialize() {
+		ekuzo.crazyworldprogression.mobforge.script.ScriptEffects.initialize();
 		MobAiRegistry.initialize();
 		MobAbilityRuntime.initialize();
 		MobForgeCommand.initialize();

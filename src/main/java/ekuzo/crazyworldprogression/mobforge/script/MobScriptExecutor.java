@@ -290,6 +290,7 @@ public final class MobScriptExecutor {
 		PortalService.resetRuntimeLocations(run.level.getServer(), run.level.dimension().identifier());
 		run.handles.clear();
 		run.boxes.clear(); run.boxPlayers.clear(); run.boxOccupied.clear(); run.boxTriggers.clear();
+		clearCharging(run);
 		run.redstone.clear(); run.kills.clear(); run.portalUses.clear(); run.watches.clear();
 		return true;
 	}
@@ -344,6 +345,7 @@ public final class MobScriptExecutor {
 		}
 		trackAreas(run);
 		tickAuras(run);
+		tickCharging(run);
 		if (run.resumeFrom != null) {
 			MobScript.EncounterEndStep checkpoint = run.resumeFrom;
 			run.resumeFrom = null;
@@ -452,6 +454,10 @@ public final class MobScriptExecutor {
 						box.mobId(), box.playerVariable(), box.countVariable());
 				run.boxes.put(box.name(), area);
 				if (!box.countVariable().isEmpty()) run.variables.put(box.countVariable(), area.count(run.level));
+				if (box.charging() != null) run.chargers.put(box.name(), new Charger(box.charging()));
+				else run.chargers.remove(box.name());
+				if (box.delivery() != null) run.deliveries.put(box.name(), box.delivery());
+				else run.deliveries.remove(box.name());
 			} else if (step instanceof MobScript.RedstoneStep sensor) {
 				run.step++;
 				run.redstone.put(sensor.name(), BlockPos.containing(sensor.position().x(), sensor.position().y(), sensor.position().z()));
@@ -593,6 +599,28 @@ public final class MobScriptExecutor {
 			} else if (step instanceof MobScript.MessageStep message) {
 				run.step++;
 				message(run, message);
+			} else if (step instanceof MobScript.MobHideStep hide) {
+				run.step++;
+				ScriptEntityHandle handle = run.handles.get(hide.tag());
+				List<ScriptEntityHandle> members = handle instanceof TagGroup group ? group.living()
+						: handle == null ? List.of() : List.of(handle);
+				for (ScriptEntityHandle member : members) {
+					Entity entity = run.level.getEntity(member.uuid());
+					if (entity == null || !entity.isAlive()) continue;
+					run.level.sendParticles(net.minecraft.core.particles.ParticleTypes.POOF, entity.getX(),
+							entity.getY() + entity.getBbHeight() / 2, entity.getZ(), 20, 0.4, 0.6, 0.4, 0.02);
+					entity.setInvulnerable(hide.hidden());
+					entity.setInvisible(hide.hidden());
+					entity.setSilent(hide.hidden());
+					entity.setNoGravity(hide.hidden());
+					if (entity instanceof net.minecraft.world.entity.Mob mob) {
+						mob.setNoAi(hide.hidden());
+						if (hide.hidden()) mob.setTarget(null);
+					}
+					entity.setDeltaMovement(Vec3.ZERO);
+					if (hide.location() != null)
+						entity.teleportTo(hide.location().x(), hide.location().y(), hide.location().z());
+				}
 			} else if (step instanceof MobScript.DespawnStep despawn) {
 				run.step++;
 				ScriptEntityHandle handle = run.handles.get(despawn.tag());
@@ -655,6 +683,211 @@ public final class MobScriptExecutor {
 			}
 		}
 	}
+
+	/**
+	 * Charging platforms, delivery boxes and running charge effects (see {@link MobScript.Charging} and
+	 * {@link MobScript.Delivery}). Creative and spectator players take no part.
+	 */
+	private void tickCharging(ActiveRun run) {
+		Set<String> stackIds = new HashSet<>();
+		Map<String, MobScript.Charging> stackOptions = new HashMap<>();
+		Map<String, Set<UUID>> onPlatforms = new HashMap<>();
+		for (var entry : run.chargers.entrySet()) {
+			ScriptCondition.Box box = run.boxes.get(entry.getKey());
+			if (box == null) continue;
+			Charger charger = entry.getValue();
+			MobScript.Charging options = charger.options;
+			stackIds.add(options.stackId());
+			stackOptions.putIfAbsent(options.stackId(), options);
+			List<net.minecraft.server.level.ServerPlayer> inside = run.level.players().stream()
+					.filter(player -> !player.isSpectator() && !player.isCreative() && box.contains(player.position()))
+					.toList();
+			inside.forEach(player -> onPlatforms.computeIfAbsent(options.stackId(), id -> new HashSet<>()).add(player.getUUID()));
+			Vec3 center = new Vec3((box.min().x() + box.max().x() + 1) / 2, box.min().y(), (box.min().z() + box.max().z() + 1) / 2);
+			if (!inside.isEmpty() && !charger.activated) {
+				charger.activated = true;
+				charger.lastStack = clock;
+				run.level.playSound(null, center.x, center.y, center.z, net.minecraft.sounds.SoundEvents.BEACON_ACTIVATE,
+						SoundSource.HOSTILE, 2.0F, 1.0F);
+			}
+			run.variables.put("platform_active." + entry.getKey(), charger.activated ? 1L : 0L);
+			if (!inside.isEmpty() && clock - charger.lastStack >= options.intervalTicks()) {
+				charger.lastStack = clock;
+				Map<UUID, Integer> stacks = run.stacks.computeIfAbsent(options.stackId(), ignored -> new HashMap<>());
+				for (var player : inside) {
+					int count = stacks.merge(player.getUUID(), 1, Integer::sum);
+					if (count < options.maxStacks()) {
+						showStacks(player, options, count);
+						player.level().playSound(null, player.getX(), player.getY(), player.getZ(),
+								net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.6F,
+								0.6F + count / (float) options.maxStacks());
+						continue;
+					}
+					stacks.remove(player.getUUID());
+					showStacks(player, options, 0);
+					if (charger.chargesLeft > 0) {
+						charger.chargesLeft--;
+						charge(run, player, options);
+					} else {
+						player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+								"message.crazy-world-progression.script.no_charge").withStyle(net.minecraft.ChatFormatting.RED));
+						run.level.playSound(null, player.getX(), player.getY(), player.getZ(),
+								net.minecraft.sounds.SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.HOSTILE, 1.0F, 1.2F);
+						player.kill(run.level);
+					}
+				}
+			}
+			if (options.abandonTicks() <= 0 || !charger.activated) continue;
+			int before = (int) (charger.danger / 20);
+			charger.danger = inside.isEmpty() ? charger.danger + 1 : Math.max(0, charger.danger - options.abandonRecover());
+			if (charger.danger >= options.abandonTicks()) {
+				charger.danger = 0;
+				charger.activated = false;
+				run.level.explode(null, center.x, center.y + 0.5, center.z, 4.0F, Level.ExplosionInteraction.NONE);
+				RaidService.forceWipe(run.level);
+				continue;
+			}
+			int now = (int) (charger.danger / 20);
+			if (inside.isEmpty() && now > before)
+				// Each death-value step a deeper warning; the last one before the wipe rings a bell.
+				run.level.playSound(null, center.x, center.y, center.z, now >= options.abandonTicks() / 20 - 1
+								? net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BELL : net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BASS,
+						SoundSource.HOSTILE, 3.0F, 0.5F + 0.25F * now);
+			if (charger.danger > 0 && clock % 5 == 0) {
+				var message = net.minecraft.network.chat.Component.translatable("message.crazy-world-progression.script.abandoned",
+						entry.getKey(), (int) Math.ceil(charger.danger / 20), (int) Math.ceil(options.abandonTicks() / 20.0))
+						.withStyle(inside.isEmpty() ? net.minecraft.ChatFormatting.RED : net.minecraft.ChatFormatting.GOLD);
+				for (var player : run.level.players())
+					if (!player.isSpectator() && player.position().distanceTo(center) <= 48 && !box.contains(player.position()))
+						player.sendOverlayMessage(message);
+			}
+		}
+		// Stacks fade for players on no platform of their stack, and vanish with the last platform of a stack.
+		for (var stack : List.copyOf(run.stacks.entrySet())) {
+			MobScript.Charging options = stackOptions.get(stack.getKey());
+			if (options == null) {
+				for (UUID id : stack.getValue().keySet()) clearStackEffect(run, id, run.stackEffects.get(stack.getKey()));
+				run.stacks.remove(stack.getKey());
+				continue;
+			}
+			if (options.decayTicks() <= 0 || clock % options.decayTicks() != 0) continue;
+			Set<UUID> standing = onPlatforms.getOrDefault(stack.getKey(), Set.of());
+			for (var player : List.copyOf(stack.getValue().entrySet())) {
+				if (standing.contains(player.getKey())) continue;
+				int count = player.getValue() - 1;
+				if (count <= 0) stack.getValue().remove(player.getKey());
+				else stack.getValue().put(player.getKey(), count);
+				var online = run.level.getServer().getPlayerList().getPlayer(player.getKey());
+				if (online != null) showStacks(online, options, Math.max(0, count));
+			}
+		}
+		stackOptions.forEach((id, options) -> run.stackEffects.put(id, options.stackEffect()));
+		run.variables.keySet().removeIf(name -> name.startsWith("platform_active.")
+				&& !run.chargers.containsKey(name.substring("platform_active.".length())));
+		for (var entry : run.deliveries.entrySet()) {
+			ScriptCondition.Box box = run.boxes.get(entry.getKey());
+			if (box == null) continue;
+			var effect = effect(entry.getValue().removeEffect());
+			for (var player : run.level.players()) {
+				if (player.isSpectator() || !box.contains(player.position())) continue;
+				boolean carried = run.charged.remove(player.getUUID()) != null;
+				if (!player.removeEffect(effect) && !carried) continue;
+				run.level.playSound(null, player.getX(), player.getY(), player.getZ(),
+						net.minecraft.sounds.SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 2.0F, 1.2F);
+				run.level.playSound(null, player.getX(), player.getY(), player.getZ(),
+						net.minecraft.sounds.SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.PLAYERS, 2.0F, 1.0F);
+				if (!entry.getValue().variable().isEmpty()) changeVariable(run, entry.getValue().variable(), "increment", "1");
+			}
+		}
+		for (Iterator<Map.Entry<UUID, Charge>> charges = run.charged.entrySet().iterator(); charges.hasNext(); ) {
+			var charge = charges.next();
+			var player = run.level.getServer().getPlayerList().getPlayer(charge.getKey());
+			long left = charge.getValue().expiresAt() - clock;
+			if (left > 0) {
+				// Ticks like a fuse, faster towards the end.
+				long every = left <= 100 ? 5 : left <= 200 ? 10 : left <= 400 ? 20 : 40;
+				if (player != null && player.level() == run.level && left % every == 0)
+					run.level.playSound(null, player.getX(), player.getY(), player.getZ(),
+							net.minecraft.sounds.SoundEvents.NOTE_BLOCK_HAT, SoundSource.PLAYERS, 1.5F,
+							left <= 100 ? 2.0F : left <= 200 ? 1.6F : 1.2F);
+				continue;
+			}
+			charges.remove();
+			if (player == null || player.level() != run.level || player.isSpectator()) continue;
+			player.removeEffect(effect(charge.getValue().effect()));
+			run.level.explode(null, player.getX(), player.getY() + 0.5, player.getZ(), 3.0F, Level.ExplosionInteraction.NONE);
+			// Always fatal, whatever the player's health, armour or totems.
+			if (player.isAlive()) player.kill(run.level);
+		}
+	}
+
+	/** The stack count as the level of the platform's stack_effect (shown on the left for stacked effects). */
+	private static void showStacks(net.minecraft.server.level.ServerPlayer player, MobScript.Charging options, int count) {
+		if (options.stackEffect() == null) {
+			if (count > 0) player.sendOverlayMessage(net.minecraft.network.chat.Component.translatable(
+					"message.crazy-world-progression.script.stacks", count, options.maxStacks()));
+			return;
+		}
+		var effect = effect(options.stackEffect());
+		player.removeEffect(effect);
+		boolean stacked = ekuzo.crazyworldprogression.progression.equipment.StackedEffects.contains(options.stackEffect());
+		if (count > 0) player.addEffect(new MobEffectInstance(effect, MobEffectInstance.INFINITE_DURATION, count - 1,
+				false, !stacked, !stacked));
+	}
+
+	private static void clearStackEffect(ActiveRun run, UUID id, Identifier effect) {
+		var player = run.level.getServer().getPlayerList().getPlayer(id);
+		if (player == null || effect == null) return;
+		try { player.removeEffect(effect(effect)); }
+		catch (IllegalArgumentException ignored) { }
+	}
+
+	/** Turns full stacks into the platform's effect, timed when it has a duration. */
+	private void charge(ActiveRun run, net.minecraft.server.level.ServerPlayer player, MobScript.Charging options) {
+		int duration = options.onMaxTicks() > 0 ? (int) Math.min(Integer.MAX_VALUE, options.onMaxTicks())
+				: MobEffectInstance.INFINITE_DURATION;
+		boolean stacked = ekuzo.crazyworldprogression.progression.equipment.StackedEffects.contains(options.onMax());
+		player.addEffect(new MobEffectInstance(effect(options.onMax()), duration, 0, false, !stacked, !stacked));
+		run.level.playSound(null, player.getX(), player.getY(), player.getZ(),
+				net.minecraft.sounds.SoundEvents.RESPAWN_ANCHOR_CHARGE, SoundSource.PLAYERS, 2.0F, 0.8F);
+		player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+				"message.crazy-world-progression.script.charged").withStyle(net.minecraft.ChatFormatting.GOLD));
+		if (options.onExpire().equals("explode"))
+			run.charged.put(player.getUUID(), new Charge(options.onMax(), clock + options.onMaxTicks()));
+	}
+
+	private static net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> effect(Identifier id) {
+		return BuiltInRegistries.MOB_EFFECT.get(ResourceKey.create(Registries.MOB_EFFECT, id))
+				.orElseThrow(() -> new IllegalArgumentException("Unknown effect " + id));
+	}
+
+	/** Forget platforms, deliveries and stacks; a timed charge is taken off its carrier without exploding. */
+	private static void clearCharging(ActiveRun run) {
+		for (var charge : run.charged.entrySet()) {
+			var player = run.level.getServer().getPlayerList().getPlayer(charge.getKey());
+			if (player != null) {
+				try { player.removeEffect(effect(charge.getValue().effect())); }
+				catch (IllegalArgumentException ignored) { }
+			}
+		}
+		for (var stack : run.stacks.entrySet())
+			for (UUID id : stack.getValue().keySet()) clearStackEffect(run, id, run.stackEffects.get(stack.getKey()));
+		run.variables.keySet().removeIf(name -> name.startsWith("platform_active."));
+		run.chargers.clear(); run.deliveries.clear(); run.stacks.clear(); run.charged.clear();
+	}
+
+	/** One charging platform of a run. */
+	private static final class Charger {
+		private final MobScript.Charging options;
+		private int chargesLeft;
+		private boolean activated;
+		private double danger;
+		private long lastStack = Long.MIN_VALUE / 2;
+		private Charger(MobScript.Charging options) { this.options = options; this.chargesLeft = options.charges(); }
+	}
+
+	/** A charge effect that explodes its carrier at {@code expiresAt} unless it is delivered first. */
+	private record Charge(Identifier effect, long expiresAt) { }
 
 	/** Every interval, one more level of each aura's effect for players near it. */
 	private void tickAuras(ActiveRun run) {
@@ -968,6 +1201,13 @@ public final class MobScriptExecutor {
 		/** Per area: players on its list who are outside, and the tick they left. */
 		private final Map<String, Map<UUID, Long>> areaLeft = new HashMap<>();
 		private final Map<String, MobScript.AuraStep> auras = new LinkedHashMap<>();
+		private final Map<String, Charger> chargers = new LinkedHashMap<>();
+		private final Map<String, MobScript.Delivery> deliveries = new LinkedHashMap<>();
+		/** Per stack ID, each player's stacks. */
+		private final Map<String, Map<UUID, Integer>> stacks = new HashMap<>();
+		private final Map<UUID, Charge> charged = new HashMap<>();
+		/** Per stack ID, the effect that shows the stacks (to take it off again). */
+		private final Map<String, Identifier> stackEffects = new HashMap<>();
 		private long startClock = -1;
 		private int step;
 		private MobScript.EncounterEndStep resumeFrom;
@@ -990,6 +1230,7 @@ public final class MobScriptExecutor {
 		}
 		private void clearState() {
 			areas.clear(); areaLeft.clear(); auras.clear();
+			chargers.clear(); deliveries.clear(); stacks.clear(); charged.clear();
 			variables.clear(); playerVariables.clear(); boxes.clear(); boxPlayers.clear();
 			boxOccupied.clear(); boxTriggers.clear(); kills.clear(); portalUses.clear(); watches.clear();
 		}

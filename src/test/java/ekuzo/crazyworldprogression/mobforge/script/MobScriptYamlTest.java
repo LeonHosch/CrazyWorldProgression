@@ -20,6 +20,44 @@ class MobScriptYamlTest {
 				yaml.decode("id: raid\nsteps:\n  - finish_instance: true\n").steps().get(0));
 	}
 
+	@Test void chargingAndDeliveryBoxesRoundTrip() {
+		MobScript script = yaml.decode("id: raid\nsteps:\n"
+				+ "  - eventbox: {name: p1, min: {x: 0, y: 64, z: 0}, max: {x: 2, y: 64, z: 2}, stack_id: charge,"
+				+ " max_stacks: 20, on_max: 'minecraft:glowing', on_max_duration: 60s, on_expire: explode, abandon_wipe: 5s}\n"
+				+ "  - eventbox: {name: core, min: {x: 5, y: 64, z: 5}, max: {x: 6, y: 65, z: 6},"
+				+ " remove_effect: 'minecraft:glowing', on_remove_variable: delivered}\n"
+				+ "  - eventbox: {name: plain, min: {x: 0, y: 0, z: 0}, max: {x: 1, y: 1, z: 1}}\n");
+		MobScript.Charging charging = ((MobScript.EventBoxStep) script.steps().get(0)).charging();
+		assertEquals(new MobScript.Charging("charge", 20, 20, 1, Identifier.parse("minecraft:glowing"), 1200,
+				"explode", 100, 0.5), charging);
+		assertEquals(new MobScript.Delivery(Identifier.parse("minecraft:glowing"), "delivered"),
+				((MobScript.EventBoxStep) script.steps().get(1)).delivery());
+		assertEquals(null, ((MobScript.EventBoxStep) script.steps().get(2)).charging());
+		assertEquals(script, yaml.decode(yaml.encode(script)));
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: raid\nsteps:\n"
+				+ "  - eventbox: {name: p1, min: {x: 0, y: 0, z: 0}, max: {x: 1, y: 1, z: 1}, max_stacks: 5}\n"));
+		assertThrows(IllegalArgumentException.class, () -> yaml.decode("id: raid\nsteps:\n"
+				+ "  - eventbox: {name: p1, min: {x: 0, y: 0, z: 0}, max: {x: 1, y: 1, z: 1}, stack_id: c,"
+				+ " on_max: 'minecraft:glowing', on_expire: explode}\n"));
+	}
+
+	@Test void stackDisplayDecayAndMobHideRoundTrip() {
+		MobScript script = yaml.decode("id: raid\nsteps:\n"
+				+ "  - eventbox: {name: p1, min: {x: 0, y: 64, z: 0}, max: {x: 3, y: 65, z: 3}, stack_id: charge,"
+				+ " stack_interval: 5s, on_max: 'crazy-world-progression:overcharge', stack_effect: 'crazy-world-progression:charge',"
+				+ " stack_decay: 5s, abandon_wipe: 5s, abandon_recover: 1}\n"
+				+ "  - mob_hide: {tag: boss, hidden: true, location: {x: 0, y: 40, z: 0}}\n"
+				+ "  - mob_hide: {tag: boss, hidden: false}\n");
+		MobScript.Charging charging = ((MobScript.EventBoxStep) script.steps().get(0)).charging();
+		assertEquals(Identifier.parse("crazy-world-progression:charge"), charging.stackEffect());
+		assertEquals(100, charging.decayTicks());
+		assertEquals(1.0, charging.abandonRecover());
+		assertEquals(new MobScript.MobHideStep("boss", true, new MobScript.Position(0, 40, 0)), script.steps().get(1));
+		assertEquals(new MobScript.MobHideStep("boss", false, null), script.steps().get(2));
+		assertEquals(script, yaml.decode(yaml.encode(script)));
+		ScriptCondition.validate("platform_active(\"p1\") == 1 and var(\"abgegeben\") < 4");
+	}
+
 	@Test void buildingModeRoundTripsAndStaysOutOfOldSteps() {
 		MobScript script = yaml.decode("id: raid\nsteps:\n"
 				+ "  - building: {build_id: cwp:wall, action: add, location: {x: 1, y: 64, z: 2}}\n"

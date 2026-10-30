@@ -8,7 +8,7 @@ import java.util.List;
 public record MobScript(String id, List<Step> steps) {
 	public MobScript { steps = steps == null ? List.of() : List.copyOf(steps); }
 
-	public sealed interface Step permits SpawnStep, SpawnMobsStep, WaitDurationStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, SkillXpStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, StopSoundStep, DistancesStep, EffectStep, EncounterStartStep, EncounterEndStep, FinishInstanceStep, WipeStep, AreaStep, ReplaceBlocksStep, AuraStep, MessageStep, DespawnStep { }
+	public sealed interface Step permits SpawnStep, SpawnMobsStep, WaitDurationStep, SpawnEntityStep, WaitUntilStep, MobCastStep, SetPhaseStep, TriggerStep, RewardCurrencyStep, RewardItemStep, RewardLootStep, LootPoolStep, SkillXpStep, AchievementStep, VariableStep, EventStep, EventBoxStep, RedstoneStep, IfStep, ElseStep, EndIfStep, LoopStep, EndLoopStep, PortalLocationStep, BuildingStep, ParticleStep, ExplosionStep, SoundStep, StopSoundStep, DistancesStep, EffectStep, EncounterStartStep, EncounterEndStep, FinishInstanceStep, WipeStep, AreaStep, ReplaceBlocksStep, AuraStep, MessageStep, DespawnStep, MobHideStep { }
 	public record Position(double x, double y, double z) { }
 	public record Offset(double x, double y, double z) {
 		public static final Offset NONE = new Offset(0, 0, 0);
@@ -68,10 +68,23 @@ public record MobScript(String id, List<Step> steps) {
 	public record VariableStep(String name, String operation, String value) implements Step { }
 	/** A watched condition fires on a false-to-true transition after this step registers it. */
 	public record EventStep(String condition, String variable, String operation, String value) implements Step { }
+	/**
+	 * An event box. With {@code charging} it is a charging platform, with {@code delivery} a delivery box (both
+	 * player boxes only; null when not set).
+	 */
 	public record EventBoxStep(String name, Position min, Position max, String mode, String mobId,
-	                           String playerVariable, String countVariable) implements Step {
+	                           String playerVariable, String countVariable, Charging charging,
+	                           Delivery delivery) implements Step {
+		public EventBoxStep(String name, Position min, Position max, String mode, String mobId,
+		                    String playerVariable, String countVariable) {
+			this(name, min, max, mode, mobId, playerVariable, countVariable, null, null);
+		}
 		public EventBoxStep(String name, Position min, Position max) {
 			this(name, min, max, "players", "", "", "");
+		}
+		/** The same box with other corners (moving, pocket translation). */
+		public EventBoxStep at(Position newMin, Position newMax) {
+			return new EventBoxStep(name, newMin, newMax, mode, mobId, playerVariable, countVariable, charging, delivery);
 		}
 		public EventBoxStep(String name, Position min, Position max, String mode, String mobId) {
 			this(name, min, max, mode, mobId, "", "");
@@ -81,6 +94,26 @@ public record MobScript(String id, List<Step> steps) {
 			this(name, min, max, mode, mobId, playerVariable, "");
 		}
 	}
+	/**
+	 * A charging platform. Every {@code intervalTicks} each player inside gains one stack of the per-player counter
+	 * {@code stackId} (shared by every box with the same ID). At {@code maxStacks} the stacks are used up: while the
+	 * box has {@code charges} left the player gets effect {@code onMax} for {@code onMaxTicks} (0: until removed),
+	 * otherwise the player dies. With {@code onExpire} "explode", someone whose effect runs out explodes. With
+	 * {@code abandonTicks} above 0, once the box has been entered, every tick nobody is inside adds one danger tick and
+	 * every tick someone is inside takes {@code abandonRecover} away; at {@code abandonTicks} the box explodes and the
+	 * encounter wipes.
+	 */
+	public record Charging(String stackId, long intervalTicks, int maxStacks, int charges, Identifier onMax,
+	                       long onMaxTicks, String onExpire, long abandonTicks, double abandonRecover,
+	                       Identifier stackEffect, long decayTicks) {
+		public Charging(String stackId, long intervalTicks, int maxStacks, int charges, Identifier onMax,
+		                long onMaxTicks, String onExpire, long abandonTicks, double abandonRecover) {
+			this(stackId, intervalTicks, maxStacks, charges, onMax, onMaxTicks, onExpire, abandonTicks, abandonRecover,
+					null, 0);
+		}
+	}
+	/** A delivery box: takes effect {@code removeEffect} off players inside and adds 1 to {@code variable} each time. */
+	public record Delivery(Identifier removeEffect, String variable) { }
 	public record RedstoneStep(String name, Position position) implements Step { }
 	public record IfStep(String condition) implements Step { }
 	public record ElseStep() implements Step { }
@@ -176,4 +209,10 @@ public record MobScript(String id, List<Step> steps) {
 	public record MessageStep(String text, String playerId, String style, String color) implements Step { }
 	/** Removes every living mob with this tag (with a puff of smoke), for example when an event ends. */
 	public record DespawnStep(String tag) implements Step { }
+	/**
+	 * Hides the living mobs with this tag (invisible, invulnerable, frozen, silent; their health stays) or shows them
+	 * again, moving them to {@code location} when it is set. A boss can leave between damage phases and come back
+	 * with the health it had.
+	 */
+	public record MobHideStep(String tag, boolean hidden, Position location) implements Step { }
 }

@@ -229,7 +229,9 @@ public final class WorkshopHelpers {
 
     private static Helper helper(MinecraftServer server, MobScript.Step step, String source) {
         if (step instanceof MobScript.EventBoxStep box)
-            return Helper.box("event_box", box.name() + (box.mode().equals("players") ? "" : " (" + box.mode() + ")"),
+            return Helper.box("event_box", box.name() + (box.mode().equals("players") ? "" : " (" + box.mode() + ")")
+                            + (box.charging() == null ? "" : " (platform " + box.charging().stackId() + ")")
+                            + (box.delivery() == null ? "" : " (delivery)"),
                     source, box.min().x(), box.min().y(), box.min().z(),
                     box.max().x() + 1, box.max().y() + 1, box.max().z() + 1);
         if (step instanceof MobScript.AreaStep area)
@@ -263,6 +265,9 @@ public final class WorkshopHelpers {
             return Helper.box("building_spawn", name, source, origin.getX(), origin.getY(), origin.getZ(),
                     origin.getX() + info.sizeX(), origin.getY() + info.sizeY(), origin.getZ() + info.sizeZ());
         }
+        if (step instanceof MobScript.MobHideStep hide && hide.location() != null)
+            return Helper.point("mob_spawn", hide.tag() + (hide.hidden() ? " (hidden here)" : " (shown here)"), source,
+                    hide.location().x(), hide.location().y(), hide.location().z());
         if (step instanceof MobScript.EncounterEndStep end && end.spawn() != null)
             return Helper.point("spawn_point", "Encounter end spawn", source, end.spawn().x(), end.spawn().y(),
                     end.spawn().z());
@@ -368,8 +373,9 @@ public final class WorkshopHelpers {
     static MobScript.Step shifted(MobScript.Step step, int dx, int dy, int dz) {
         java.util.function.UnaryOperator<MobScript.Position> by = point -> point == null ? null
                 : new MobScript.Position(point.x() + dx, point.y() + dy, point.z() + dz);
-        if (step instanceof MobScript.EventBoxStep box) return new MobScript.EventBoxStep(box.name(),
-                by.apply(box.min()), by.apply(box.max()), box.mode(), box.mobId(), box.playerVariable(), box.countVariable());
+        if (step instanceof MobScript.EventBoxStep box) return box.at(by.apply(box.min()), by.apply(box.max()));
+        if (step instanceof MobScript.MobHideStep hide && hide.location() != null)
+            return new MobScript.MobHideStep(hide.tag(), hide.hidden(), by.apply(hide.location()));
         if (step instanceof MobScript.AreaStep area) return new MobScript.AreaStep(area.name(), by.apply(area.center()),
                 area.radius(), area.height(), area.graceTicks(), area.playerVariable(), area.countVariable(),
                 area.defendRadius());
